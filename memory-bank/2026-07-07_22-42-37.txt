@@ -1,0 +1,18 @@
+timestamp: 2026-07-07 22:42:37
+event: subtask
+title: Phase 1 live smoke hardening
+
+decision:
+Discovery now skips unusable Codex candidates, checks the OpenAI local app bin, serializes JSONL writes, and maps v2 app-server notifications.
+
+rationale:
+Live app-server smoke exposed WindowsApps access denial, initialize write overlap, and schema differences for turn sandbox/status fields.
+
+lesson:
+Generate local app-server schemas and run a small live smoke after protocol tests; docs alone missed version-specific v2 field names.
+
+working_pattern:
+Test-first hardening from live-smoke failures.
+
+next_plan:
+Final audit Phase 1 evidence and report the remaining upstream auth/network limitation.

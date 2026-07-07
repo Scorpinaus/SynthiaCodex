@@ -109,56 +109,89 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <StackPanel>
-                            <TextBlock Text="Thread surface" Style="{StaticResource SectionLabel}" />
-                            <TextBlock Text="No active thread" FontSize="20" FontWeight="SemiBold" />
-                            <TextBlock Text="{Binding SelectedProjectPath, TargetNullValue=Project workspace is empty}" Foreground="{StaticResource MutedInkBrush}" Margin="0,8,0,0" TextWrapping="Wrap" />
-                        </StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
 
-                        <Grid Grid.Row="1" Margin="0,24,0,0">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Thread surface" Style="{StaticResource SectionLabel}" />
+                                <TextBlock Text="{Binding SelectedProjectName}" FontSize="20" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding SelectedProjectPath, TargetNullValue=Project workspace is empty}" Foreground="{StaticResource MutedInkBrush}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
 
-                            <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="0,12">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="160" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Workspace" Foreground="{StaticResource MutedInkBrush}" />
-                                    <TextBlock Grid.Column="1" Text="{Binding SelectedProjectName}" FontWeight="SemiBold" />
-                                </Grid>
-                            </Border>
-
-                            <Border Grid.Row="1" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="0,12">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="160" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Codex" Foreground="{StaticResource MutedInkBrush}" />
-                                    <TextBlock Grid.Column="1" Text="{Binding CodexSummary}" FontWeight="SemiBold" />
-                                </Grid>
-                            </Border>
-
-                            <Border Grid.Row="2" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="0,12">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="160" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Sign-in" Foreground="{StaticResource MutedInkBrush}" />
-                                    <TextBlock Grid.Column="1" Text="{Binding AuthSummary}" FontWeight="SemiBold" />
-                                </Grid>
-                            </Border>
+                            <TextBlock Grid.Column="1" Text="{Binding AuthSummary}" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Top" />
                         </Grid>
 
-                        <Border Grid.Row="2" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="12">
-                            <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource MutedInkBrush}" />
-                        </Border>
+                        <Grid Grid.Row="1" Margin="0,22,0,18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.35*" />
+                                <ColumnDefinition Width="18" />
+                                <ColumnDefinition Width="1*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="Timeline" Style="{StaticResource SectionLabel}" />
+                                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding TimelineItems}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="0,10">
+                                                    <StackPanel>
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                                            <TextBlock Grid.Column="1" Text="{Binding Kind}" Foreground="{StaticResource MutedInkBrush}" FontSize="11" />
+                                                        </Grid>
+                                                        <TextBlock Text="{Binding Detail}" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                                        <TextBlock Text="{Binding Method}" FontFamily="{StaticResource MonoFont}" FontSize="11" Foreground="{StaticResource MutedInkBrush}" Margin="0,4,0,0" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Grid>
+
+                            <Grid Grid.Column="2">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="Final response" Style="{StaticResource SectionLabel}" />
+                                <Border Grid.Row="1" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="12">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                        <TextBlock Text="{Binding FinalResponse}" TextWrapping="Wrap" />
+                                    </ScrollViewer>
+                                </Border>
+                            </Grid>
+                        </Grid>
+
+                        <Grid Grid.Row="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Text="{Binding PromptText, UpdateSourceTrigger=PropertyChanged}"
+                                     AcceptsReturn="True"
+                                     MinHeight="86"
+                                     MaxHeight="150"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     Padding="10" />
+                            <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                                <Button Content="Run" Command="{Binding SubmitPromptCommand}" Style="{StaticResource PrimaryButton}" MinWidth="96" Margin="0,0,0,8" />
+                                <Button Content="Cancel" Command="{Binding CancelTurnCommand}" MinWidth="96" />
+                            </StackPanel>
+                        </Grid>
                     </Grid>
                 </Border>
             </Grid>
@@ -198,6 +231,15 @@
 
                         <TextBlock Text="Runtime" Style="{StaticResource SectionLabel}" Margin="0,4,0,8" />
                         <ItemsControl ItemsSource="{Binding Diagnostics}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" Style="{StaticResource ValueText}" Margin="0,0,0,8" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <TextBlock Text="Raw events" Style="{StaticResource SectionLabel}" Margin="0,14,0,8" />
+                        <ItemsControl ItemsSource="{Binding RawEvents}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <TextBlock Text="{Binding}" Style="{StaticResource ValueText}" Margin="0,0,0,8" />

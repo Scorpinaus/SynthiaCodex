@@ -18,6 +18,7 @@ public sealed class AppServices
     private AppServices(
         ISettingsStore settingsStore,
         ICodexDiscoveryService codexDiscoveryService,
+        ICodexProcessService codexProcessService,
         IAuthService authService,
         IRecentProjectService recentProjectService,
         IFolderPicker folderPicker,
@@ -25,6 +26,7 @@ public sealed class AppServices
     {
         SettingsStore = settingsStore;
         CodexDiscoveryService = codexDiscoveryService;
+        CodexProcessService = codexProcessService;
         AuthService = authService;
         RecentProjectService = recentProjectService;
         FolderPicker = folderPicker;
@@ -34,6 +36,8 @@ public sealed class AppServices
     public ISettingsStore SettingsStore { get; }
 
     public ICodexDiscoveryService CodexDiscoveryService { get; }
+
+    public ICodexProcessService CodexProcessService { get; }
 
     public IAuthService AuthService { get; }
 
@@ -49,6 +53,7 @@ public sealed class AppServices
         var logger = new FileAppLogger(appDataDirectory);
         var settingsStore = new JsonSettingsStore(appDataDirectory, logger);
         var codexDiscoveryService = new CodexDiscoveryService(logger);
+        var codexProcessService = new CodexProcessService(logger);
         var authService = new CodexAuthService(logger);
         var recentProjectService = new RecentProjectService();
         var folderPicker = new WpfFolderPicker();
@@ -58,6 +63,7 @@ public sealed class AppServices
         return new AppServices(
             settingsStore,
             codexDiscoveryService,
+            codexProcessService,
             authService,
             recentProjectService,
             folderPicker,

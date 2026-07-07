@@ -1,0 +1,18 @@
+timestamp: 2026-07-07 22:10:04
+event: subtask
+title: Phase 1 tests first
+
+decision:
+Defined app-server handshake, thread/turn, notification, and cancellation tests before production code.
+
+rationale:
+The user explicitly requested tests first, and missing compile-time contracts now guide the implementation.
+
+lesson:
+Use an in-memory JSONL transport so protocol tests do not depend on a live Codex process.
+
+working_pattern:
+Protocol-contract tests before infrastructure wiring.
+
+next_plan:
+Implement Core app-server models, Infrastructure client, then UI thread service wiring.

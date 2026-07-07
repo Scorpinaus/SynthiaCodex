@@ -1,0 +1,18 @@
+timestamp: 2026-07-07 22:19:11
+event: subtask
+title: Phase 1 notes and audit
+
+decision:
+Recorded implementation rationale, errors, verification commands, and the live Codex runtime caveat in phase_1.md.
+
+rationale:
+The user requested an explicit learning/error/rationale record, and completion evidence must distinguish tested code from unverified local runtime launch.
+
+lesson:
+Document environmental blockers separately from code verification so follow-up work has a clean target.
+
+working_pattern:
+Keep implementation notes adjacent to acceptance evidence.
+
+next_plan:
+Resolve the packaged codex.exe access issue or test with a normal Codex CLI install before marking Phase 1 fully complete.

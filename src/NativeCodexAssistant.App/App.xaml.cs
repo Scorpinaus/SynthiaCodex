@@ -10,6 +10,7 @@ public partial class App : Application
     private const string MutexName = "NativeCodexAssistant.SingleInstance";
 
     private Mutex? instanceMutex;
+    private MainViewModel? mainViewModel;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -28,23 +29,29 @@ public partial class App : Application
         var services = AppServices.Create();
         RegisterExceptionHandlers(services.Logger);
 
-        var viewModel = new MainViewModel(
+        mainViewModel = new MainViewModel(
             services.SettingsStore,
             services.CodexDiscoveryService,
+            services.CodexProcessService,
             services.AuthService,
             services.RecentProjectService,
             services.FolderPicker,
             services.Logger);
 
-        MainWindow = new MainWindow(viewModel);
+        MainWindow = new MainWindow(mainViewModel);
         MainWindow.Show();
-        _ = viewModel.InitializeAsync();
+        _ = mainViewModel.InitializeAsync();
 
         base.OnStartup(e);
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        if (mainViewModel is not null)
+        {
+            mainViewModel.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
         instanceMutex?.ReleaseMutex();
         instanceMutex?.Dispose();
         base.OnExit(e);

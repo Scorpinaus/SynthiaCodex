@@ -18,51 +18,102 @@ public sealed class CodexDiscoveryService(IAppLogger logger) : ICodexDiscoverySe
         string? preferredExecutablePath = null,
         CancellationToken cancellationToken = default)
     {
-        var executable = ResolveExecutable(preferredExecutablePath);
-        if (executable is null)
+        var sawCandidate = false;
+        foreach (var executable in EnumerateExecutableCandidates(preferredExecutablePath))
         {
-            return CodexInstallation.Missing("Install Codex CLI or set a preferred executable path in settings.");
+            sawCandidate = true;
+            var version = await TryReadVersionAsync(executable, cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(version))
+            {
+                return new CodexInstallation(
+                    true,
+                    executable,
+                    version,
+                    $"Codex CLI {version}",
+                    "Codex executable was resolved from the configured path, PATH, or the OpenAI Codex app bin folder.");
+            }
         }
 
-        var version = await TryReadVersionAsync(executable, cancellationToken).ConfigureAwait(false);
-        return new CodexInstallation(
-            true,
-            executable,
-            version,
-            version is null ? "Codex CLI found" : $"Codex CLI {version}",
-            "Codex executable was resolved from the configured path or PATH.");
+        return CodexInstallation.Missing(
+            sawCandidate
+                ? "Codex executable candidates were found, but none could be run with `--version`."
+                : "Install Codex CLI or set a preferred executable path in settings.");
     }
 
-    private static string? ResolveExecutable(string? preferredExecutablePath)
+    private static IEnumerable<string> EnumerateExecutableCandidates(string? preferredExecutablePath)
     {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         if (!string.IsNullOrWhiteSpace(preferredExecutablePath))
         {
             var expanded = Environment.ExpandEnvironmentVariables(preferredExecutablePath);
             if (File.Exists(expanded))
             {
-                return Path.GetFullPath(expanded);
-            }
-        }
-
-        var pathValue = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrWhiteSpace(pathValue))
-        {
-            return null;
-        }
-
-        foreach (var directory in pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            foreach (var name in WindowsExecutableNames)
-            {
-                var candidate = Path.Combine(directory, name);
-                if (File.Exists(candidate))
+                foreach (var candidate in YieldIfNew(Path.GetFullPath(expanded), seen))
                 {
-                    return candidate;
+                    yield return candidate;
                 }
             }
         }
 
-        return null;
+        var pathValue = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrWhiteSpace(pathValue))
+        {
+            foreach (var directory in pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                foreach (var candidate in EnumerateDirectoryCandidates(directory, seen))
+                {
+                    yield return candidate;
+                }
+            }
+        }
+
+        foreach (var directory in EnumerateKnownCodexBinDirectories())
+        {
+            foreach (var candidate in EnumerateDirectoryCandidates(directory, seen))
+            {
+                yield return candidate;
+            }
+        }
+    }
+
+    private static IEnumerable<string> EnumerateDirectoryCandidates(string directory, HashSet<string> seen)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            yield break;
+        }
+
+        foreach (var name in WindowsExecutableNames)
+        {
+            var candidate = Path.Combine(directory, name);
+            if (!File.Exists(candidate))
+            {
+                continue;
+            }
+
+            foreach (var uniqueCandidate in YieldIfNew(Path.GetFullPath(candidate), seen))
+            {
+                yield return uniqueCandidate;
+            }
+        }
+    }
+
+    private static IEnumerable<string> EnumerateKnownCodexBinDirectories()
+    {
+        var localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            yield return Path.Combine(Environment.ExpandEnvironmentVariables(localAppData), "OpenAI", "Codex", "bin");
+        }
+    }
+
+    private static IEnumerable<string> YieldIfNew(string candidate, HashSet<string> seen)
+    {
+        if (seen.Add(candidate))
+        {
+            yield return candidate;
+        }
     }
 
     private async Task<string?> TryReadVersionAsync(string executablePath, CancellationToken cancellationToken)

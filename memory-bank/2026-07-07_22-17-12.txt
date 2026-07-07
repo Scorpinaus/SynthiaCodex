@@ -1,0 +1,18 @@
+timestamp: 2026-07-07 22:17:12
+event: subtask
+title: Phase 1 protocol and UI path
+
+decision:
+Implemented app-server transport abstraction, JSONL client, thread-state mapping, and WPF run/cancel UI.
+
+rationale:
+This satisfies the tested Phase 1 path while keeping live process startup isolated from protocol tests.
+
+lesson:
+Keep raw app-server notifications alongside mapped timeline items for debugging and UI stability.
+
+working_pattern:
+Transport abstraction plus in-memory fake for protocol clients.
+
+next_plan:
+Audit Phase 1 acceptance criteria, run final verification, and document any remaining local-runtime caveats.

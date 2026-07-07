@@ -1,0 +1,18 @@
+timestamp: 2026-07-07 22:50:03
+event: subtask
+title: Hardened Codex auth failure handling
+
+decision:
+Preserve prompts through failed turns and surface Codex auth failures explicitly.
+
+rationale:
+External 401 or stream-disconnect failures should allow immediate retry without losing the user's task text.
+
+lesson:
+Do not read object-valued app-server error metadata as strings; defensive JSON leaf readers keep the notification loop alive.
+
+working_pattern:
+Add regression tests around live-observed protocol shapes before changing app-server UI state.
+
+next_plan:
+Review git diff, then decide whether Phase 1 can be marked complete or whether another live turn check is needed.

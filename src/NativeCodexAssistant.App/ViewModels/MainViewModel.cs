@@ -64,7 +64,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         SignInDeviceCodeCommand = new AsyncRelayCommand(() => StartLoginAsync(LoginMethod.DeviceCode));
         SignOutCommand = new AsyncRelayCommand(SignOutAsync);
         SubmitPromptCommand = submitPromptCommand = new AsyncRelayCommand(SubmitPromptAsync);
-        CancelTurnCommand = cancelTurnCommand = new AsyncRelayCommand(CancelTurnAsync);
+        CancelTurnCommand = cancelTurnCommand = new AsyncRelayCommand(CancelTurnAsync, CanCancelTurn);
     }
 
     public ObservableCollection<RecentProject> RecentProjects { get; } = [];
@@ -307,6 +307,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 CodexSandbox.WorkspaceWrite)).ConfigureAwait(true);
 
             activeTurnId = turn.TurnId;
+            cancelTurnCommand.RaiseCanExecuteChanged();
             StatusMessage = "Codex turn running";
         }
         catch (Exception ex)
@@ -319,7 +320,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task CancelTurnAsync()
     {
-        if (appServerClient is null || string.IsNullOrWhiteSpace(activeTurnId))
+        if (!CanCancelTurn() || appServerClient is null || string.IsNullOrWhiteSpace(activeThreadId) || string.IsNullOrWhiteSpace(activeTurnId))
         {
             StatusMessage = "No active turn to cancel";
             return;
@@ -327,7 +328,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await appServerClient.CancelTurnAsync(activeTurnId).ConfigureAwait(true);
+            await appServerClient.CancelTurnAsync(activeThreadId, activeTurnId).ConfigureAwait(true);
             StatusMessage = "Cancellation requested";
         }
         catch (Exception ex)
@@ -335,6 +336,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             StatusMessage = ex.Message;
             logger.Log(AppLogLevel.Error, "codex_turn_cancel_failed", "Could not cancel Codex turn.", exception: ex);
         }
+    }
+
+    private bool CanCancelTurn()
+    {
+        return IsTurnRunning &&
+            appServerClient is not null &&
+            !string.IsNullOrWhiteSpace(activeThreadId) &&
+            !string.IsNullOrWhiteSpace(activeTurnId);
     }
 
     private async Task<CodexAppServerClient> EnsureAppServerClientAsync()

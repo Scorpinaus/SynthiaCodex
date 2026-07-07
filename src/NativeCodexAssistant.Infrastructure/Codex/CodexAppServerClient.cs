@@ -124,8 +124,13 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         return new CodexTurnStartResult(turnId);
     }
 
-    public async Task CancelTurnAsync(string turnId, CancellationToken cancellationToken = default)
+    public async Task CancelTurnAsync(string threadId, string turnId, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            throw new ArgumentException("Thread ID is required.", nameof(threadId));
+        }
+
         if (string.IsNullOrWhiteSpace(turnId))
         {
             throw new ArgumentException("Turn ID is required.", nameof(turnId));
@@ -134,7 +139,11 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
         await SendRequestAsync(
             "turn/interrupt",
-            new JsonObject { ["turnId"] = turnId },
+            new JsonObject
+            {
+                ["threadId"] = threadId,
+                ["turnId"] = turnId
+            },
             cancellationToken).ConfigureAwait(false);
     }
 

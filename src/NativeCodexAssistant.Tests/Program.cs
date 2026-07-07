@@ -27,6 +27,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("app-server v2 notifications update thread state", TestAppServerV2NotificationsUpdateThreadStateAsync),
     ("app-server error notifications show detail", TestAppServerErrorNotificationsShowDetailAsync),
     ("view model preserves prompt after auth failed turn", TestViewModelPreservesPromptAfterAuthFailedTurnAsync),
+    ("view model cancellation sends active thread and turn", TestViewModelCancellationSendsActiveThreadAndTurnAsync),
     ("app-server cancellation sends turn interrupt", TestAppServerCancellationSendsInterruptAsync),
     ("live codex app-server initializes when enabled", TestLiveCodexAppServerInitializesWhenEnabledAsync)
 };
@@ -445,12 +446,13 @@ static async Task TestAppServerCancellationSendsInterruptAsync()
     await using var client = new CodexAppServerClient(transport, TestClientMetadata());
     await CompleteInitializeAsync(client, transport);
 
-    var cancelTask = client.CancelTurnAsync("turn_456");
+    var cancelTask = client.CancelTurnAsync("thr_123", "turn_456");
     await transport.WaitForClientMessageCountAsync(3);
 
     var cancelRequest = ParseMessage(transport.ClientMessages[2]);
     AssertJsonString("turn/interrupt", cancelRequest, "method", "cancel method");
     AssertJsonInt(1, cancelRequest, "id", "cancel id");
+    AssertJsonString("thr_123", cancelRequest, "params.threadId", "cancel thread id");
     AssertJsonString("turn_456", cancelRequest, "params.turnId", "cancel turn id");
 
     transport.ServerSend(
@@ -459,6 +461,56 @@ static async Task TestAppServerCancellationSendsInterruptAsync()
         """);
 
     await cancelTask;
+}
+
+static async Task TestViewModelCancellationSendsActiveThreadAndTurnAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var projectPath = temp.CreateDirectory("Repo");
+    var viewModel = CreateMainViewModel(transport, projectPath, AuthReadiness.LikelySignedIn);
+
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => string.Equals(viewModel.SelectedProjectPath, projectPath, StringComparison.OrdinalIgnoreCase), "project selection");
+
+    viewModel.PromptText = "Run a long task.";
+    viewModel.SubmitPromptCommand.Execute(null);
+
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend(
+        """
+        {"id":0,"result":{"userAgent":"codex-test","platformFamily":"windows","platformOs":"windows"}}
+        """);
+
+    await transport.WaitForClientMessageCountAsync(3);
+    transport.ServerSend(
+        """
+        {"id":1,"result":{"thread":{"id":"thr_123"}}}
+        """);
+
+    await transport.WaitForClientMessageCountAsync(4);
+    transport.ServerSend(
+        """
+        {"id":2,"result":{"turn":{"id":"turn_456"}}}
+        """);
+
+    await WaitUntilAsync(() => viewModel.CancelTurnCommand.CanExecute(null), "cancel enabled");
+
+    viewModel.CancelTurnCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(5);
+
+    var cancelRequest = ParseMessage(transport.ClientMessages[4]);
+    AssertJsonString("turn/interrupt", cancelRequest, "method", "view model cancel method");
+    AssertJsonString("thr_123", cancelRequest, "params.threadId", "view model cancel thread id");
+    AssertJsonString("turn_456", cancelRequest, "params.turnId", "view model cancel turn id");
+
+    transport.ServerSend(
+        """
+        {"id":3,"result":{"ok":true}}
+        """);
+
+    await viewModel.DisposeAsync();
 }
 
 static async Task TestLiveCodexAppServerInitializesWhenEnabledAsync()

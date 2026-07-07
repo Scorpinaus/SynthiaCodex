@@ -55,3 +55,13 @@
 - Verification: `cmd.exe /c dotnet test NativeCodexAssistant.sln` completed successfully.
 - Verification: `cmd.exe /c scripts\publish-portable.cmd` produced the portable app folder.
 - Verification: `cmd.exe /c "set NCA_RUN_LIVE_CODEX_SMOKE=1&& dotnet run --project src\NativeCodexAssistant.Tests\NativeCodexAssistant.Tests.csproj"` passed all 14 tests, including live app-server initialization.
+
+## 2026-07-07 Cancel Request Thread ID Fix
+
+- Error: clicking Cancel after a turn produced `App-server error -32600: Invalid request: missing field `threadId``.
+- Decision: send both `threadId` and `turnId` in `turn/interrupt`, and disable the Cancel command unless a turn is actively running with both IDs available.
+- Rationale: local Codex app-server requires the thread context for interrupts; sending only the turn ID can also accidentally target a stale completed turn.
+- Implementation: `CodexAppServerClient.CancelTurnAsync` now requires `threadId` and `turnId`; `MainViewModel` passes the active thread and turn and gates `CancelTurnCommand`.
+- Verification: added client and view-model regression coverage; `cmd.exe /c dotnet run --project src\NativeCodexAssistant.Tests\NativeCodexAssistant.Tests.csproj` passed 15 tests.
+- Verification: `cmd.exe /c dotnet build NativeCodexAssistant.sln` passed with 0 warnings and 0 errors.
+- Verification: after closing the running app, `cmd.exe /c scripts\publish-portable.cmd` refreshed `portable\NativeCodexAssistant` with the fixed executable.

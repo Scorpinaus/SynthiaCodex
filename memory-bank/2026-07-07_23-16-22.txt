@@ -1,0 +1,18 @@
+timestamp: 2026-07-07 23:16:22
+event: subtask
+title: Fixed app-server cancel payload
+
+decision:
+Send both threadId and turnId for turn/interrupt and disable Cancel without an active turn.
+
+rationale:
+Codex app-server rejects interrupts missing threadId, and stale completed turns should not be cancellable.
+
+lesson:
+Use live app-server error messages to harden protocol request tests immediately.
+
+working_pattern:
+Add client-level payload assertions plus view-model command-flow regression tests for UI protocol bugs.
+
+next_plan:
+Run the refreshed portable app and verify Cancel during an active turn no longer reports missing threadId.

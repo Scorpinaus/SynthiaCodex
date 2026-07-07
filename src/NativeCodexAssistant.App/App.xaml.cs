@@ -1,0 +1,76 @@
+using System.Threading;
+using System.Windows;
+using NativeCodexAssistant.App.ViewModels;
+using NativeCodexAssistant.Core.Logging;
+
+namespace NativeCodexAssistant.App;
+
+public partial class App : Application
+{
+    private const string MutexName = "NativeCodexAssistant.SingleInstance";
+
+    private Mutex? instanceMutex;
+
+    protected override void OnStartup(StartupEventArgs e)
+    {
+        instanceMutex = new Mutex(initiallyOwned: true, MutexName, out var isFirstInstance);
+        if (!isFirstInstance)
+        {
+            MessageBox.Show(
+                "Native Codex Assistant is already running.",
+                "Native Codex Assistant",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            Shutdown();
+            return;
+        }
+
+        var services = AppServices.Create();
+        RegisterExceptionHandlers(services.Logger);
+
+        var viewModel = new MainViewModel(
+            services.SettingsStore,
+            services.CodexDiscoveryService,
+            services.AuthService,
+            services.RecentProjectService,
+            services.FolderPicker,
+            services.Logger);
+
+        MainWindow = new MainWindow(viewModel);
+        MainWindow.Show();
+        _ = viewModel.InitializeAsync();
+
+        base.OnStartup(e);
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        instanceMutex?.ReleaseMutex();
+        instanceMutex?.Dispose();
+        base.OnExit(e);
+    }
+
+    private void RegisterExceptionHandlers(IAppLogger logger)
+    {
+        DispatcherUnhandledException += (_, args) =>
+        {
+            logger.Log(AppLogLevel.Error, "dispatcher_unhandled_exception", "An unhandled UI exception occurred.", exception: args.Exception);
+            MessageBox.Show(args.Exception.Message, "Native Codex Assistant", MessageBoxButton.OK, MessageBoxImage.Error);
+            args.Handled = true;
+        };
+
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.ExceptionObject is Exception exception)
+            {
+                logger.Log(AppLogLevel.Critical, "appdomain_unhandled_exception", "An unhandled application exception occurred.", exception: exception);
+            }
+        };
+
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            logger.Log(AppLogLevel.Error, "unobserved_task_exception", "An unobserved task exception occurred.", exception: args.Exception);
+            args.SetObserved();
+        };
+    }
+}

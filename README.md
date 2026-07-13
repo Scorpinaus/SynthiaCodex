@@ -64,6 +64,17 @@ By default it creates a Release, self-contained `win-x64` build. For a framework
 .\scripts\publish-portable.cmd -FrameworkDependent
 ```
 
+## Maintenance Sweep
+
+Preview or remove reproducible build output while preserving the current portable app:
+
+```powershell
+.\scripts\maintenance-sweep.cmd -WhatIf
+.\scripts\maintenance-sweep.cmd
+```
+
+Add `-RemovePortable` for the smallest source-only folder. See [docs/maintenance-sweep.md](docs/maintenance-sweep.md) for the exact targets and safety rules.
+
 ## Notes
 
 Generated build output under `portable\` is intentionally ignored by source control. App settings and logs remain under the user's local app data folder rather than inside the portable app folder.

@@ -916,6 +916,16 @@ portable\NativeCodexAssistant\NativeCodexAssistant.App.exe
 
 Testing and zip sharing should use `portable\NativeCodexAssistant\` directly instead of digging through `src\...\bin\Release\...` publish folders. The generated `portable\` folder is ignored by source control.
 
+### Maintenance sweep
+
+Use the guarded maintenance wrapper to remove reproducible build output after development or publishing:
+
+```powershell
+.\scripts\maintenance-sweep.cmd
+```
+
+The default sweep removes project `bin\`/`obj\` output, test results, the root Visual Studio cache and app log, and noncanonical portable copies. It preserves `portable\NativeCodexAssistant\` so the latest runnable build remains available. `-WhatIf` previews exact targets, while `-RemovePortable` explicitly opts into a source-only folder. Every deletion target must resolve beneath the repository root.
+
 ### Internal alpha
 
 - signed installer if possible

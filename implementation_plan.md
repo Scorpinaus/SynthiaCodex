@@ -28,7 +28,7 @@ Open a project, describe a task, watch Codex work, inspect results, and continue
 
 ### UI framework
 
-Use **WPF on modern .NET** for the first implementation.
+Use **WPF on .NET 10** for the first implementation.
 
 Rationale:
 
@@ -39,6 +39,19 @@ Rationale:
 - Allows straightforward single-instance, tray, settings, and native file picker behavior.
 
 WinUI 3 remains a possible later UI refresh if Windows 11 Fluent polish becomes more important than implementation stability.
+
+### .NET version
+
+Target **.NET 10** across the WPF app, Core, Infrastructure, and Tests projects.
+
+Rationale:
+
+- Keeps the application on the current long-term support .NET release.
+- Uses the installed .NET 10 SDK and Windows Desktop runtime toolchain.
+- Gives every project one consistent target framework: `net10.0` for libraries and `net10.0-windows` for WPF-facing projects.
+- Allows self-contained portable builds to run without a separately installed .NET 10 runtime.
+
+Pin the repository to the .NET 10 SDK family through `global.json`, while allowing newer .NET 10 feature bands so servicing updates do not require repository churn.
 
 ### Codex integration path
 
@@ -803,7 +816,7 @@ Diagnostics panel should include:
 
 - app version
 - Windows version
-- .NET runtime version
+- .NET 10 runtime version and compatibility
 - Codex executable path
 - Codex version
 - `CODEX_HOME`
@@ -922,7 +935,7 @@ Testing and zip sharing should use `portable\NativeCodexAssistant\` directly ins
 - detect Codex CLI
 - verify login can be initiated but do not require login during install
 - detect Git
-- optionally detect .NET runtime if framework-dependent
+- if framework-dependent, detect and require the .NET 10 Windows Desktop Runtime
 - avoid modifying Codex config without user action
 
 ## 23. Milestone Plan

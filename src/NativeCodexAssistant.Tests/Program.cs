@@ -3,14 +3,17 @@ using NativeCodexAssistant.App.ViewModels;
 using NativeCodexAssistant.Core.Auth;
 using NativeCodexAssistant.Core.Codex;
 using NativeCodexAssistant.Core.Codex.AppServer;
+using NativeCodexAssistant.Core.Git;
 using NativeCodexAssistant.Core.Logging;
 using NativeCodexAssistant.Core.Settings;
 using NativeCodexAssistant.Infrastructure.Auth;
 using NativeCodexAssistant.Infrastructure.Codex;
+using NativeCodexAssistant.Infrastructure.Git;
 using NativeCodexAssistant.Infrastructure.Logging;
 using NativeCodexAssistant.Infrastructure.Projects;
 using NativeCodexAssistant.Infrastructure.Settings;
 using System.Runtime.CompilerServices;
+using System.Diagnostics;
 using System.Text.Json.Nodes;
 
 var tests = new List<(string Name, Func<Task> Run)>
@@ -36,6 +39,9 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("view model loads model options", TestViewModelLoadsModelOptionsAsync),
     ("view model exit command requests close", TestViewModelExitCommandRequestsCloseAsync),
     ("view model shutdown cancels running turn and disposes transport", TestViewModelShutdownCancelsRunningTurnAndDisposesTransportAsync),
+    ("git service reads status and diffs", TestGitServiceReadsStatusAndDiffsAsync),
+    ("git service stages commits and reverts", TestGitServiceStagesCommitsAndRevertsAsync),
+    ("git service refuses non-repository folders", TestGitServiceRefusesNonRepositoryFoldersAsync),
     ("app-server cancellation sends turn interrupt", TestAppServerCancellationSendsInterruptAsync),
     ("live codex app-server initializes when enabled", TestLiveCodexAppServerInitializesWhenEnabledAsync)
 };
@@ -857,6 +863,157 @@ static async Task TestViewModelShutdownCancelsRunningTurnAndDisposesTransportAsy
     AssertEqual("thr_123", settingsStore.SavedSettings.ProjectThreads.Single().ThreadId, "shutdown saves thread id");
 }
 
+static async Task TestGitServiceReadsStatusAndDiffsAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var repository = temp.CreateDirectory("Repo with spaces");
+    await InitializeGitRepositoryAsync(repository);
+    var trackedPath = Path.Combine(repository, "tracked file.txt");
+    await File.WriteAllTextAsync(trackedPath, "original\n");
+    await RunGitAsync(repository, "add", "--", "tracked file.txt");
+    await RunGitAsync(repository, "commit", "-m", "initial");
+
+    await File.WriteAllTextAsync(trackedPath, "original\nworking change\n");
+    await File.WriteAllTextAsync(Path.Combine(repository, "new file.txt"), "new content\n");
+
+    var service = new GitService(new TestLogger());
+    var state = await service.GetRepositoryStateAsync(repository);
+
+    AssertTrue(state.IsRepository, "git repository detected");
+    AssertEqual(Path.GetFullPath(repository), state.RootPath, "git repository root");
+    AssertEqual(2, state.ChangedFiles.Count, "git changed file count");
+    var tracked = state.ChangedFiles.Single(file => file.Path == "tracked file.txt");
+    var untracked = state.ChangedFiles.Single(file => file.Path == "new file.txt");
+    AssertTrue(tracked.HasWorkingTreeChanges, "tracked working-tree change");
+    AssertTrue(untracked.IsUntracked, "untracked status");
+
+    var trackedDiff = await service.GetDiffAsync(repository, tracked, staged: false);
+    var untrackedDiff = await service.GetDiffAsync(repository, untracked, staged: false);
+    AssertTrue(trackedDiff.Contains("+working change", StringComparison.Ordinal), "tracked diff content");
+    AssertTrue(untrackedDiff.Contains("+new content", StringComparison.Ordinal), "untracked diff content");
+
+    File.Delete(Path.Combine(repository, "new file.txt"));
+    await RunGitAsync(repository, "restore", "--", "tracked file.txt");
+    File.Move(trackedPath, Path.Combine(repository, "renamed file.txt"));
+    await RunGitAsync(repository, "add", "-A");
+    var rename = (await service.GetRepositoryStateAsync(repository)).ChangedFiles.Single();
+    AssertEqual("renamed file.txt", rename.Path, "rename destination path");
+    AssertEqual("tracked file.txt", rename.OriginalPath, "rename original path");
+}
+
+static async Task TestGitServiceStagesCommitsAndRevertsAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var service = new GitService(new TestLogger());
+    var unbornRepository = temp.CreateDirectory("UnbornRepo");
+    await InitializeGitRepositoryAsync(unbornRepository);
+    var firstFilePath = Path.Combine(unbornRepository, "first.txt");
+    await File.WriteAllTextAsync(firstFilePath, "first commit candidate\n");
+    await service.StageAsync(unbornRepository, ["first.txt"]);
+    await service.UnstageAsync(unbornRepository, ["first.txt"]);
+    AssertTrue((await service.GetRepositoryStateAsync(unbornRepository)).ChangedFiles.Single().IsUntracked, "file unstaged before first commit");
+    await service.StageAsync(unbornRepository, ["first.txt"]);
+    await service.RevertAsync(unbornRepository, (await service.GetRepositoryStateAsync(unbornRepository)).ChangedFiles);
+    AssertTrue(!File.Exists(firstFilePath), "confirmed discard removes staged file before first commit");
+
+    var repository = temp.CreateDirectory("Repo");
+    await InitializeGitRepositoryAsync(repository);
+    var trackedPath = Path.Combine(repository, "tracked.txt");
+    await File.WriteAllTextAsync(trackedPath, "original\n");
+    await RunGitAsync(repository, "add", "--", "tracked.txt");
+    await RunGitAsync(repository, "commit", "-m", "initial");
+
+    await File.WriteAllTextAsync(trackedPath, "committed change\n");
+    await service.StageAsync(repository, ["tracked.txt"]);
+    var stagedState = await service.GetRepositoryStateAsync(repository);
+    var stagedFile = stagedState.ChangedFiles.Single();
+    AssertTrue(stagedFile.IsStaged, "file staged");
+    AssertTrue((await service.GetDiffAsync(repository, stagedFile, staged: true)).Contains("+committed change", StringComparison.Ordinal), "staged diff content");
+
+    await service.UnstageAsync(repository, ["tracked.txt"]);
+    var unstagedState = await service.GetRepositoryStateAsync(repository);
+    AssertTrue(!unstagedState.ChangedFiles.Single().IsStaged, "file unstaged");
+
+    await service.StageAsync(repository, ["tracked.txt"]);
+    var commit = await service.CommitAsync(repository, "phase two commit");
+    AssertTrue(!string.IsNullOrWhiteSpace(commit.CommitId), "commit id returned");
+    AssertEqual(0, (await service.GetRepositoryStateAsync(repository)).ChangedFiles.Count, "working tree clean after commit");
+
+    await File.WriteAllTextAsync(trackedPath, "discard me\n");
+    var untrackedPath = Path.Combine(repository, "discard-new.txt");
+    await File.WriteAllTextAsync(untrackedPath, "discard me too\n");
+    var stagedNewPath = Path.Combine(repository, "staged-new.txt");
+    await File.WriteAllTextAsync(stagedNewPath, "staged then discarded\n");
+    await service.StageAsync(repository, ["staged-new.txt"]);
+    var dirtyState = await service.GetRepositoryStateAsync(repository);
+    await service.RevertAsync(repository, dirtyState.ChangedFiles);
+
+    AssertEqual("committed change\n", (await File.ReadAllTextAsync(trackedPath)).Replace("\r\n", "\n"), "tracked file restored");
+    AssertTrue(!File.Exists(untrackedPath), "untracked file deleted after confirmed service call");
+    AssertTrue(!File.Exists(stagedNewPath), "staged new file deleted after confirmed service call");
+    AssertEqual(0, (await service.GetRepositoryStateAsync(repository)).ChangedFiles.Count, "working tree clean after revert");
+}
+
+static async Task TestGitServiceRefusesNonRepositoryFoldersAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var service = new GitService(new TestLogger());
+    var state = await service.GetRepositoryStateAsync(temp.Root);
+
+    AssertTrue(!state.IsRepository, "non-repository rejected");
+    AssertEqual(0, state.ChangedFiles.Count, "non-repository has no changes");
+
+    var actionRefused = false;
+    try
+    {
+        await service.StageAsync(temp.Root, ["outside.txt"]);
+    }
+    catch (InvalidOperationException)
+    {
+        actionRefused = true;
+    }
+
+    AssertTrue(actionRefused, "git action outside repository refused");
+}
+
+static async Task InitializeGitRepositoryAsync(string repository)
+{
+    await RunGitAsync(repository, "init", "-b", "main");
+    await RunGitAsync(repository, "config", "user.name", "Native Codex Assistant Tests");
+    await RunGitAsync(repository, "config", "user.email", "tests@example.invalid");
+}
+
+static async Task RunGitAsync(string workingDirectory, params string[] arguments)
+{
+    using var process = new Process
+    {
+        StartInfo = new ProcessStartInfo
+        {
+            FileName = "git.exe",
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        }
+    };
+    foreach (var argument in arguments)
+    {
+        process.StartInfo.ArgumentList.Add(argument);
+    }
+
+    process.Start();
+    var output = process.StandardOutput.ReadToEndAsync();
+    var error = process.StandardError.ReadToEndAsync();
+    await process.WaitForExitAsync();
+    if (process.ExitCode != 0)
+    {
+        throw new InvalidOperationException($"git {string.Join(' ', arguments)} failed: {await error}");
+    }
+
+    await output;
+}
+
 static async Task TestLiveCodexAppServerInitializesWhenEnabledAsync()
 {
     if (!string.Equals(Environment.GetEnvironmentVariable("NCA_RUN_LIVE_CODEX_SMOKE"), "1", StringComparison.Ordinal))
@@ -958,8 +1115,10 @@ static MainViewModel CreateMainViewModel(
         new FakeCodexDiscoveryService(installation),
         new FakeCodexProcessService(transport),
         new FakeAuthService(new AuthenticationState(readiness, readiness.ToString(), "Test auth state.", @"C:\Users\Test\.codex")),
+        new FakeGitService(projectPath),
         new RecentProjectService(),
         new FakeFolderPicker(projectPath),
+        new FakeUserInteractionService(),
         new TestLogger());
 }
 
@@ -1052,6 +1211,11 @@ internal sealed class TempWorkspace : IDisposable
     {
         if (Directory.Exists(Root))
         {
+            foreach (var file in Directory.EnumerateFiles(Root, "*", SearchOption.AllDirectories))
+            {
+                File.SetAttributes(file, FileAttributes.Normal);
+            }
+
             Directory.Delete(Root, recursive: true);
         }
     }
@@ -1136,6 +1300,43 @@ internal sealed class FakeAuthService(AuthenticationState state) : IAuthService
 internal sealed class FakeFolderPicker(string projectPath) : IFolderPicker
 {
     public string? PickFolder(string? initialPath = null) => projectPath;
+}
+
+internal sealed class FakeGitService(string repositoryRoot) : IGitService
+{
+    public Task<GitRepositoryState> GetRepositoryStateAsync(string workingDirectory, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(new GitRepositoryState(true, repositoryRoot, "main", [], null));
+    }
+
+    public Task<string> GetDiffAsync(string repositoryRoot, GitChangedFile file, bool staged, CancellationToken cancellationToken = default) =>
+        Task.FromResult("test diff");
+
+    public Task StageAsync(string repositoryRoot, IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    public Task UnstageAsync(string repositoryRoot, IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    public Task RevertAsync(string repositoryRoot, IReadOnlyCollection<GitChangedFile> files, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    public Task<GitCommitResult> CommitAsync(string repositoryRoot, string message, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new GitCommitResult("abc1234", "test commit"));
+}
+
+internal sealed class FakeUserInteractionService : IUserInteractionService
+{
+    public bool ConfirmDestructiveAction(string title, string message) => true;
+
+    public void OpenInEditor(string path)
+    {
+    }
+
+    public void RevealInExplorer(string path)
+    {
+    }
 }
 
 internal sealed class FakeAppServerTransport : IAppServerTransport

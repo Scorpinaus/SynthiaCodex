@@ -26,7 +26,7 @@ portable\NativeCodexAssistant\NativeCodexAssistant.App.exe
 
 Zip `portable\NativeCodexAssistant\` directly when sharing or testing a build.
 
-By default, the script creates a Release, self-contained `win-x64` build so the folder can run without requiring a matching .NET runtime installation. To create a framework-dependent build instead:
+By default, the script creates a Release, self-contained .NET 10 `win-x64` build so the folder can run without requiring a matching .NET runtime installation. To create a framework-dependent build instead, the target machine must have the .NET 10 Windows Desktop Runtime installed:
 
 ```powershell
 .\scripts\publish-portable.ps1 -FrameworkDependent

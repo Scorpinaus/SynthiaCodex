@@ -4,6 +4,8 @@ Native Codex Assistant is a lightweight Windows-native WPF desktop assistant for
 
 The app is intended to launch and communicate with `codex app-server` while keeping the Windows desktop workflow small, predictable, and easy to test.
 
+The current build also includes a Git-aware Changes workspace for repository status, working and staged diffs, staging, unstaging, confirmed discard, commits, and editor/Explorer shortcuts.
+
 ## Solution
 
 ```text
@@ -16,6 +18,8 @@ src\
 ```
 
 ## Build And Test
+
+Install a .NET 10 SDK with Windows Desktop support. The repository's `global.json` accepts current .NET 10 feature bands and servicing updates.
 
 Restore, build, and run the current solution tests with:
 

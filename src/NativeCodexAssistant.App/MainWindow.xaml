@@ -103,7 +103,9 @@
                     </Grid>
                 </Border>
 
-                <Border Grid.Row="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="22" Margin="0,18">
+                <TabControl Grid.Row="1" Margin="0,18">
+                    <TabItem Header="Task">
+                <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="22">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -223,6 +225,136 @@
                         </Grid>
                     </Grid>
                 </Border>
+                    </TabItem>
+
+                    <TabItem Header="Changes">
+                        <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="18">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Git workspace" Style="{StaticResource SectionLabel}" />
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding GitBranch}" FontSize="18" FontWeight="SemiBold" />
+                                            <TextBlock Text="  /  " Foreground="{StaticResource MutedInkBrush}" />
+                                            <TextBlock Text="{Binding GitStatusMessage}" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button Content="Open editor" Command="{Binding OpenInEditorCommand}" Margin="0,0,8,0" ToolTip="Open the selected file or project in the configured editor" />
+                                        <Button Content="Explorer" Command="{Binding RevealInExplorerCommand}" Margin="0,0,8,0" ToolTip="Reveal the selected file in Explorer" />
+                                        <Button Content="Refresh" Command="{Binding RefreshGitCommand}" ToolTip="Refresh repository status" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid Grid.Row="1" Margin="0,16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="280" />
+                                        <ColumnDefinition Width="16" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Text="Changed files" Style="{StaticResource SectionLabel}" />
+                                        <ListBox Grid.Row="1"
+                                                 ItemsSource="{Binding ChangedFiles}"
+                                                 SelectedItem="{Binding SelectedGitFile}"
+                                                 BorderBrush="{StaticResource LineBrush}"
+                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid Margin="6">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <StackPanel>
+                                                            <TextBlock Text="{Binding DisplayPath}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding StatusSummary}" Foreground="{StaticResource MutedInkBrush}" FontSize="11" />
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="1" Text="{Binding StatusCode}" FontFamily="{StaticResource MonoFont}" Foreground="{StaticResource CopperBrush}" Margin="8,0,0,0" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                        <WrapPanel Grid.Row="2" Margin="0,10,0,0">
+                                            <Button Content="Stage" Command="{Binding StageSelectedFileCommand}" Margin="0,0,8,8" />
+                                            <Button Content="Unstage" Command="{Binding UnstageSelectedFileCommand}" Margin="0,0,8,8" />
+                                            <Button Content="Discard" Command="{Binding RevertSelectedFileCommand}" Margin="0,0,0,8" ToolTip="Discard changes after confirmation" />
+                                        </WrapPanel>
+                                    </Grid>
+
+                                    <Grid Grid.Column="2">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding DiffViewLabel}" Style="{StaticResource SectionLabel}" />
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                <Button Content="Working" Command="{Binding ShowWorkingDiffCommand}" Margin="0,0,8,6" MinHeight="26" Padding="9,2" />
+                                                <Button Content="Staged" Command="{Binding ShowStagedDiffCommand}" Margin="0,0,0,6" MinHeight="26" Padding="9,2" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBox Grid.Row="1"
+                                                 Text="{Binding SelectedDiff, Mode=OneWay}"
+                                                 IsReadOnly="True"
+                                                 FontFamily="{StaticResource MonoFont}"
+                                                 FontSize="12"
+                                                 AcceptsReturn="True"
+                                                 AcceptsTab="True"
+                                                 TextWrapping="NoWrap"
+                                                 HorizontalScrollBarVisibility="Auto"
+                                                 VerticalScrollBarVisibility="Auto"
+                                                 Padding="10" />
+                                    </Grid>
+                                </Grid>
+
+                                <Grid Grid.Row="2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Commit message" Style="{StaticResource SectionLabel}" />
+                                        <TextBox Text="{Binding CommitMessage, UpdateSourceTrigger=PropertyChanged}"
+                                                 MinHeight="58"
+                                                 MaxHeight="96"
+                                                 AcceptsReturn="True"
+                                                 TextWrapping="Wrap"
+                                                 VerticalScrollBarVisibility="Auto"
+                                                 Padding="9" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1"
+                                            Content="Commit staged"
+                                            Command="{Binding CommitCommand}"
+                                            Style="{StaticResource PrimaryButton}"
+                                            MinWidth="118"
+                                            Margin="12,25,0,0"
+                                            VerticalAlignment="Top" />
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </TabItem>
+                </TabControl>
             </Grid>
 
             <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1,0,0,0">

@@ -34,8 +34,10 @@ public partial class App : Application
             services.CodexDiscoveryService,
             services.CodexProcessService,
             services.AuthService,
+            services.GitService,
             services.RecentProjectService,
             services.FolderPicker,
+            services.UserInteractionService,
             services.Logger);
 
         MainWindow = new MainWindow(mainViewModel);

@@ -105,9 +105,14 @@ public sealed class CodexAppServerProcessTransport(string executablePath, IAppLo
 
         try
         {
-            while (!currentProcess.StandardError.EndOfStream)
+            while (true)
             {
                 var line = await currentProcess.StandardError.ReadLineAsync().ConfigureAwait(false);
+                if (line is null)
+                {
+                    break;
+                }
+
                 if (!string.IsNullOrWhiteSpace(line))
                 {
                     logger.Log(AppLogLevel.Warning, "codex_app_server_stderr", line);

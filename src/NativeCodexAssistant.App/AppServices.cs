@@ -2,12 +2,14 @@ using NativeCodexAssistant.App.Services;
 using NativeCodexAssistant.Core.Auth;
 using NativeCodexAssistant.Core.Codex;
 using NativeCodexAssistant.Core.Logging;
+using NativeCodexAssistant.Core.Git;
 using NativeCodexAssistant.Core.Projects;
 using NativeCodexAssistant.Core.Settings;
 using NativeCodexAssistant.Infrastructure;
 using NativeCodexAssistant.Infrastructure.Auth;
 using NativeCodexAssistant.Infrastructure.Codex;
 using NativeCodexAssistant.Infrastructure.Logging;
+using NativeCodexAssistant.Infrastructure.Git;
 using NativeCodexAssistant.Infrastructure.Projects;
 using NativeCodexAssistant.Infrastructure.Settings;
 
@@ -20,16 +22,20 @@ public sealed class AppServices
         ICodexDiscoveryService codexDiscoveryService,
         ICodexProcessService codexProcessService,
         IAuthService authService,
+        IGitService gitService,
         IRecentProjectService recentProjectService,
         IFolderPicker folderPicker,
+        IUserInteractionService userInteractionService,
         IAppLogger logger)
     {
         SettingsStore = settingsStore;
         CodexDiscoveryService = codexDiscoveryService;
         CodexProcessService = codexProcessService;
         AuthService = authService;
+        GitService = gitService;
         RecentProjectService = recentProjectService;
         FolderPicker = folderPicker;
+        UserInteractionService = userInteractionService;
         Logger = logger;
     }
 
@@ -41,9 +47,13 @@ public sealed class AppServices
 
     public IAuthService AuthService { get; }
 
+    public IGitService GitService { get; }
+
     public IRecentProjectService RecentProjectService { get; }
 
     public IFolderPicker FolderPicker { get; }
+
+    public IUserInteractionService UserInteractionService { get; }
 
     public IAppLogger Logger { get; }
 
@@ -55,8 +65,10 @@ public sealed class AppServices
         var codexDiscoveryService = new CodexDiscoveryService(logger);
         var codexProcessService = new CodexProcessService(logger);
         var authService = new CodexAuthService(logger);
+        var gitService = new GitService(logger);
         var recentProjectService = new RecentProjectService();
         var folderPicker = new WpfFolderPicker();
+        var userInteractionService = new WpfUserInteractionService();
 
         logger.Log(AppLogLevel.Information, "app_services_created", "Application services were created.");
 
@@ -65,8 +77,10 @@ public sealed class AppServices
             codexDiscoveryService,
             codexProcessService,
             authService,
+            gitService,
             recentProjectService,
             folderPicker,
+            userInteractionService,
             logger);
     }
 }

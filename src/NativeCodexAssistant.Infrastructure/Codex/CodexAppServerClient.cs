@@ -77,6 +77,78 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         return new CodexThreadStartResult(threadId);
     }
 
+    public async Task<CodexThreadResumeResult> ResumeThreadAsync(
+        CodexThreadResumeRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.ThreadId))
+        {
+            throw new ArgumentException("Thread ID is required.", nameof(request));
+        }
+
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+
+        var parameters = new JsonObject
+        {
+            ["threadId"] = request.ThreadId,
+            ["cwd"] = request.Cwd,
+            ["sandbox"] = request.Sandbox.ToProtocolValue()
+        };
+
+        if (!string.IsNullOrWhiteSpace(request.Model))
+        {
+            parameters["model"] = request.Model;
+        }
+
+        var result = await SendRequestAsync("thread/resume", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
+        var threadId = ReadString(result, "thread.id");
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            throw new CodexAppServerProtocolException("thread/resume response did not include result.thread.id.");
+        }
+
+        return new CodexThreadResumeResult(threadId);
+    }
+
+    public async Task<IReadOnlyList<CodexModelOption>> ListModelsAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+
+        var result = await SendRequestAsync(
+            "model/list",
+            new JsonObject
+            {
+                ["includeHidden"] = false
+            },
+            cancellationToken).ConfigureAwait(false) as JsonObject;
+
+        var data = result?["data"] as JsonArray;
+        if (data is null)
+        {
+            return [];
+        }
+
+        var models = new List<CodexModelOption>();
+        foreach (var item in data.OfType<JsonObject>())
+        {
+            var model = ReadString(item, "model") ?? ReadString(item, "id");
+            if (string.IsNullOrWhiteSpace(model))
+            {
+                continue;
+            }
+
+            models.Add(new CodexModelOption(
+                ReadString(item, "id") ?? model,
+                model,
+                ReadString(item, "displayName") ?? model,
+                ReadBool(item, "isDefault") ?? false,
+                ReadReasoningEfforts(item)));
+        }
+
+        return models;
+    }
+
     public async Task<CodexTurnStartResult> StartTurnAsync(
         CodexTurnStartRequest request,
         CancellationToken cancellationToken = default)
@@ -112,6 +184,11 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         if (!string.IsNullOrWhiteSpace(request.Model))
         {
             parameters["model"] = request.Model;
+        }
+
+        if (request.ReasoningEffort is not null)
+        {
+            parameters["effort"] = request.ReasoningEffort.Value.ToProtocolValue();
         }
 
         var result = await SendRequestAsync("turn/start", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
@@ -361,6 +438,56 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
 
         return current?.GetValue<string>();
+    }
+
+    private static bool? ReadBool(JsonObject? obj, string path)
+    {
+        if (obj is null)
+        {
+            return null;
+        }
+
+        JsonNode? current = obj;
+        foreach (var segment in path.Split('.'))
+        {
+            if (current is JsonObject currentObject)
+            {
+                current = currentObject[segment];
+                continue;
+            }
+
+            if (current is JsonArray currentArray && int.TryParse(segment, out var index))
+            {
+                current = index >= 0 && index < currentArray.Count ? currentArray[index] : null;
+                continue;
+            }
+
+            return null;
+        }
+
+        return current is JsonValue value && value.TryGetValue<bool>(out var boolValue)
+            ? boolValue
+            : null;
+    }
+
+    private static IReadOnlyList<string> ReadReasoningEfforts(JsonObject model)
+    {
+        if (model["supportedReasoningEfforts"] is not JsonArray efforts)
+        {
+            return [];
+        }
+
+        var values = new List<string>();
+        foreach (var item in efforts.OfType<JsonObject>())
+        {
+            var effort = ReadString(item, "reasoningEffort");
+            if (!string.IsNullOrWhiteSpace(effort))
+            {
+                values.Add(effort);
+            }
+        }
+
+        return values;
     }
 
     public async ValueTask DisposeAsync()

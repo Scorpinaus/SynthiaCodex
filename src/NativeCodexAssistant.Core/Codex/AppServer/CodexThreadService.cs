@@ -37,6 +37,39 @@ public sealed class CodexThreadService
         finalResponseBuilder.Clear();
     }
 
+    public void Restore(
+        string? threadId,
+        string? finalResponse,
+        IEnumerable<CodexTimelineItem>? timelineItems,
+        IEnumerable<string>? rawEvents)
+    {
+        Reset();
+        ActiveThreadId = threadId;
+        ActiveTurnStatus = CodexTurnStatus.Idle;
+
+        if (!string.IsNullOrWhiteSpace(finalResponse))
+        {
+            finalResponseBuilder.Append(finalResponse);
+            FinalResponse = finalResponse;
+        }
+
+        if (timelineItems is not null)
+        {
+            foreach (var item in timelineItems)
+            {
+                TimelineItems.Add(item);
+            }
+        }
+
+        if (rawEvents is not null)
+        {
+            foreach (var rawEvent in rawEvents)
+            {
+                RawEvents.Add(rawEvent);
+            }
+        }
+    }
+
     public void ApplyNotification(AppServerNotification notification)
     {
         RawEvents.Add($"{notification.Method}: {notification.Params.ToJsonString()}");

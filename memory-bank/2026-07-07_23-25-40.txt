@@ -1,0 +1,18 @@
+timestamp: 2026-07-07 23:25:40
+event: subtask
+title: Added per-project thread persistence
+
+decision:
+Persist one Codex thread snapshot per project and resume it with thread/resume before the next turn.
+
+rationale:
+The app should reopen into a believable continuation without adding full multi-thread UI yet.
+
+lesson:
+Local app-server schemas are the right source for lifecycle details; codex 0.130.0-alpha.5 supports thread/resume by threadId.
+
+working_pattern:
+Use settings-backed lightweight state for single-project MVP continuity, then leave ThreadStore UI expansion for Phase 3.
+
+next_plan:
+Run the portable app, complete a turn, close and reopen, then verify the final response restores and the next prompt resumes the saved thread.

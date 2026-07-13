@@ -23,11 +23,19 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("app-server client writes initialize handshake", TestAppServerInitializeWritesHandshakeAsync),
     ("app-server client serializes initialize writes", TestAppServerClientSerializesInitializeWritesAsync),
     ("app-server client starts thread and turn", TestAppServerStartsThreadAndTurnAsync),
+    ("app-server client sends model and reasoning overrides", TestAppServerSendsModelAndReasoningOverridesAsync),
+    ("app-server client resumes thread", TestAppServerResumesThreadAsync),
+    ("app-server client lists models", TestAppServerListsModelsAsync),
     ("app-server notifications update thread state", TestAppServerNotificationsUpdateThreadStateAsync),
     ("app-server v2 notifications update thread state", TestAppServerV2NotificationsUpdateThreadStateAsync),
     ("app-server error notifications show detail", TestAppServerErrorNotificationsShowDetailAsync),
     ("view model preserves prompt after auth failed turn", TestViewModelPreservesPromptAfterAuthFailedTurnAsync),
     ("view model cancellation sends active thread and turn", TestViewModelCancellationSendsActiveThreadAndTurnAsync),
+    ("view model restores persisted thread and resumes it", TestViewModelRestoresPersistedThreadAndResumesItAsync),
+    ("view model sends selected model and reasoning", TestViewModelSendsSelectedModelAndReasoningAsync),
+    ("view model loads model options", TestViewModelLoadsModelOptionsAsync),
+    ("view model exit command requests close", TestViewModelExitCommandRequestsCloseAsync),
+    ("view model shutdown cancels running turn and disposes transport", TestViewModelShutdownCancelsRunningTurnAndDisposesTransportAsync),
     ("app-server cancellation sends turn interrupt", TestAppServerCancellationSendsInterruptAsync),
     ("live codex app-server initializes when enabled", TestLiveCodexAppServerInitializesWhenEnabledAsync)
 };
@@ -88,16 +96,40 @@ static async Task TestSettingsRoundTripAsync()
     var settings = new AppSettings
     {
         Theme = "Dark",
-        PreferredCodexPath = @"C:\Tools\codex.exe"
+        PreferredCodexPath = @"C:\Tools\codex.exe",
+        LastModelOverride = "gpt-test",
+        LastReasoningEffortOverride = "high"
     };
     settings.RecentProjects.Add(new(temp.CreateDirectory("Repo"), "Repo", DateTimeOffset.UtcNow));
+    settings.ProjectThreads.Add(new ProjectThreadState
+    {
+        ProjectPath = temp.CreateDirectory("ThreadRepo"),
+        ThreadId = "thr_saved",
+        FinalResponse = "Saved final response",
+        TimelineItems =
+        [
+            new CodexTimelineItem(
+                CodexTimelineItemKind.AgentMessage,
+                "Item completed",
+                "Saved final response",
+                "item/completed",
+                DateTimeOffset.UtcNow)
+        ],
+        RawEvents = ["item/completed: {}"],
+        UpdatedAt = DateTimeOffset.UtcNow
+    });
 
     await store.SaveAsync(settings);
     var loaded = await store.LoadAsync();
 
     AssertEqual("Dark", loaded.Theme, "theme");
     AssertEqual(settings.PreferredCodexPath, loaded.PreferredCodexPath, "preferred codex path");
+    AssertEqual(settings.LastModelOverride, loaded.LastModelOverride, "last model override");
+    AssertEqual(settings.LastReasoningEffortOverride, loaded.LastReasoningEffortOverride, "last reasoning override");
     AssertEqual(1, loaded.RecentProjects.Count, "recent project count");
+    AssertEqual(1, loaded.ProjectThreads.Count, "project thread count");
+    AssertEqual("thr_saved", loaded.ProjectThreads[0].ThreadId, "project thread id");
+    AssertEqual("Saved final response", loaded.ProjectThreads[0].FinalResponse, "project thread final response");
     AssertTrue(File.Exists(store.SettingsPath), "settings file exists");
 }
 
@@ -302,6 +334,92 @@ static async Task TestAppServerStartsThreadAndTurnAsync()
 
     var turn = await turnTask;
     AssertEqual("turn_456", turn.TurnId, "turn id");
+}
+
+static async Task TestAppServerSendsModelAndReasoningOverridesAsync()
+{
+    await using var transport = new FakeAppServerTransport();
+    await using var client = new CodexAppServerClient(transport, TestClientMetadata());
+    await CompleteInitializeAsync(client, transport);
+
+    var turnTask = client.StartTurnAsync(new CodexTurnStartRequest(
+        "thr_123",
+        "Summarize this repo.",
+        Path.Combine("D:\\", "Repo"),
+        CodexSandbox.WorkspaceWrite,
+        "gpt-test",
+        CodexReasoningEffort.High));
+
+    await transport.WaitForClientMessageCountAsync(3);
+
+    var turnRequest = ParseMessage(transport.ClientMessages[2]);
+    AssertJsonString("turn/start", turnRequest, "method", "override turn method");
+    AssertJsonString("gpt-test", turnRequest, "params.model", "turn model override");
+    AssertJsonString("high", turnRequest, "params.effort", "turn reasoning effort");
+
+    transport.ServerSend(
+        """
+        {"id":1,"result":{"turn":{"id":"turn_456"}}}
+        """);
+
+    var turn = await turnTask;
+    AssertEqual("turn_456", turn.TurnId, "override turn id");
+}
+
+static async Task TestAppServerResumesThreadAsync()
+{
+    await using var transport = new FakeAppServerTransport();
+    await using var client = new CodexAppServerClient(transport, TestClientMetadata());
+    await CompleteInitializeAsync(client, transport);
+
+    var cwd = Path.Combine("D:\\", "Repo With Space");
+    var resumeTask = client.ResumeThreadAsync(new CodexThreadResumeRequest(
+        "thr_existing",
+        cwd,
+        CodexSandbox.WorkspaceWrite));
+
+    await transport.WaitForClientMessageCountAsync(3);
+
+    var resumeRequest = ParseMessage(transport.ClientMessages[2]);
+    AssertJsonString("thread/resume", resumeRequest, "method", "thread resume method");
+    AssertJsonInt(1, resumeRequest, "id", "thread resume id");
+    AssertJsonString("thr_existing", resumeRequest, "params.threadId", "resume thread id");
+    AssertJsonString(cwd, resumeRequest, "params.cwd", "resume cwd");
+    AssertJsonString("workspace-write", resumeRequest, "params.sandbox", "resume sandbox");
+
+    transport.ServerSend(
+        """
+        {"id":1,"result":{"thread":{"id":"thr_existing"}}}
+        """);
+
+    var resumed = await resumeTask;
+    AssertEqual("thr_existing", resumed.ThreadId, "resumed thread id");
+}
+
+static async Task TestAppServerListsModelsAsync()
+{
+    await using var transport = new FakeAppServerTransport();
+    await using var client = new CodexAppServerClient(transport, TestClientMetadata());
+    await CompleteInitializeAsync(client, transport);
+
+    var modelsTask = client.ListModelsAsync();
+    await transport.WaitForClientMessageCountAsync(3);
+
+    var modelsRequest = ParseMessage(transport.ClientMessages[2]);
+    AssertJsonString("model/list", modelsRequest, "method", "model list method");
+    AssertJsonInt(1, modelsRequest, "id", "model list id");
+
+    transport.ServerSend(
+        """
+        {"id":1,"result":{"data":[{"id":"default","model":"gpt-default","displayName":"GPT Default","isDefault":true,"supportedReasoningEfforts":[{"reasoningEffort":"medium","description":"Balanced"}]},{"id":"fast","model":"gpt-fast","displayName":"GPT Fast","isDefault":false,"supportedReasoningEfforts":[{"reasoningEffort":"minimal","description":"Fast"}]}]}}
+        """);
+
+    var models = await modelsTask;
+    AssertEqual(2, models.Count, "model count");
+    AssertEqual("gpt-default", models[0].Model, "first model id");
+    AssertEqual("GPT Default", models[0].DisplayName, "first model display");
+    AssertTrue(models[0].IsDefault, "first model default");
+    AssertEqual("medium", models[0].SupportedReasoningEfforts[0], "first model effort");
 }
 
 static Task TestAppServerNotificationsUpdateThreadStateAsync()
@@ -513,6 +631,232 @@ static async Task TestViewModelCancellationSendsActiveThreadAndTurnAsync()
     await viewModel.DisposeAsync();
 }
 
+static async Task TestViewModelRestoresPersistedThreadAndResumesItAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var projectPath = temp.CreateDirectory("Repo");
+    var settings = new AppSettings();
+    settings.ProjectThreads.Add(new ProjectThreadState
+    {
+        ProjectPath = projectPath,
+        ThreadId = "thr_existing",
+        FinalResponse = "Earlier answer",
+        TimelineItems =
+        [
+            new CodexTimelineItem(
+                CodexTimelineItemKind.AgentMessage,
+                "Item completed",
+                "Earlier answer",
+                "item/completed",
+                DateTimeOffset.UtcNow)
+        ],
+        RawEvents = ["item/completed: {}"],
+        UpdatedAt = DateTimeOffset.UtcNow
+    });
+    var settingsStore = new FakeSettingsStore(settings);
+    var viewModel = CreateMainViewModel(transport, projectPath, AuthReadiness.LikelySignedIn, settingsStore);
+
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => string.Equals(viewModel.FinalResponse, "Earlier answer", StringComparison.Ordinal), "thread snapshot restore");
+
+    viewModel.PromptText = "Continue the same thread.";
+    viewModel.SubmitPromptCommand.Execute(null);
+
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend(
+        """
+        {"id":0,"result":{"userAgent":"codex-test","platformFamily":"windows","platformOs":"windows"}}
+        """);
+
+    await transport.WaitForClientMessageCountAsync(3);
+    var resumeRequest = ParseMessage(transport.ClientMessages[2]);
+    AssertJsonString("thread/resume", resumeRequest, "method", "view model resume method");
+    AssertJsonString("thr_existing", resumeRequest, "params.threadId", "view model resume thread id");
+    AssertJsonString(projectPath, resumeRequest, "params.cwd", "view model resume cwd");
+
+    transport.ServerSend(
+        """
+        {"id":1,"result":{"thread":{"id":"thr_existing"}}}
+        """);
+
+    await transport.WaitForClientMessageCountAsync(4);
+    var turnRequest = ParseMessage(transport.ClientMessages[3]);
+    AssertJsonString("turn/start", turnRequest, "method", "view model turn method");
+    AssertJsonString("thr_existing", turnRequest, "params.threadId", "view model turn thread id");
+
+    transport.ServerSend(
+        """
+        {"id":2,"result":{"turn":{"id":"turn_456"}}}
+        """);
+    transport.ServerSend(
+        """
+        {"method":"item/completed","params":{"item":{"type":"agentMessage","text":"Updated answer"},"threadId":"thr_existing","turnId":"turn_456"}}
+        """);
+    transport.ServerSend(
+        """
+        {"method":"turn/completed","params":{"threadId":"thr_existing","turn":{"id":"turn_456","status":"completed","items":[]}}}
+        """);
+
+    await WaitUntilAsync(() => settingsStore.SavedSettings.ProjectThreads.Any(thread =>
+        string.Equals(thread.ThreadId, "thr_existing", StringComparison.Ordinal) &&
+        string.Equals(thread.FinalResponse, "Updated answer", StringComparison.Ordinal)), "thread snapshot save");
+
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelSendsSelectedModelAndReasoningAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var projectPath = temp.CreateDirectory("Repo");
+    var settingsStore = new FakeSettingsStore();
+    var viewModel = CreateMainViewModel(transport, projectPath, AuthReadiness.LikelySignedIn, settingsStore);
+
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => string.Equals(viewModel.SelectedProjectPath, projectPath, StringComparison.OrdinalIgnoreCase), "project selection");
+
+    viewModel.ModelOverride = "gpt-test";
+    viewModel.ReasoningEffortOverride = "xhigh";
+    viewModel.PromptText = "Use selected overrides.";
+    viewModel.SubmitPromptCommand.Execute(null);
+
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend(
+        """
+        {"id":0,"result":{"userAgent":"codex-test","platformFamily":"windows","platformOs":"windows"}}
+        """);
+
+    await transport.WaitForClientMessageCountAsync(3);
+    transport.ServerSend(
+        """
+        {"id":1,"result":{"thread":{"id":"thr_123"}}}
+        """);
+
+    await transport.WaitForClientMessageCountAsync(4);
+    var turnRequest = ParseMessage(transport.ClientMessages[3]);
+    AssertJsonString("gpt-test", turnRequest, "params.model", "view model model override");
+    AssertJsonString("xhigh", turnRequest, "params.effort", "view model reasoning effort");
+
+    transport.ServerSend(
+        """
+        {"id":2,"result":{"turn":{"id":"turn_456"}}}
+        """);
+    transport.ServerSend(
+        """
+        {"method":"turn/completed","params":{"threadId":"thr_123","turn":{"id":"turn_456","status":"completed","items":[]}}}
+        """);
+
+    await WaitUntilAsync(() => string.Equals(settingsStore.SavedSettings.LastModelOverride, "gpt-test", StringComparison.Ordinal) &&
+        string.Equals(settingsStore.SavedSettings.LastReasoningEffortOverride, "xhigh", StringComparison.Ordinal), "override save");
+
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelLoadsModelOptionsAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var projectPath = temp.CreateDirectory("Repo");
+    var viewModel = CreateMainViewModel(transport, projectPath, AuthReadiness.LikelySignedIn);
+
+    await viewModel.InitializeAsync();
+    viewModel.LoadModelsCommand.Execute(null);
+
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend(
+        """
+        {"id":0,"result":{"userAgent":"codex-test","platformFamily":"windows","platformOs":"windows"}}
+        """);
+
+    await transport.WaitForClientMessageCountAsync(3);
+    var modelRequest = ParseMessage(transport.ClientMessages[2]);
+    AssertJsonString("model/list", modelRequest, "method", "view model model list method");
+
+    transport.ServerSend(
+        """
+        {"id":1,"result":{"data":[{"id":"default","model":"gpt-default","displayName":"GPT Default","isDefault":true,"supportedReasoningEfforts":[{"reasoningEffort":"medium","description":"Balanced"}]},{"id":"default-duplicate","model":"gpt-default","displayName":"GPT Default Duplicate","isDefault":false,"supportedReasoningEfforts":[]},{"id":"fast","model":"gpt-fast","displayName":"GPT Fast","isDefault":false,"supportedReasoningEfforts":[{"reasoningEffort":"minimal","description":"Fast"}]}]}}
+        """);
+
+    await WaitUntilAsync(() => viewModel.ModelOptions.Count == 2, "model options load");
+    AssertTrue(viewModel.ModelOptions.Contains("gpt-default"), "default model option");
+    AssertTrue(viewModel.ModelOptions.Contains("gpt-fast"), "fast model option");
+
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelExitCommandRequestsCloseAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var projectPath = temp.CreateDirectory("Repo");
+    var viewModel = CreateMainViewModel(transport, projectPath, AuthReadiness.LikelySignedIn);
+    var requested = false;
+    viewModel.CloseRequested += (_, _) => requested = true;
+
+    viewModel.ExitApplicationCommand.Execute(null);
+
+    await WaitUntilAsync(() => requested, "close requested");
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelShutdownCancelsRunningTurnAndDisposesTransportAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var projectPath = temp.CreateDirectory("Repo");
+    var settingsStore = new FakeSettingsStore();
+    var viewModel = CreateMainViewModel(transport, projectPath, AuthReadiness.LikelySignedIn, settingsStore);
+
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => string.Equals(viewModel.SelectedProjectPath, projectPath, StringComparison.OrdinalIgnoreCase), "project selection");
+
+    viewModel.PromptText = "Run until shutdown.";
+    viewModel.SubmitPromptCommand.Execute(null);
+
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend(
+        """
+        {"id":0,"result":{"userAgent":"codex-test","platformFamily":"windows","platformOs":"windows"}}
+        """);
+
+    await transport.WaitForClientMessageCountAsync(3);
+    transport.ServerSend(
+        """
+        {"id":1,"result":{"thread":{"id":"thr_123"}}}
+        """);
+
+    await transport.WaitForClientMessageCountAsync(4);
+    transport.ServerSend(
+        """
+        {"id":2,"result":{"turn":{"id":"turn_456"}}}
+        """);
+
+    await WaitUntilAsync(() => viewModel.IsTurnRunning, "turn running");
+
+    var shutdownTask = viewModel.ShutdownAsync();
+    await transport.WaitForClientMessageCountAsync(5);
+
+    var cancelRequest = ParseMessage(transport.ClientMessages[4]);
+    AssertJsonString("turn/interrupt", cancelRequest, "method", "shutdown cancel method");
+    AssertJsonString("thr_123", cancelRequest, "params.threadId", "shutdown cancel thread id");
+    AssertJsonString("turn_456", cancelRequest, "params.turnId", "shutdown cancel turn id");
+
+    transport.ServerSend(
+        """
+        {"id":3,"result":{"ok":true}}
+        """);
+
+    await shutdownTask;
+
+    AssertTrue(!viewModel.IsTurnRunning, "shutdown clears running flag");
+    AssertTrue(transport.IsDisposed, "shutdown disposes transport");
+    AssertEqual("thr_123", settingsStore.SavedSettings.ProjectThreads.Single().ThreadId, "shutdown saves thread id");
+}
+
 static async Task TestLiveCodexAppServerInitializesWhenEnabledAsync()
 {
     if (!string.Equals(Environment.GetEnvironmentVariable("NCA_RUN_LIVE_CODEX_SMOKE"), "1", StringComparison.Ordinal))
@@ -605,11 +949,12 @@ static JsonObject ParseMessage(string line)
 static MainViewModel CreateMainViewModel(
     FakeAppServerTransport transport,
     string projectPath,
-    AuthReadiness readiness)
+    AuthReadiness readiness,
+    FakeSettingsStore? settingsStore = null)
 {
     var installation = new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation");
     return new MainViewModel(
-        new FakeSettingsStore(),
+        settingsStore ?? new FakeSettingsStore(),
         new FakeCodexDiscoveryService(installation),
         new FakeCodexProcessService(transport),
         new FakeAuthService(new AuthenticationState(readiness, readiness.ToString(), "Test auth state.", @"C:\Users\Test\.codex")),
@@ -726,17 +1071,25 @@ internal sealed class TestLogger : IAppLogger
 
 internal sealed class FakeSettingsStore : ISettingsStore
 {
+    public FakeSettingsStore(AppSettings? initialSettings = null)
+    {
+        SavedSettings = initialSettings ?? new AppSettings();
+    }
+
     public string SettingsPath => Path.Combine(Path.GetTempPath(), "NativeCodexAssistant.Tests", "settings.json");
+
+    public AppSettings SavedSettings { get; private set; }
 
     public Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(new AppSettings());
+        return Task.FromResult(SavedSettings);
     }
 
     public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        SavedSettings = settings;
         return Task.CompletedTask;
     }
 }
@@ -794,6 +1147,8 @@ internal sealed class FakeAppServerTransport : IAppServerTransport
     private bool isDisposed;
 
     public IReadOnlyList<string> ClientMessages => clientMessages;
+
+    public bool IsDisposed => isDisposed;
 
     private readonly List<string> clientMessages = [];
 
@@ -877,6 +1232,8 @@ internal sealed class SlowWriteAppServerTransport : IAppServerTransport
     private bool isDisposed;
 
     public bool OverlappingWriteDetected { get; private set; }
+
+    public bool IsDisposed => isDisposed;
 
     public Task StartAsync(CancellationToken cancellationToken = default)
     {

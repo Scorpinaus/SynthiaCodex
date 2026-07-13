@@ -1,0 +1,18 @@
+timestamp: 2026-07-07 23:45:01
+event: subtask
+title: Added per-turn model and reasoning controls
+
+decision:
+Expose editable model override, dynamic model/list loading, and reasoning effort dropdown for turn/start.
+
+rationale:
+Users need per-turn control while Codex defaults remain available when fields are blank.
+
+lesson:
+Local app-server schema maps reasoning to params.effort, not reasoningEffort, and model options can come from model/list.
+
+working_pattern:
+Schema-first protocol additions with client payload tests and view-model command-flow tests.
+
+next_plan:
+Run the refreshed portable app, click Load near Model, choose model/reasoning, and verify the next turn uses those overrides.

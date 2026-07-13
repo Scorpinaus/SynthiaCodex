@@ -65,3 +65,40 @@
 - Verification: added client and view-model regression coverage; `cmd.exe /c dotnet run --project src\NativeCodexAssistant.Tests\NativeCodexAssistant.Tests.csproj` passed 15 tests.
 - Verification: `cmd.exe /c dotnet build NativeCodexAssistant.sln` passed with 0 warnings and 0 errors.
 - Verification: after closing the running app, `cmd.exe /c scripts\publish-portable.cmd` refreshed `portable\NativeCodexAssistant` with the fixed executable.
+
+## 2026-07-07 Per-Project Thread Persistence
+
+- Error: reopening the app lost the visible thread surface and the app started from an in-memory thread state only.
+- Learning: local `codex-cli 0.130.0-alpha.5` exposes `thread/resume`; generated schema says resume can load by `threadId`, and recommends using `threadId` whenever possible.
+- Decision: persist one thread snapshot per project in settings and resume that real Codex thread before starting the next turn.
+- Rationale: this keeps Phase 1 single-threaded while matching the expected "reopen and continue" behavior without faking context.
+- Implementation: `AppSettings` now stores `ProjectThreadState`; `CodexThreadService` can restore a visible snapshot; `CodexAppServerClient` sends `thread/resume`; `MainViewModel` restores the selected project's snapshot and resumes before `turn/start`.
+- Caveat: this is still a lightweight single-thread store, not the full Phase 3 multi-thread list/fork/archive UI.
+- Verification: `cmd.exe /c dotnet run --project src\NativeCodexAssistant.Tests\NativeCodexAssistant.Tests.csproj` passed 17 tests.
+- Verification: `cmd.exe /c dotnet build NativeCodexAssistant.sln` passed with 0 warnings and 0 errors.
+- Verification: `cmd.exe /c "set NCA_RUN_LIVE_CODEX_SMOKE=1&& dotnet run --project src\NativeCodexAssistant.Tests\NativeCodexAssistant.Tests.csproj"` passed all 17 tests, including live app-server initialization.
+- Verification: `cmd.exe /c scripts\publish-portable.cmd` refreshed `portable\NativeCodexAssistant` with the thread persistence build.
+
+## 2026-07-07 Per-Turn Model And Reasoning Controls
+
+- Error: the UI could not choose a model or reasoning effort per turn.
+- Learning: local `TurnStartParams` uses `model` for model override and `effort` for reasoning effort; supported efforts are `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
+- Learning: local app-server exposes `model/list`, so the app can load model IDs dynamically instead of hardcoding a stale model list.
+- Decision: add an editable model override selector, a reasoning dropdown, and a Load button that populates models from `model/list`.
+- Rationale: leaving the model field blank keeps Codex config/default behavior, while explicit values are sent on the next `turn/start`.
+- Implementation: `CodexTurnStartRequest` now includes optional model and reasoning effort; `CodexAppServerClient` sends `params.model` and `params.effort`; `MainViewModel` persists last-used overrides in settings.
+- Verification: `cmd.exe /c dotnet run --project src\NativeCodexAssistant.Tests\NativeCodexAssistant.Tests.csproj` passed 21 tests.
+- Verification: `cmd.exe /c dotnet build NativeCodexAssistant.sln` passed with 0 warnings and 0 errors.
+- Verification: `cmd.exe /c "set NCA_RUN_LIVE_CODEX_SMOKE=1&& dotnet run --project src\NativeCodexAssistant.Tests\NativeCodexAssistant.Tests.csproj"` passed all 21 tests, including live app-server initialization.
+- Verification: `cmd.exe /c scripts\publish-portable.cmd` refreshed `portable\NativeCodexAssistant` with the model/reasoning controls.
+
+## 2026-07-07 Graceful Application Close
+
+- Decision: route both the title-bar close button and a new in-app Exit button through `MainViewModel.ShutdownAsync`.
+- Rationale: closing should persist project/thread state, interrupt an active turn when possible, dispose the app-server client, and stop the stdio app-server transport before WPF exits.
+- Implementation: `MainWindow` now cancels the first close event, awaits shutdown, then closes for real; `MainViewModel` exposes `ExitApplicationCommand`, `CloseRequested`, and `ShutdownAsync`.
+- Implementation: shutdown sends `turn/interrupt` with `threadId` and `turnId` when a turn is active, using a short timeout so close does not hang forever.
+- Verification: added tests for close request and active-turn shutdown; `cmd.exe /c dotnet run --project src\NativeCodexAssistant.Tests\NativeCodexAssistant.Tests.csproj` passed 23 tests.
+- Verification: `cmd.exe /c dotnet build NativeCodexAssistant.sln` passed with 0 warnings and 0 errors.
+- Verification: `cmd.exe /c "set NCA_RUN_LIVE_CODEX_SMOKE=1&& dotnet run --project src\NativeCodexAssistant.Tests\NativeCodexAssistant.Tests.csproj"` passed all 23 tests, including live app-server initialization.
+- Verification: `cmd.exe /c scripts\publish-portable.cmd` refreshed `portable\NativeCodexAssistant` with the graceful close path.

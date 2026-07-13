@@ -1,0 +1,18 @@
+timestamp: 2026-07-07 23:56:09
+event: subtask
+title: Added graceful application close
+
+decision:
+Route Exit and window close through an async shutdown path that saves state, interrupts active turns, and disposes app-server transport.
+
+rationale:
+Closing the app should not abandon an active Codex process or lose the latest per-project thread state.
+
+lesson:
+WPF close needs an async Closing handler that cancels the first close event, awaits shutdown, then closes for real.
+
+working_pattern:
+Test shutdown at the view-model/protocol boundary with fake app-server messages before wiring WPF close UI.
+
+next_plan:
+Launch the portable app, start a long turn, then use Exit or the title-bar close button and verify the window closes without stale app-server errors.

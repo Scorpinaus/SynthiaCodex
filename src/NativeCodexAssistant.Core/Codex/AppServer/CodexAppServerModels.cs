@@ -13,14 +13,30 @@ public sealed record CodexThreadStartOptions(string? Model = null, CodexSandbox?
 
 public sealed record CodexThreadStartResult(string ThreadId);
 
+public sealed record CodexThreadResumeRequest(
+    string ThreadId,
+    string Cwd,
+    CodexSandbox Sandbox,
+    string? Model = null);
+
+public sealed record CodexThreadResumeResult(string ThreadId);
+
 public sealed record CodexTurnStartRequest(
     string ThreadId,
     string Prompt,
     string Cwd,
     CodexSandbox Sandbox,
-    string? Model = null);
+    string? Model = null,
+    CodexReasoningEffort? ReasoningEffort = null);
 
 public sealed record CodexTurnStartResult(string TurnId);
+
+public sealed record CodexModelOption(
+    string Id,
+    string Model,
+    string DisplayName,
+    bool IsDefault,
+    IReadOnlyList<string> SupportedReasoningEfforts);
 
 public sealed record AppServerNotification(string Method, JsonObject Params);
 
@@ -29,6 +45,16 @@ public enum CodexSandbox
     ReadOnly,
     WorkspaceWrite,
     DangerFullAccess
+}
+
+public enum CodexReasoningEffort
+{
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    XHigh
 }
 
 public static class CodexSandboxExtensions
@@ -55,6 +81,23 @@ public static class CodexSandboxExtensions
                 CodexSandbox.DangerFullAccess => "dangerFullAccess",
                 _ => throw new ArgumentOutOfRangeException(nameof(sandbox), sandbox, "Unknown sandbox value.")
             }
+        };
+    }
+}
+
+public static class CodexReasoningEffortExtensions
+{
+    public static string ToProtocolValue(this CodexReasoningEffort effort)
+    {
+        return effort switch
+        {
+            CodexReasoningEffort.None => "none",
+            CodexReasoningEffort.Minimal => "minimal",
+            CodexReasoningEffort.Low => "low",
+            CodexReasoningEffort.Medium => "medium",
+            CodexReasoningEffort.High => "high",
+            CodexReasoningEffort.XHigh => "xhigh",
+            _ => throw new ArgumentOutOfRangeException(nameof(effort), effort, "Unknown reasoning effort value.")
         };
     }
 }

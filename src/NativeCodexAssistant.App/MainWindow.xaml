@@ -10,14 +10,14 @@
         MinWidth="1100"
         Height="760"
         Width="1240">
-    <Grid Background="{StaticResource CanvasBrush}">
+    <Grid Background="{DynamicResource CanvasBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="64" />
             <RowDefinition Height="*" />
             <RowDefinition Height="32" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
+        <Border Grid.Row="0" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1">
             <Grid Margin="22,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -26,10 +26,15 @@
 
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock Text="Native Codex Assistant" FontSize="18" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding SelectedProjectPath, TargetNullValue=Select a project to begin}" Foreground="{StaticResource MutedInkBrush}" FontSize="12" />
+                    <TextBlock Text="{Binding SelectedProjectPath, TargetNullValue=Select a project to begin}" Foreground="{DynamicResource MutedInkBrush}" FontSize="12" />
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <ComboBox ItemsSource="{Binding ThemeOptions}"
+                              SelectedItem="{Binding SelectedTheme, UpdateSourceTrigger=PropertyChanged}"
+                              Width="92"
+                              Margin="0,0,8,0"
+                              ToolTip="Application theme" />
                     <Button Content="Refresh" Command="{Binding RefreshDiagnosticsCommand}" Margin="0,0,8,0" />
                     <Button Content="Sign in" Command="{Binding SignInChatGptCommand}" Style="{StaticResource PrimaryButton}" />
                     <Button Content="Exit" Command="{Binding ExitApplicationCommand}" Margin="8,0,0,0" />
@@ -44,12 +49,15 @@
                 <ColumnDefinition Width="340" />
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" Background="{StaticResource RailBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,0">
+            <Border Grid.Column="0" Background="{DynamicResource RailBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,1,0">
                 <Grid Margin="18">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="150" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <TextBlock Text="Projects" Style="{StaticResource SectionLabel}" />
@@ -66,17 +74,40 @@
                                         CommandParameter="{Binding Path}"
                                         HorizontalContentAlignment="Stretch"
                                         Background="Transparent"
-                                        BorderBrush="{StaticResource LineBrush}"
+                                        BorderBrush="{DynamicResource LineBrush}"
                                         Margin="0,0,0,8"
                                         Padding="10">
                                     <StackPanel>
                                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Text="{Binding Path}" Foreground="{StaticResource MutedInkBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Path}" Foreground="{DynamicResource MutedInkBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
                                     </StackPanel>
                                 </Button>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
+
+                    <TextBlock Grid.Row="3" Text="Threads" Style="{StaticResource SectionLabel}" Margin="0,14,0,8" />
+                    <ListBox Grid.Row="4"
+                             ItemsSource="{Binding ProjectThreads}"
+                             SelectedItem="{Binding SelectedThread}"
+                             BorderBrush="{DynamicResource LineBrush}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="6">
+                                    <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding ThreadId}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding ActivityLabel}" Foreground="{DynamicResource CopperBrush}" FontSize="10" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <WrapPanel Grid.Row="5" Margin="0,10,0,0">
+                        <Button Content="New" Command="{Binding NewThreadCommand}" Margin="0,0,6,6" />
+                        <Button Content="Resume" Command="{Binding ResumeThreadCommand}" Margin="0,0,6,6" />
+                        <Button Content="Fork" Command="{Binding ForkThreadCommand}" Margin="0,0,6,6" />
+                        <Button Content="Archive" Command="{Binding ArchiveThreadCommand}" Margin="0,0,6,6" />
+                        <Button Content="Unarchive" Command="{Binding UnarchiveThreadCommand}" Margin="0,0,0,6" />
+                    </WrapPanel>
                 </Grid>
             </Border>
 
@@ -87,7 +118,7 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="18">
+                <Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="18">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="6" />
@@ -95,21 +126,22 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
-                        <Border Background="{StaticResource CopperBrush}" CornerRadius="3" />
+                        <Border Background="{DynamicResource CopperBrush}" CornerRadius="3" />
                         <StackPanel Grid.Column="2">
                             <TextBlock Text="{Binding SelectedProjectName}" FontSize="22" FontWeight="SemiBold" />
-                            <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource MutedInkBrush}" Margin="0,4,0,0" />
+                            <TextBlock Text="{Binding StatusMessage}" Foreground="{DynamicResource MutedInkBrush}" Margin="0,4,0,0" />
                         </StackPanel>
                     </Grid>
                 </Border>
 
                 <TabControl Grid.Row="1" Margin="0,18">
                     <TabItem Header="Task">
-                <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="22">
+                <Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" Padding="22">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
@@ -123,10 +155,13 @@
                             <StackPanel>
                                 <TextBlock Text="Thread surface" Style="{StaticResource SectionLabel}" />
                                 <TextBlock Text="{Binding SelectedProjectName}" FontSize="20" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding SelectedProjectPath, TargetNullValue=Project workspace is empty}" Foreground="{StaticResource MutedInkBrush}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding SelectedProjectPath, TargetNullValue=Project workspace is empty}" Foreground="{DynamicResource MutedInkBrush}" Margin="0,8,0,0" TextWrapping="Wrap" />
                             </StackPanel>
 
-                            <TextBlock Grid.Column="1" Text="{Binding AuthSummary}" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Top" />
+                            <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+                                <TextBlock Text="{Binding AuthSummary}" Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Right" />
+                                <TextBlock Text="{Binding AppServerHealth, StringFormat=App-server: {0}}" Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Right" Margin="0,4,0,0" />
+                            </StackPanel>
                         </Grid>
 
                         <Grid Grid.Row="1" Margin="0,22,0,18">
@@ -146,7 +181,7 @@
                                     <ItemsControl ItemsSource="{Binding TimelineItems}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="0,10">
+                                                <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1" Padding="0,10">
                                                     <StackPanel>
                                                         <Grid>
                                                             <Grid.ColumnDefinitions>
@@ -154,10 +189,10 @@
                                                                 <ColumnDefinition Width="Auto" />
                                                             </Grid.ColumnDefinitions>
                                                             <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
-                                                            <TextBlock Grid.Column="1" Text="{Binding Kind}" Foreground="{StaticResource MutedInkBrush}" FontSize="11" />
+                                                            <TextBlock Grid.Column="1" Text="{Binding Kind}" Foreground="{DynamicResource MutedInkBrush}" FontSize="11" />
                                                         </Grid>
-                                                        <TextBlock Text="{Binding Detail}" Foreground="{StaticResource MutedInkBrush}" TextWrapping="Wrap" Margin="0,4,0,0" />
-                                                        <TextBlock Text="{Binding Method}" FontFamily="{StaticResource MonoFont}" FontSize="11" Foreground="{StaticResource MutedInkBrush}" Margin="0,4,0,0" />
+                                                        <TextBlock Text="{Binding Detail}" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                                        <TextBlock Text="{Binding Method}" FontFamily="{StaticResource MonoFont}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" Margin="0,4,0,0" />
                                                     </StackPanel>
                                                 </Border>
                                             </DataTemplate>
@@ -172,7 +207,7 @@
                                     <RowDefinition Height="*" />
                                 </Grid.RowDefinitions>
                                 <TextBlock Text="Final response" Style="{StaticResource SectionLabel}" />
-                                <Border Grid.Row="1" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="12">
+                                <Border Grid.Row="1" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="12">
                                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                                         <TextBlock Text="{Binding FinalResponse}" TextWrapping="Wrap" />
                                     </ScrollViewer>
@@ -223,12 +258,27 @@
                                 <Button Content="Cancel" Command="{Binding CancelTurnCommand}" MinWidth="96" />
                             </StackPanel>
                         </Grid>
+
+                        <Grid Grid.Row="4" Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Text="{Binding SteeringText, UpdateSourceTrigger=PropertyChanged}"
+                                     MinHeight="34"
+                                     Padding="8"
+                                     ToolTip="Send additional guidance to the active turn" />
+                            <Button Grid.Column="1"
+                                    Content="Steer active turn"
+                                    Command="{Binding SteerTurnCommand}"
+                                    Margin="10,0,0,0" />
+                        </Grid>
                     </Grid>
                 </Border>
                     </TabItem>
 
                     <TabItem Header="Changes">
-                        <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="18">
+                        <Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" Padding="18">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
@@ -245,8 +295,8 @@
                                         <TextBlock Text="Git workspace" Style="{StaticResource SectionLabel}" />
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="{Binding GitBranch}" FontSize="18" FontWeight="SemiBold" />
-                                            <TextBlock Text="  /  " Foreground="{StaticResource MutedInkBrush}" />
-                                            <TextBlock Text="{Binding GitStatusMessage}" Foreground="{StaticResource MutedInkBrush}" VerticalAlignment="Center" />
+                                            <TextBlock Text="  /  " Foreground="{DynamicResource MutedInkBrush}" />
+                                            <TextBlock Text="{Binding GitStatusMessage}" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" />
                                         </StackPanel>
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -273,7 +323,7 @@
                                         <ListBox Grid.Row="1"
                                                  ItemsSource="{Binding ChangedFiles}"
                                                  SelectedItem="{Binding SelectedGitFile}"
-                                                 BorderBrush="{StaticResource LineBrush}"
+                                                 BorderBrush="{DynamicResource LineBrush}"
                                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                                             <ListBox.ItemTemplate>
                                                 <DataTemplate>
@@ -284,9 +334,9 @@
                                                         </Grid.ColumnDefinitions>
                                                         <StackPanel>
                                                             <TextBlock Text="{Binding DisplayPath}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                                            <TextBlock Text="{Binding StatusSummary}" Foreground="{StaticResource MutedInkBrush}" FontSize="11" />
+                                                            <TextBlock Text="{Binding StatusSummary}" Foreground="{DynamicResource MutedInkBrush}" FontSize="11" />
                                                         </StackPanel>
-                                                        <TextBlock Grid.Column="1" Text="{Binding StatusCode}" FontFamily="{StaticResource MonoFont}" Foreground="{StaticResource CopperBrush}" Margin="8,0,0,0" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding StatusCode}" FontFamily="{StaticResource MonoFont}" Foreground="{DynamicResource CopperBrush}" Margin="8,0,0,0" />
                                                     </Grid>
                                                 </DataTemplate>
                                             </ListBox.ItemTemplate>
@@ -357,23 +407,26 @@
                 </TabControl>
             </Grid>
 
-            <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1,0,0,0">
+            <Border Grid.Column="2" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1,0,0,0">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="18">
                         <TextBlock Text="Diagnostics" Style="{StaticResource SectionLabel}" />
+                        <Button Content="Run Codex doctor"
+                                Command="{Binding RunCodexDoctorCommand}"
+                                Margin="0,0,0,14" />
 
-                        <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,14">
+                        <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,14">
                             <StackPanel>
                                 <TextBlock Text="Codex" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding CodexSummary}" Foreground="{StaticResource MutedInkBrush}" Margin="0,4,0,10" />
+                                <TextBlock Text="{Binding CodexSummary}" Foreground="{DynamicResource MutedInkBrush}" Margin="0,4,0,10" />
                                 <TextBlock Text="{Binding CodexExecutablePath}" Style="{StaticResource ValueText}" />
                             </StackPanel>
                         </Border>
 
-                        <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,14">
+                        <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,14">
                             <StackPanel>
                                 <TextBlock Text="Sign-in" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding AuthSummary}" Foreground="{StaticResource MutedInkBrush}" Margin="0,4,0,8" />
+                                <TextBlock Text="{Binding AuthSummary}" Foreground="{DynamicResource MutedInkBrush}" Margin="0,4,0,8" />
                                 <TextBlock Text="{Binding AuthDetail}" TextWrapping="Wrap" />
                                 <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                                     <Button Content="ChatGPT" Command="{Binding SignInChatGptCommand}" Margin="0,0,8,0" />
@@ -383,7 +436,7 @@
                             </StackPanel>
                         </Border>
 
-                        <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,14">
+                        <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,14">
                             <StackPanel>
                                 <TextBlock Text="Codex home" FontWeight="SemiBold" />
                                 <TextBlock Text="{Binding CodexHome}" Style="{StaticResource ValueText}" Margin="0,6,0,0" />
@@ -412,7 +465,7 @@
             </Border>
         </Grid>
 
-        <Border Grid.Row="2" Background="{StaticResource InkBrush}">
+        <Border Grid.Row="2" Background="{DynamicResource StatusBarBrush}">
             <Grid Margin="14,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />

@@ -20,6 +20,9 @@ var tests = new List<(string Name, Func<Task> Run)>
 {
     ("recent projects are deduped and capped", TestRecentProjectsAsync),
     ("settings round trip to json", TestSettingsRoundTripAsync),
+    ("view model applies and persists selected theme", TestViewModelAppliesAndPersistsThemeAsync),
+    ("codex utility runner executes doctor", TestCodexUtilityRunnerExecutesDoctorAsync),
+    ("view model surfaces codex doctor diagnostics", TestViewModelSurfacesCodexDoctorDiagnosticsAsync),
     ("auth detection reports file cache without reading token", TestAuthDetectionAsync),
     ("codex discovery skips unusable path candidates", TestCodexDiscoverySkipsUnusablePathCandidatesAsync),
     ("codex discovery checks OpenAI local app bin", TestCodexDiscoveryChecksOpenAiLocalAppBinAsync),
@@ -28,15 +31,25 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("app-server client starts thread and turn", TestAppServerStartsThreadAndTurnAsync),
     ("app-server client sends model and reasoning overrides", TestAppServerSendsModelAndReasoningOverridesAsync),
     ("app-server client resumes thread", TestAppServerResumesThreadAsync),
+    ("app-server client sends lifecycle requests", TestAppServerLifecycleRequestsAsync),
+    ("app-server initialize advertises notification opt outs", TestAppServerInitializeCapabilitiesAsync),
+    ("app-server client reports connection failure", TestAppServerConnectionFailureAsync),
     ("app-server client lists models", TestAppServerListsModelsAsync),
     ("app-server notifications update thread state", TestAppServerNotificationsUpdateThreadStateAsync),
     ("app-server v2 notifications update thread state", TestAppServerV2NotificationsUpdateThreadStateAsync),
     ("app-server error notifications show detail", TestAppServerErrorNotificationsShowDetailAsync),
+    ("thread store keeps multiple project threads", TestThreadStoreKeepsMultipleProjectThreadsAsync),
+    ("thread workspace routes parallel notifications", TestThreadWorkspaceRoutesParallelNotificationsAsync),
     ("view model preserves prompt after auth failed turn", TestViewModelPreservesPromptAfterAuthFailedTurnAsync),
     ("view model cancellation sends active thread and turn", TestViewModelCancellationSendsActiveThreadAndTurnAsync),
     ("view model restores persisted thread and resumes it", TestViewModelRestoresPersistedThreadAndResumesItAsync),
     ("view model sends selected model and reasoning", TestViewModelSendsSelectedModelAndReasoningAsync),
     ("view model loads model options", TestViewModelLoadsModelOptionsAsync),
+    ("view model manages multiple threads", TestViewModelManagesMultipleThreadsAsync),
+    ("view model forks archives and unarchives threads", TestViewModelForksArchivesAndUnarchivesThreadsAsync),
+    ("view model steers an active turn", TestViewModelSteersActiveTurnAsync),
+    ("view model runs parallel project threads", TestViewModelRunsParallelProjectThreadsAsync),
+    ("view model restarts app-server after crash", TestViewModelRestartsAppServerAfterCrashAsync),
     ("view model exit command requests close", TestViewModelExitCommandRequestsCloseAsync),
     ("view model shutdown cancels running turn and disposes transport", TestViewModelShutdownCancelsRunningTurnAndDisposesTransportAsync),
     ("git service reads status and diffs", TestGitServiceReadsStatusAndDiffsAsync),
@@ -47,7 +60,10 @@ var tests = new List<(string Name, Func<Task> Run)>
 };
 
 var failures = 0;
-foreach (var test in tests)
+var testFilter = Environment.GetEnvironmentVariable("NCA_TEST_FILTER");
+foreach (var test in tests.Where(test =>
+             string.IsNullOrWhiteSpace(testFilter) ||
+             test.Name.Contains(testFilter, StringComparison.OrdinalIgnoreCase)))
 {
     try
     {
@@ -137,6 +153,403 @@ static async Task TestSettingsRoundTripAsync()
     AssertEqual("thr_saved", loaded.ProjectThreads[0].ThreadId, "project thread id");
     AssertEqual("Saved final response", loaded.ProjectThreads[0].FinalResponse, "project thread final response");
     AssertTrue(File.Exists(store.SettingsPath), "settings file exists");
+}
+
+static async Task TestViewModelAppliesAndPersistsThemeAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var settingsStore = new FakeSettingsStore(new AppSettings { Theme = "Dark" });
+    var themeService = new FakeThemeService();
+    var viewModel = CreateMainViewModel(
+        new FakeAppServerTransport(),
+        temp.Root,
+        AuthReadiness.LikelySignedIn,
+        settingsStore,
+        themeService);
+
+    await viewModel.InitializeAsync();
+
+    AssertEqual("Dark", viewModel.SelectedTheme, "persisted theme selection");
+    AssertEqual("Dark", themeService.AppliedTheme, "persisted theme applied");
+
+    viewModel.SelectedTheme = "Light";
+    await WaitUntilAsync(() => settingsStore.SavedSettings.Theme == "Light", "theme setting saved");
+
+    AssertEqual("Light", themeService.AppliedTheme, "changed theme applied");
+}
+
+static async Task TestCodexUtilityRunnerExecutesDoctorAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var executable = Path.Combine(temp.Root, "fake-codex.cmd");
+    await File.WriteAllTextAsync(
+        executable,
+        "@echo off\r\nif \"%1\"==\"doctor\" (\r\n  echo DOCTOR_OK\r\n  echo diagnostic warning 1>&2\r\n  exit /b 0\r\n)\r\nexit /b 9\r\n");
+    var installation = new CodexInstallation(true, executable, "codex-test", "Codex test", "Test installation");
+    var runner = new CodexCliUtilityRunner(new TestLogger());
+
+    var result = await runner.RunDoctorAsync(installation);
+
+    AssertEqual(0, result.ExitCode, "doctor exit code");
+    AssertTrue(result.StandardOutput.Contains("DOCTOR_OK", StringComparison.Ordinal), "doctor stdout captured");
+    AssertTrue(result.StandardError.Contains("diagnostic warning", StringComparison.Ordinal), "doctor stderr captured");
+    AssertTrue(result.Succeeded, "doctor success state");
+}
+
+static async Task TestAppServerInitializeCapabilitiesAsync()
+{
+    var transport = new FakeAppServerTransport();
+    await using var client = new CodexAppServerClient(transport, TestClientMetadata());
+
+    var initializeTask = client.InitializeAsync(new CodexInitializeOptions(
+        ExperimentalApi: false,
+        OptOutNotificationMethods: ["thread/tokenUsage/updated"]));
+    await transport.WaitForClientMessageCountAsync(2);
+
+    var initialize = ParseMessage(transport.ClientMessages[0]);
+    AssertEqual(false, ResolvePath(initialize, "params.capabilities.experimentalApi")!.GetValue<bool>(), "experimental capability");
+    AssertJsonString(
+        "thread/tokenUsage/updated",
+        initialize,
+        "params.capabilities.optOutNotificationMethods.0",
+        "notification opt out");
+
+    transport.ServerSend("""{"id":0,"result":{"userAgent":"codex-test"}}""");
+    await initializeTask;
+}
+
+static async Task TestAppServerLifecycleRequestsAsync()
+{
+    var transport = new FakeAppServerTransport();
+    await using var client = new CodexAppServerClient(transport, TestClientMetadata());
+    await CompleteInitializeAsync(client, transport);
+
+    var listTask = client.ListThreadsAsync(new CodexThreadListRequest(@"C:\Repo", Archived: false, Limit: 25));
+    await transport.WaitForClientMessageCountAsync(3);
+    var list = ParseMessage(transport.ClientMessages[2]);
+    AssertJsonString("thread/list", list, "method", "thread list method");
+    AssertJsonString(@"C:\Repo", list, "params.cwd", "thread list cwd");
+    transport.ServerSend(
+        """
+        {"id":1,"result":{"data":[{"id":"thr_a","name":"First thread","preview":"First prompt","cwd":"C:\\Repo","createdAt":100,"updatedAt":200,"status":{"type":"idle"}}],"nextCursor":"next"}}
+        """);
+    var page = await listTask;
+    AssertEqual(1, page.Threads.Count, "listed thread count");
+    AssertEqual("thr_a", page.Threads[0].ThreadId, "listed thread id");
+    AssertEqual("First thread", page.Threads[0].Title, "listed thread title");
+    AssertEqual("next", page.NextCursor, "thread list cursor");
+
+    var forkTask = client.ForkThreadAsync(new CodexThreadForkRequest("thr_a", @"C:\Repo", CodexSandbox.WorkspaceWrite));
+    await transport.WaitForClientMessageCountAsync(4);
+    var fork = ParseMessage(transport.ClientMessages[3]);
+    AssertJsonString("thread/fork", fork, "method", "thread fork method");
+    AssertJsonString("thr_a", fork, "params.threadId", "fork source id");
+    transport.ServerSend("""{"id":2,"result":{"thread":{"id":"thr_fork"}}}""");
+    AssertEqual("thr_fork", (await forkTask).ThreadId, "forked thread id");
+
+    var archiveTask = client.ArchiveThreadAsync("thr_a");
+    await transport.WaitForClientMessageCountAsync(5);
+    AssertJsonString("thread/archive", ParseMessage(transport.ClientMessages[4]), "method", "archive method");
+    transport.ServerSend("""{"id":3,"result":{}}""");
+    await archiveTask;
+
+    var unarchiveTask = client.UnarchiveThreadAsync("thr_a");
+    await transport.WaitForClientMessageCountAsync(6);
+    AssertJsonString("thread/unarchive", ParseMessage(transport.ClientMessages[5]), "method", "unarchive method");
+    transport.ServerSend("""{"id":4,"result":{"thread":{"id":"thr_a"}}}""");
+    await unarchiveTask;
+
+    var steerTask = client.SteerTurnAsync(new CodexTurnSteerRequest("thr_a", "turn_1", "Focus on tests."));
+    await transport.WaitForClientMessageCountAsync(7);
+    var steer = ParseMessage(transport.ClientMessages[6]);
+    AssertJsonString("turn/steer", steer, "method", "turn steer method");
+    AssertJsonString("turn_1", steer, "params.expectedTurnId", "steer turn precondition");
+    AssertJsonString("Focus on tests.", steer, "params.input.0.text", "steer text");
+    transport.ServerSend("""{"id":5,"result":{"turnId":"turn_1"}}""");
+    AssertEqual("turn_1", (await steerTask).TurnId, "steered turn id");
+}
+
+static async Task TestAppServerConnectionFailureAsync()
+{
+    var transport = new FakeAppServerTransport();
+    await using var client = new CodexAppServerClient(transport, TestClientMetadata());
+    await CompleteInitializeAsync(client, transport);
+    AppServerConnectionFailedEventArgs? failure = null;
+    client.ConnectionFailed += (_, args) => failure = args;
+
+    var pending = client.ListThreadsAsync(new CodexThreadListRequest(@"C:\Repo"));
+    await transport.WaitForClientMessageCountAsync(3);
+    transport.ServerFail(new IOException("fake app-server crash"));
+
+    var requestFailed = false;
+    try
+    {
+        await pending;
+    }
+    catch (IOException ex) when (ex.Message.Contains("fake app-server crash", StringComparison.Ordinal))
+    {
+        requestFailed = true;
+    }
+
+    await WaitUntilAsync(() => failure is not null, "connection failure event");
+    AssertTrue(requestFailed, "pending request failed after connection crash");
+    AssertTrue(!client.IsHealthy, "client health after connection crash");
+    AssertTrue(failure!.Exception.Message.Contains("fake app-server crash", StringComparison.Ordinal), "connection failure detail");
+}
+
+static Task TestThreadStoreKeepsMultipleProjectThreadsAsync()
+{
+    var settings = new AppSettings();
+    var store = new ThreadStore();
+    var first = new ProjectThreadState
+    {
+        ProjectPath = @"C:\Repo",
+        ThreadId = "thr_1",
+        Title = "First",
+        CreatedAt = DateTimeOffset.Parse("2026-07-13T01:00:00Z")
+    };
+    var second = new ProjectThreadState
+    {
+        ProjectPath = @"C:\Repo",
+        ThreadId = "thr_2",
+        Title = "Second",
+        CreatedAt = DateTimeOffset.Parse("2026-07-13T02:00:00Z")
+    };
+
+    store.Upsert(settings, first);
+    store.Upsert(settings, second);
+    store.SetActive(settings, @"C:\Repo", "thr_2");
+    store.SetArchived(settings, @"C:\Repo", "thr_1", archived: true);
+
+    var threads = store.GetProjectThreads(settings, @"C:\Repo", includeArchived: true);
+    AssertEqual(2, threads.Count, "multi-thread count");
+    AssertEqual("thr_2", store.GetActive(settings, @"C:\Repo")?.ThreadId, "active project thread");
+    AssertTrue(threads.Single(thread => thread.ThreadId == "thr_1").IsArchived, "archived state");
+    AssertEqual(1, store.GetProjectThreads(settings, @"C:\Repo", includeArchived: false).Count, "archived filter");
+    return Task.CompletedTask;
+}
+
+static Task TestThreadWorkspaceRoutesParallelNotificationsAsync()
+{
+    var workspace = new CodexThreadWorkspace();
+    workspace.Restore(new ProjectThreadState { ProjectPath = @"C:\Repo", ThreadId = "thr_a" });
+    workspace.Restore(new ProjectThreadState { ProjectPath = @"C:\Repo", ThreadId = "thr_b" });
+
+    workspace.ApplyNotification(Notification(
+        "item/agentMessage/delta",
+        """{"threadId":"thr_a","turnId":"turn_a","delta":"alpha"}"""));
+    workspace.ApplyNotification(Notification(
+        "item/agentMessage/delta",
+        """{"threadId":"thr_b","turnId":"turn_b","delta":"beta"}"""));
+
+    AssertEqual("alpha", workspace.GetRequired("thr_a").FinalResponse, "first parallel response");
+    AssertEqual("beta", workspace.GetRequired("thr_b").FinalResponse, "second parallel response");
+    AssertEqual(1, workspace.GetRequired("thr_a").RawEvents.Count, "first parallel event count");
+    AssertEqual(1, workspace.GetRequired("thr_b").RawEvents.Count, "second parallel event count");
+    return Task.CompletedTask;
+}
+
+static async Task TestViewModelSurfacesCodexDoctorDiagnosticsAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var utilityRunner = new FakeCodexCliUtilityRunner(new CodexCliUtilityResult(
+        "doctor",
+        0,
+        "Doctor reports healthy",
+        string.Empty));
+    var viewModel = CreateMainViewModel(
+        new FakeAppServerTransport(),
+        temp.Root,
+        AuthReadiness.LikelySignedIn,
+        cliUtilityRunner: utilityRunner);
+
+    await viewModel.InitializeAsync();
+    viewModel.RunCodexDoctorCommand.Execute(null);
+    await WaitUntilAsync(
+        () => viewModel.Diagnostics.Any(line => line.Contains("Doctor reports healthy", StringComparison.Ordinal)),
+        "doctor output shown");
+
+    AssertEqual(1, utilityRunner.RunCount, "doctor invocation count");
+}
+
+static async Task TestViewModelManagesMultipleThreadsAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var settingsStore = new FakeSettingsStore();
+    var viewModel = CreateMainViewModel(transport, temp.Root, AuthReadiness.LikelySignedIn, settingsStore);
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "multi-thread project selected");
+
+    viewModel.NewThreadCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend("""{"id":0,"result":{"userAgent":"codex-test"}}""");
+    await transport.WaitForClientMessageCountAsync(3);
+    transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thr_one"}}}""");
+    await WaitUntilAsync(() => viewModel.ProjectThreads.Count == 1, "first thread created");
+    await WaitUntilAsync(() => viewModel.NewThreadCommand.CanExecute(null), "new thread command ready again");
+
+    viewModel.NewThreadCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(4);
+    transport.ServerSend("""{"id":2,"result":{"thread":{"id":"thr_two"}}}""");
+    await WaitUntilAsync(() => viewModel.ProjectThreads.Count == 2, "second thread created");
+    AssertEqual("thr_two", viewModel.SelectedThread?.ThreadId, "newest thread selected");
+
+    viewModel.SelectedThread = viewModel.ProjectThreads.Single(thread => thread.ThreadId == "thr_one");
+    viewModel.ResumeThreadCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(5);
+    AssertJsonString("thread/resume", ParseMessage(transport.ClientMessages[4]), "method", "resume selected thread method");
+    transport.ServerSend("""{"id":3,"result":{"thread":{"id":"thr_one"}}}""");
+    await WaitUntilAsync(() => viewModel.StatusMessage.Contains("resumed", StringComparison.OrdinalIgnoreCase), "selected thread resumed");
+
+    AssertEqual(2, settingsStore.SavedSettings.ProjectThreads.Count, "multiple threads persisted");
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelForksArchivesAndUnarchivesThreadsAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var viewModel = CreateMainViewModel(transport, temp.Root, AuthReadiness.LikelySignedIn);
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "fork project selected");
+
+    viewModel.NewThreadCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend("""{"id":0,"result":{}}""");
+    await transport.WaitForClientMessageCountAsync(3);
+    transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thr_source"}}}""");
+    await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "thr_source", "source thread created");
+
+    viewModel.ForkThreadCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(4);
+    AssertJsonString("thread/fork", ParseMessage(transport.ClientMessages[3]), "method", "view model fork method");
+    transport.ServerSend("""{"id":2,"result":{"thread":{"id":"thr_forked"}}}""");
+    await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "thr_forked", "fork selected");
+
+    viewModel.ArchiveThreadCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(5);
+    transport.ServerSend("""{"id":3,"result":{}}""");
+    await WaitUntilAsync(() => viewModel.SelectedThread?.IsArchived == true, "thread archived");
+
+    viewModel.UnarchiveThreadCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(6);
+    transport.ServerSend("""{"id":4,"result":{"thread":{"id":"thr_forked"}}}""");
+    await WaitUntilAsync(() => viewModel.SelectedThread?.IsArchived == false, "thread unarchived");
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelSteersActiveTurnAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var viewModel = CreateMainViewModel(transport, temp.Root, AuthReadiness.LikelySignedIn);
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "steering project selected");
+
+    viewModel.PromptText = "Start work.";
+    viewModel.SubmitPromptCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend("""{"id":0,"result":{}}""");
+    await transport.WaitForClientMessageCountAsync(3);
+    transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thr_steer"}}}""");
+    await transport.WaitForClientMessageCountAsync(4);
+    transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn_steer"}}}""");
+    await WaitUntilAsync(() => viewModel.IsTurnRunning, "steer turn running");
+
+    viewModel.SteeringText = "Concentrate on regression tests.";
+    await WaitUntilAsync(() => viewModel.SteerTurnCommand.CanExecute(null), "steer command enabled");
+    viewModel.SteerTurnCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(5);
+    var steer = ParseMessage(transport.ClientMessages[4]);
+    AssertJsonString("turn/steer", steer, "method", "view model steer method");
+    AssertJsonString("turn_steer", steer, "params.expectedTurnId", "view model steer turn id");
+    transport.ServerSend("""{"id":3,"result":{"turnId":"turn_steer"}}""");
+    await WaitUntilAsync(() => string.IsNullOrWhiteSpace(viewModel.SteeringText), "steering composer cleared");
+
+    transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thr_steer","turn":{"id":"turn_steer","status":"completed"}}}""");
+    await WaitUntilAsync(() => !viewModel.IsTurnRunning, "steered turn completed");
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelRestartsAppServerAfterCrashAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var firstTransport = new FakeAppServerTransport();
+    await using var secondTransport = new FakeAppServerTransport();
+    var processService = new SequenceCodexProcessService(firstTransport, secondTransport);
+    var viewModel = CreateMainViewModel(
+        firstTransport,
+        temp.Root,
+        AuthReadiness.LikelySignedIn,
+        processService: processService);
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "recovery project selected");
+
+    viewModel.NewThreadCommand.Execute(null);
+    await firstTransport.WaitForClientMessageCountAsync(2);
+    firstTransport.ServerSend("""{"id":0,"result":{}}""");
+    await firstTransport.WaitForClientMessageCountAsync(3);
+    firstTransport.ServerSend("""{"id":1,"result":{"thread":{"id":"thr_recover"}}}""");
+    await WaitUntilAsync(() => viewModel.AppServerHealth == "Healthy", "initial app-server healthy");
+
+    firstTransport.ServerFail(new IOException("simulated crash"));
+    await WaitUntilAsync(() => viewModel.AppServerHealth == "Recovering", "app-server recovering");
+
+    viewModel.LoadModelsCommand.Execute(null);
+    await secondTransport.WaitForClientMessageCountAsync(2);
+    secondTransport.ServerSend("""{"id":0,"result":{}}""");
+    await secondTransport.WaitForClientMessageCountAsync(3);
+    secondTransport.ServerSend("""{"id":1,"result":{"data":[]}}""");
+    await WaitUntilAsync(() => viewModel.AppServerHealth == "Healthy", "app-server recovered");
+    AssertEqual(2, processService.StartCount, "app-server restart count");
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelRunsParallelProjectThreadsAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var viewModel = CreateMainViewModel(transport, temp.Root, AuthReadiness.LikelySignedIn);
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "parallel project selected");
+
+    viewModel.PromptText = "First parallel task";
+    viewModel.SubmitPromptCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend("""{"id":0,"result":{}}""");
+    await transport.WaitForClientMessageCountAsync(3);
+    transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thr_parallel_a"}}}""");
+    await transport.WaitForClientMessageCountAsync(4);
+    transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn_parallel_a"}}}""");
+    await WaitUntilAsync(() => viewModel.IsTurnRunning, "first parallel turn running");
+
+    viewModel.NewThreadCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(5);
+    transport.ServerSend("""{"id":3,"result":{"thread":{"id":"thr_parallel_b"}}}""");
+    await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "thr_parallel_b", "second parallel thread selected");
+    AssertTrue(!viewModel.IsTurnRunning, "second thread composer remains available");
+
+    viewModel.PromptText = "Second parallel task";
+    viewModel.SubmitPromptCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(6);
+    transport.ServerSend("""{"id":4,"result":{"turn":{"id":"turn_parallel_b"}}}""");
+    await WaitUntilAsync(() => viewModel.ProjectThreads.All(thread => thread.IsRunning), "parallel running indicators");
+
+    transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thr_parallel_a","turn":{"id":"turn_parallel_a","status":"completed"}}}""");
+    await WaitUntilAsync(
+        () => !viewModel.ProjectThreads.Single(thread => thread.ThreadId == "thr_parallel_a").IsRunning,
+        "first parallel indicator completed");
+    AssertTrue(viewModel.IsTurnRunning, "second parallel turn remains active");
+
+    transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thr_parallel_b","turn":{"id":"turn_parallel_b","status":"completed"}}}""");
+    await WaitUntilAsync(() => !viewModel.IsTurnRunning, "second parallel turn completed");
+    await viewModel.DisposeAsync();
 }
 
 static async Task TestAuthDetectionAsync()
@@ -1048,6 +1461,14 @@ static async Task TestLiveCodexAppServerInitializesWhenEnabledAsync()
     if (string.Equals(Environment.GetEnvironmentVariable("NCA_RUN_LIVE_CODEX_TURN_SMOKE"), "1", StringComparison.Ordinal))
     {
         using var temp = TempWorkspace.Create();
+        var models = await client.ListModelsAsync();
+        var requestedModel = Environment.GetEnvironmentVariable("NCA_LIVE_CODEX_MODEL");
+        var liveModel = !string.IsNullOrWhiteSpace(requestedModel)
+            ? requestedModel
+            : models.FirstOrDefault(model => string.Equals(model.Model, "gpt-5.4", StringComparison.OrdinalIgnoreCase))?.Model
+              ?? models.FirstOrDefault(model => !model.Model.Contains("5.6", StringComparison.OrdinalIgnoreCase))?.Model;
+        Console.WriteLine($"LIVE model options: {string.Join(", ", models.Select(model => model.Model))}");
+        Console.WriteLine($"LIVE selected model: {liveModel ?? "Codex default"}");
         var threadService = new CodexThreadService();
         var turnCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         client.NotificationReceived += (_, notification) =>
@@ -1063,11 +1484,15 @@ static async Task TestLiveCodexAppServerInitializesWhenEnabledAsync()
             thread.ThreadId,
             "Reply with exactly PHASE1_SMOKE_OK. Do not edit files or run commands.",
             temp.Root,
-            CodexSandbox.WorkspaceWrite));
+            CodexSandbox.WorkspaceWrite,
+            liveModel));
 
         AssertTrue(!string.IsNullOrWhiteSpace(turn.TurnId), "live app-server turn id");
         await turnCompleted.Task.WaitAsync(TimeSpan.FromMinutes(3));
-        AssertEqual(CodexTurnStatus.Completed, threadService.ActiveTurnStatus, "live app-server turn completed");
+        AssertEqual(
+            CodexTurnStatus.Completed,
+            threadService.ActiveTurnStatus,
+            $"live app-server turn completed; detail: {threadService.LastErrorDetail ?? "none"}");
     }
 }
 
@@ -1107,18 +1532,25 @@ static MainViewModel CreateMainViewModel(
     FakeAppServerTransport transport,
     string projectPath,
     AuthReadiness readiness,
-    FakeSettingsStore? settingsStore = null)
+    FakeSettingsStore? settingsStore = null,
+    IThemeService? themeService = null,
+    ICodexCliUtilityRunner? cliUtilityRunner = null,
+    ICodexProcessService? processService = null)
 {
     var installation = new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation");
     return new MainViewModel(
         settingsStore ?? new FakeSettingsStore(),
         new FakeCodexDiscoveryService(installation),
-        new FakeCodexProcessService(transport),
+        processService ?? new FakeCodexProcessService(transport),
         new FakeAuthService(new AuthenticationState(readiness, readiness.ToString(), "Test auth state.", @"C:\Users\Test\.codex")),
         new FakeGitService(projectPath),
         new RecentProjectService(),
         new FakeFolderPicker(projectPath),
         new FakeUserInteractionService(),
+        themeService ?? new FakeThemeService(),
+        cliUtilityRunner ?? new FakeCodexCliUtilityRunner(),
+        new ThreadStore(),
+        new CodexThreadWorkspace(),
         new TestLogger());
 }
 
@@ -1276,6 +1708,27 @@ internal sealed class FakeCodexProcessService(FakeAppServerTransport transport) 
     }
 }
 
+internal sealed class SequenceCodexProcessService(params FakeAppServerTransport[] transports) : ICodexProcessService
+{
+    private int nextTransport;
+
+    public int StartCount { get; private set; }
+
+    public Task<IAppServerTransport> StartAppServerTransportAsync(
+        CodexInstallation installation,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (nextTransport >= transports.Length)
+        {
+            throw new InvalidOperationException("No fake app-server transport remains.");
+        }
+
+        StartCount++;
+        return Task.FromResult<IAppServerTransport>(transports[nextTransport++]);
+    }
+}
+
 internal sealed class FakeAuthService(AuthenticationState state) : IAuthService
 {
     public Task<AuthenticationState> GetAuthenticationStateAsync(CodexInstallation installation, CancellationToken cancellationToken = default)
@@ -1339,6 +1792,32 @@ internal sealed class FakeUserInteractionService : IUserInteractionService
     }
 }
 
+internal sealed class FakeThemeService : IThemeService
+{
+    public string AppliedTheme { get; private set; } = string.Empty;
+
+    public void ApplyTheme(string theme)
+    {
+        AppliedTheme = theme;
+    }
+}
+
+internal sealed class FakeCodexCliUtilityRunner(CodexCliUtilityResult? result = null) : ICodexCliUtilityRunner
+{
+    private readonly CodexCliUtilityResult result = result ?? new CodexCliUtilityResult("doctor", 0, "Doctor OK", string.Empty);
+
+    public int RunCount { get; private set; }
+
+    public Task<CodexCliUtilityResult> RunDoctorAsync(
+        CodexInstallation installation,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        RunCount++;
+        return Task.FromResult(result);
+    }
+}
+
 internal sealed class FakeAppServerTransport : IAppServerTransport
 {
     private readonly Queue<string> serverMessages = new();
@@ -1346,6 +1825,7 @@ internal sealed class FakeAppServerTransport : IAppServerTransport
     private readonly SemaphoreSlim clientMessageSignal = new(0);
     private bool isCompleted;
     private bool isDisposed;
+    private Exception? serverFailure;
 
     public IReadOnlyList<string> ClientMessages => clientMessages;
 
@@ -1373,6 +1853,11 @@ internal sealed class FakeAppServerTransport : IAppServerTransport
         {
             await serverMessageSignal.WaitAsync(cancellationToken);
 
+            if (serverFailure is not null)
+            {
+                throw serverFailure;
+            }
+
             while (serverMessages.Count > 0)
             {
                 yield return serverMessages.Dequeue();
@@ -1396,6 +1881,12 @@ internal sealed class FakeAppServerTransport : IAppServerTransport
     public void ServerSend(string line)
     {
         serverMessages.Enqueue(line);
+        serverMessageSignal.Release();
+    }
+
+    public void ServerFail(Exception exception)
+    {
+        serverFailure = exception;
         serverMessageSignal.Release();
     }
 

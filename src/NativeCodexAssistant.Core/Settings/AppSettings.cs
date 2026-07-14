@@ -1,5 +1,7 @@
 using NativeCodexAssistant.Core.Projects;
 using NativeCodexAssistant.Core.Codex.AppServer;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 
 namespace NativeCodexAssistant.Core.Settings;
 
@@ -18,11 +20,76 @@ public sealed class AppSettings
     public List<ProjectThreadState> ProjectThreads { get; set; } = [];
 }
 
-public sealed class ProjectThreadState
+public sealed class ProjectThreadState : INotifyPropertyChanged
 {
+    private bool isArchived;
+    private bool isRunning;
+    private string turnStatus = "Idle";
+
+    public event PropertyChangedEventHandler? PropertyChanged;
     public string ProjectPath { get; set; } = string.Empty;
 
     public string ThreadId { get; set; } = string.Empty;
+
+    public string Title { get; set; } = string.Empty;
+
+    public string Preview { get; set; } = string.Empty;
+
+    public bool IsArchived
+    {
+        get => isArchived;
+        set
+        {
+            if (isArchived == value)
+            {
+                return;
+            }
+
+            isArchived = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ActivityLabel));
+        }
+    }
+
+    public bool IsPinned { get; set; }
+
+    public bool IsActive { get; set; }
+
+    public bool IsRunning
+    {
+        get => isRunning;
+        set
+        {
+            if (isRunning == value)
+            {
+                return;
+            }
+
+            isRunning = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ActivityLabel));
+        }
+    }
+
+    public string TurnStatus
+    {
+        get => turnStatus;
+        set
+        {
+            if (string.Equals(turnStatus, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            turnStatus = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ActivityLabel));
+        }
+    }
+
+    public string Mode { get; set; } = "local";
+
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public string FinalResponse { get; set; } = string.Empty;
 
@@ -31,4 +98,13 @@ public sealed class ProjectThreadState
     public List<string> RawEvents { get; set; } = [];
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public string DisplayTitle => string.IsNullOrWhiteSpace(Title)
+        ? string.IsNullOrWhiteSpace(Preview) ? ThreadId : Preview
+        : Title;
+
+    public string ActivityLabel => IsArchived ? "Archived" : TurnStatus;
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

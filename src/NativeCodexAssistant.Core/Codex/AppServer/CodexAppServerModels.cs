@@ -6,6 +6,15 @@ public sealed record CodexAppServerClientMetadata(string Name, string Title, str
 
 public sealed record CodexAppServerSession(string? UserAgent, string? PlatformFamily, string? PlatformOs);
 
+public sealed record CodexInitializeOptions(
+    bool ExperimentalApi = false,
+    IReadOnlyList<string>? OptOutNotificationMethods = null)
+{
+    public static CodexInitializeOptions Default { get; } = new(
+        ExperimentalApi: false,
+        OptOutNotificationMethods: ["thread/tokenUsage/updated"]);
+}
+
 public sealed record CodexThreadStartOptions(string? Model = null, CodexSandbox? Sandbox = null)
 {
     public static CodexThreadStartOptions Default { get; } = new();
@@ -21,6 +30,33 @@ public sealed record CodexThreadResumeRequest(
 
 public sealed record CodexThreadResumeResult(string ThreadId);
 
+public sealed record CodexThreadListRequest(
+    string? Cwd = null,
+    bool? Archived = null,
+    int? Limit = null,
+    string? Cursor = null);
+
+public sealed record CodexThreadSummary(
+    string ThreadId,
+    string Title,
+    string Preview,
+    string? Cwd,
+    DateTimeOffset? CreatedAt,
+    DateTimeOffset? UpdatedAt,
+    string? Status);
+
+public sealed record CodexThreadListResult(
+    IReadOnlyList<CodexThreadSummary> Threads,
+    string? NextCursor);
+
+public sealed record CodexThreadForkRequest(
+    string ThreadId,
+    string Cwd,
+    CodexSandbox Sandbox,
+    string? Model = null);
+
+public sealed record CodexThreadForkResult(string ThreadId);
+
 public sealed record CodexTurnStartRequest(
     string ThreadId,
     string Prompt,
@@ -31,6 +67,10 @@ public sealed record CodexTurnStartRequest(
 
 public sealed record CodexTurnStartResult(string TurnId);
 
+public sealed record CodexTurnSteerRequest(string ThreadId, string ExpectedTurnId, string Prompt);
+
+public sealed record CodexTurnSteerResult(string TurnId);
+
 public sealed record CodexModelOption(
     string Id,
     string Model,
@@ -39,6 +79,11 @@ public sealed record CodexModelOption(
     IReadOnlyList<string> SupportedReasoningEfforts);
 
 public sealed record AppServerNotification(string Method, JsonObject Params);
+
+public sealed class AppServerConnectionFailedEventArgs(Exception exception) : EventArgs
+{
+    public Exception Exception { get; } = exception;
+}
 
 public enum CodexSandbox
 {

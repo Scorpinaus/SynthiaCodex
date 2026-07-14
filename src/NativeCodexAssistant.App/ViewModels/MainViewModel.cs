@@ -24,14 +24,25 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly IRecentProjectService recentProjectService;
     private readonly IFolderPicker folderPicker;
     private readonly IUserInteractionService userInteractionService;
+    private readonly IThemeService themeService;
+    private readonly ICodexCliUtilityRunner codexCliUtilityRunner;
+    private readonly ThreadStore threadStore;
+    private readonly CodexThreadWorkspace threadWorkspace;
     private readonly IAppLogger logger;
-    private readonly CodexThreadService threadService = new();
+    private CodexThreadService threadService = new();
     private readonly SynchronizationContext? synchronizationContext;
     private readonly AsyncRelayCommand submitPromptCommand;
     private readonly AsyncRelayCommand cancelTurnCommand;
     private readonly AsyncRelayCommand loadModelsCommand;
     private readonly AsyncRelayCommand exitApplicationCommand;
     private readonly AsyncRelayCommand refreshGitCommand;
+    private readonly AsyncRelayCommand runCodexDoctorCommand;
+    private readonly AsyncRelayCommand newThreadCommand;
+    private readonly AsyncRelayCommand resumeThreadCommand;
+    private readonly AsyncRelayCommand forkThreadCommand;
+    private readonly AsyncRelayCommand archiveThreadCommand;
+    private readonly AsyncRelayCommand unarchiveThreadCommand;
+    private readonly AsyncRelayCommand steerTurnCommand;
     private readonly AsyncRelayCommand showWorkingDiffCommand;
     private readonly AsyncRelayCommand showStagedDiffCommand;
     private readonly AsyncRelayCommand stageSelectedFileCommand;
@@ -50,6 +61,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string promptText = string.Empty;
     private string modelOverride = string.Empty;
     private string reasoningEffortOverride = string.Empty;
+    private string selectedTheme = "System";
+    private string steeringText = string.Empty;
+    private string appServerHealth = "Stopped";
     private string statusMessage = "Starting";
     private string? gitRepositoryRoot;
     private string gitBranch = "No repository";
@@ -57,6 +71,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string selectedDiff = "Select a changed file to inspect its diff.";
     private string commitMessage = string.Empty;
     private GitChangedFile? selectedGitFile;
+    private ProjectThreadState? selectedThread;
     private bool isBusy;
     private bool isGitBusy;
     private bool isShowingStagedDiff;
@@ -65,6 +80,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool isShuttingDown;
     private Task? shutdownTask;
     private CodexAppServerClient? appServerClient;
+    private CodexCliUtilityResult? lastDoctorResult;
+    private readonly HashSet<string> loadedThreadIds = new(StringComparer.Ordinal);
+    private readonly HashSet<string> runningThreadIds = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> activeTurnIds = new(StringComparer.Ordinal);
 
     public MainViewModel(
         ISettingsStore settingsStore,
@@ -75,6 +94,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         IRecentProjectService recentProjectService,
         IFolderPicker folderPicker,
         IUserInteractionService userInteractionService,
+        IThemeService themeService,
+        ICodexCliUtilityRunner codexCliUtilityRunner,
+        ThreadStore threadStore,
+        CodexThreadWorkspace threadWorkspace,
         IAppLogger logger)
     {
         this.settingsStore = settingsStore;
@@ -85,11 +108,22 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         this.recentProjectService = recentProjectService;
         this.folderPicker = folderPicker;
         this.userInteractionService = userInteractionService;
+        this.themeService = themeService;
+        this.codexCliUtilityRunner = codexCliUtilityRunner;
+        this.threadStore = threadStore;
+        this.threadWorkspace = threadWorkspace;
         this.logger = logger;
         synchronizationContext = SynchronizationContext.Current;
 
         BrowseProjectCommand = new AsyncRelayCommand(BrowseProjectAsync);
         RefreshDiagnosticsCommand = new AsyncRelayCommand(RefreshDiagnosticsAsync);
+        RunCodexDoctorCommand = runCodexDoctorCommand = new AsyncRelayCommand(RunCodexDoctorAsync, CanRunCodexDoctor);
+        NewThreadCommand = newThreadCommand = new AsyncRelayCommand(NewThreadAsync, CanManageThreads);
+        ResumeThreadCommand = resumeThreadCommand = new AsyncRelayCommand(ResumeSelectedThreadAsync, CanUseSelectedThread);
+        ForkThreadCommand = forkThreadCommand = new AsyncRelayCommand(ForkSelectedThreadAsync, CanUseSelectedThread);
+        ArchiveThreadCommand = archiveThreadCommand = new AsyncRelayCommand(ArchiveSelectedThreadAsync, CanArchiveSelectedThread);
+        UnarchiveThreadCommand = unarchiveThreadCommand = new AsyncRelayCommand(UnarchiveSelectedThreadAsync, CanUnarchiveSelectedThread);
+        SteerTurnCommand = steerTurnCommand = new AsyncRelayCommand(SteerTurnAsync, CanSteerTurn);
         OpenRecentProjectCommand = new AsyncRelayCommand(OpenRecentProjectAsync);
         SignInChatGptCommand = new AsyncRelayCommand(() => StartLoginAsync(LoginMethod.ChatGpt));
         SignInDeviceCodeCommand = new AsyncRelayCommand(() => StartLoginAsync(LoginMethod.DeviceCode));
@@ -123,6 +157,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public ObservableCollection<GitChangedFile> ChangedFiles { get; } = [];
 
+    public ObservableCollection<ProjectThreadState> ProjectThreads { get; } = [];
+
     public ObservableCollection<string> ReasoningEffortOptions { get; } =
     [
         string.Empty,
@@ -134,9 +170,25 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         "xhigh"
     ];
 
+    public IReadOnlyList<string> ThemeOptions { get; } = ["System", "Light", "Dark"];
+
     public ICommand BrowseProjectCommand { get; }
 
     public ICommand RefreshDiagnosticsCommand { get; }
+
+    public ICommand RunCodexDoctorCommand { get; }
+
+    public ICommand NewThreadCommand { get; }
+
+    public ICommand ResumeThreadCommand { get; }
+
+    public ICommand ForkThreadCommand { get; }
+
+    public ICommand ArchiveThreadCommand { get; }
+
+    public ICommand UnarchiveThreadCommand { get; }
+
+    public ICommand SteerTurnCommand { get; }
 
     public ICommand OpenRecentProjectCommand { get; }
 
@@ -183,6 +235,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 refreshGitCommand.RaiseCanExecuteChanged();
                 openInEditorCommand.RaiseCanExecuteChanged();
                 revealInExplorerCommand.RaiseCanExecuteChanged();
+                RaiseThreadCommandStates();
             }
         }
     }
@@ -222,6 +275,55 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         get => reasoningEffortOverride;
         set => SetProperty(ref reasoningEffortOverride, value);
+    }
+
+    public string SelectedTheme
+    {
+        get => selectedTheme;
+        set
+        {
+            var normalized = NormalizeTheme(value);
+            if (!SetProperty(ref selectedTheme, normalized))
+            {
+                return;
+            }
+
+            themeService.ApplyTheme(normalized);
+            settings.Theme = normalized;
+            _ = SaveThemeSelectionAsync();
+        }
+    }
+
+    public ProjectThreadState? SelectedThread
+    {
+        get => selectedThread;
+        set
+        {
+            if (!SetProperty(ref selectedThread, value))
+            {
+                return;
+            }
+
+            SelectThread(value);
+        }
+    }
+
+    public string SteeringText
+    {
+        get => steeringText;
+        set
+        {
+            if (SetProperty(ref steeringText, value))
+            {
+                steerTurnCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string AppServerHealth
+    {
+        get => appServerHealth;
+        private set => SetProperty(ref appServerHealth, value);
     }
 
     public string FinalResponse =>
@@ -289,7 +391,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsBusy
     {
         get => isBusy;
-        private set => SetProperty(ref isBusy, value);
+        private set
+        {
+            if (SetProperty(ref isBusy, value))
+            {
+                runCodexDoctorCommand.RaiseCanExecuteChanged();
+            }
+        }
     }
 
     public bool IsGitBusy
@@ -313,6 +421,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 submitPromptCommand.RaiseCanExecuteChanged();
                 cancelTurnCommand.RaiseCanExecuteChanged();
+                RaiseThreadCommandStates();
             }
         }
     }
@@ -337,6 +446,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         logger.Log(AppLogLevel.Information, "view_model_initialize", "Main view model initialization started.");
         settings = await settingsStore.LoadAsync().ConfigureAwait(true);
+        selectedTheme = NormalizeTheme(settings.Theme);
+        OnPropertyChanged(nameof(SelectedTheme));
+        themeService.ApplyTheme(selectedTheme);
         ModelOverride = settings.LastModelOverride ?? string.Empty;
         ReasoningEffortOverride = settings.LastReasoningEffortOverride ?? string.Empty;
         RefreshRecentProjects();
@@ -393,6 +505,174 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             new Dictionary<string, string?> { ["path"] = SelectedProjectPath });
     }
 
+    private async Task NewThreadAsync()
+    {
+        if (!CanManageThreads())
+        {
+            StatusMessage = "Select a project and sign in before creating a thread";
+            return;
+        }
+
+        try
+        {
+            var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
+            var result = await client.StartThreadAsync(CodexThreadStartOptions.Default).ConfigureAwait(true);
+            var state = CreateThreadState(result.ThreadId, $"Thread {ProjectThreads.Count + 1}");
+            loadedThreadIds.Add(result.ThreadId);
+            RefreshProjectThreads(result.ThreadId);
+            StatusMessage = "New Codex thread created";
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Error, "thread_create_failed", "Could not create a Codex thread.", exception: ex);
+        }
+    }
+
+    private async Task ResumeSelectedThreadAsync()
+    {
+        if (!CanUseSelectedThread() || SelectedProjectPath is null || SelectedThread is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
+            var result = await client.ResumeThreadAsync(new CodexThreadResumeRequest(
+                SelectedThread.ThreadId,
+                SelectedProjectPath,
+                CodexSandbox.WorkspaceWrite,
+                NormalizeOverride(ModelOverride))).ConfigureAwait(true);
+            loadedThreadIds.Add(result.ThreadId);
+            activeThreadLoaded = true;
+            StatusMessage = "Codex thread resumed";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Error, "thread_resume_failed", "Could not resume the selected thread.", exception: ex);
+        }
+    }
+
+    private async Task ForkSelectedThreadAsync()
+    {
+        if (!CanUseSelectedThread() || SelectedProjectPath is null || SelectedThread is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
+            var result = await client.ForkThreadAsync(new CodexThreadForkRequest(
+                SelectedThread.ThreadId,
+                SelectedProjectPath,
+                CodexSandbox.WorkspaceWrite,
+                NormalizeOverride(ModelOverride))).ConfigureAwait(true);
+            var state = CreateThreadState(result.ThreadId, $"Fork of {SelectedThread.DisplayTitle}");
+            state.Preview = SelectedThread.Preview;
+            loadedThreadIds.Add(result.ThreadId);
+            RefreshProjectThreads(result.ThreadId);
+            StatusMessage = "Codex thread forked";
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Error, "thread_fork_failed", "Could not fork the selected thread.", exception: ex);
+        }
+    }
+
+    private async Task ArchiveSelectedThreadAsync()
+    {
+        if (!CanArchiveSelectedThread() || SelectedThread is null || SelectedProjectPath is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
+            await client.ArchiveThreadAsync(SelectedThread.ThreadId).ConfigureAwait(true);
+            threadStore.SetArchived(settings, SelectedProjectPath, SelectedThread.ThreadId, archived: true);
+            StatusMessage = "Codex thread archived";
+            RefreshProjectThreads(SelectedThread.ThreadId);
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Error, "thread_archive_failed", "Could not archive the selected thread.", exception: ex);
+        }
+    }
+
+    private async Task UnarchiveSelectedThreadAsync()
+    {
+        if (!CanUnarchiveSelectedThread() || SelectedThread is null || SelectedProjectPath is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
+            await client.UnarchiveThreadAsync(SelectedThread.ThreadId).ConfigureAwait(true);
+            threadStore.SetArchived(settings, SelectedProjectPath, SelectedThread.ThreadId, archived: false);
+            StatusMessage = "Codex thread unarchived";
+            RefreshProjectThreads(SelectedThread.ThreadId);
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Error, "thread_unarchive_failed", "Could not unarchive the selected thread.", exception: ex);
+        }
+    }
+
+    private async Task SteerTurnAsync()
+    {
+        if (!CanSteerTurn() || appServerClient is null || activeThreadId is null || activeTurnId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await appServerClient.SteerTurnAsync(new CodexTurnSteerRequest(
+                activeThreadId,
+                activeTurnId,
+                SteeringText.Trim())).ConfigureAwait(true);
+            SteeringText = string.Empty;
+            StatusMessage = "Steering sent to active turn";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Error, "turn_steer_failed", "Could not steer the active turn.", exception: ex);
+        }
+    }
+
+    private ProjectThreadState CreateThreadState(string threadId, string title)
+    {
+        var projectPath = SelectedProjectPath
+            ?? throw new InvalidOperationException("A project must be selected before creating a thread record.");
+        var state = new ProjectThreadState
+        {
+            ProjectPath = projectPath,
+            ThreadId = threadId,
+            Title = title,
+            IsActive = true,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        threadStore.Upsert(settings, state);
+        threadStore.SetActive(settings, projectPath, threadId);
+        threadWorkspace.Restore(state);
+        return state;
+    }
+
     private async Task RefreshDiagnosticsAsync()
     {
         IsBusy = true;
@@ -411,6 +691,57 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             IsBusy = false;
         }
     }
+
+    private async Task RunCodexDoctorAsync()
+    {
+        if (!CanRunCodexDoctor())
+        {
+            StatusMessage = "Codex doctor is unavailable";
+            return;
+        }
+
+        IsBusy = true;
+        StatusMessage = "Running Codex doctor";
+        try
+        {
+            lastDoctorResult = await codexCliUtilityRunner.RunDoctorAsync(currentCodex).ConfigureAwait(true);
+            RefreshDiagnosticLines();
+            StatusMessage = lastDoctorResult.Succeeded
+                ? "Codex doctor completed"
+                : $"Codex doctor failed with exit code {lastDoctorResult.ExitCode}";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Error, "codex_doctor_failed", "Could not run codex doctor.", exception: ex);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private bool CanRunCodexDoctor() => !IsShuttingDown && !IsBusy && currentCodex.IsFound;
+
+    private async Task SaveThemeSelectionAsync()
+    {
+        try
+        {
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            logger.Log(AppLogLevel.Warning, "theme_save_failed", "Could not save the selected theme.", exception: ex);
+        }
+    }
+
+    private static string NormalizeTheme(string? theme) =>
+        theme?.Trim().ToLowerInvariant() switch
+        {
+            "dark" => "Dark",
+            "light" => "Light",
+            _ => "System"
+        };
 
     private async Task RefreshGitAsync()
     {
@@ -704,6 +1035,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
             activeThreadId = await EnsureActiveThreadAsync(client).ConfigureAwait(true);
+            runningThreadIds.Add(activeThreadId);
+            UpdateThreadActivity(activeThreadId, isRunning: true, "Running");
+            IsTurnRunning = true;
 
             var submittedPrompt = PromptText.Trim();
             settings.LastModelOverride = NormalizeOverride(ModelOverride);
@@ -717,11 +1051,18 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 ParseReasoningEffort(ReasoningEffortOverride))).ConfigureAwait(true);
 
             activeTurnId = turn.TurnId;
+            activeTurnIds[activeThreadId] = turn.TurnId;
+            threadWorkspace.RegisterTurn(activeThreadId, turn.TurnId);
             cancelTurnCommand.RaiseCanExecuteChanged();
             StatusMessage = "Codex turn running";
         }
         catch (Exception ex)
         {
+            if (!string.IsNullOrWhiteSpace(activeThreadId))
+            {
+                runningThreadIds.Remove(activeThreadId);
+                activeTurnIds.Remove(activeThreadId);
+            }
             IsTurnRunning = false;
             StatusMessage = ex.Message;
             logger.Log(AppLogLevel.Error, "codex_task_start_failed", "Could not start Codex task.", exception: ex);
@@ -738,6 +1079,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (string.IsNullOrWhiteSpace(activeThreadId))
         {
             var thread = await client.StartThreadAsync(CodexThreadStartOptions.Default).ConfigureAwait(true);
+            CreateThreadState(thread.ThreadId, $"Thread {ProjectThreads.Count + 1}");
+            RefreshProjectThreads(thread.ThreadId);
+            loadedThreadIds.Add(thread.ThreadId);
             activeThreadLoaded = true;
             return thread.ThreadId;
         }
@@ -754,6 +1098,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 SelectedProjectPath,
                 CodexSandbox.WorkspaceWrite)).ConfigureAwait(true);
             activeThreadLoaded = true;
+            loadedThreadIds.Add(resumed.ThreadId);
             StatusMessage = "Codex thread resumed";
             return resumed.ThreadId;
         }
@@ -767,6 +1112,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 ex);
 
             var thread = await client.StartThreadAsync(CodexThreadStartOptions.Default).ConfigureAwait(true);
+            CreateThreadState(thread.ThreadId, $"Thread {ProjectThreads.Count + 1}");
+            RefreshProjectThreads(thread.ThreadId);
+            loadedThreadIds.Add(thread.ThreadId);
             activeThreadLoaded = true;
             StatusMessage = "Previous thread could not be resumed; started a new Codex thread";
             return thread.ThreadId;
@@ -790,7 +1138,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             await appServerClient.CancelTurnAsync(activeThreadId, activeTurnId).ConfigureAwait(true);
-            IsTurnRunning = false;
+            UpdateThreadActivity(activeThreadId, isRunning: true, "Cancelling");
             StatusMessage = "Cancellation requested";
         }
         catch (Exception ex)
@@ -828,32 +1176,45 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         IsTurnRunning = false;
         activeTurnId = null;
+        activeTurnIds.Clear();
+        runningThreadIds.Clear();
         StatusMessage = "Application closed";
     }
 
     private async Task TryCancelRunningTurnForShutdownAsync(CancellationToken cancellationToken)
     {
-        if (!IsTurnRunning || appServerClient is null || string.IsNullOrWhiteSpace(activeThreadId) || string.IsNullOrWhiteSpace(activeTurnId))
+        if (appServerClient is null)
         {
             return;
         }
 
-        try
+        var turns = activeTurnIds.Count > 0
+            ? activeTurnIds.ToArray()
+            : !string.IsNullOrWhiteSpace(activeThreadId) && !string.IsNullOrWhiteSpace(activeTurnId)
+                ? [new KeyValuePair<string, string>(activeThreadId, activeTurnId)]
+                : [];
+
+        foreach (var turn in turns)
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(2));
-            await appServerClient.CancelTurnAsync(activeThreadId, activeTurnId, timeout.Token).ConfigureAwait(true);
-            IsTurnRunning = false;
-            StatusMessage = "Cancellation requested";
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(TimeSpan.FromSeconds(2));
+                await appServerClient.CancelTurnAsync(turn.Key, turn.Value, timeout.Token).ConfigureAwait(true);
+                runningThreadIds.Remove(turn.Key);
+                StatusMessage = "Cancellation requested";
+            }
+            catch (OperationCanceledException ex)
+            {
+                logger.Log(AppLogLevel.Warning, "shutdown_cancel_turn_timed_out", "Timed out while cancelling an active turn during shutdown.", exception: ex);
+            }
+            catch (Exception ex)
+            {
+                logger.Log(AppLogLevel.Warning, "shutdown_cancel_turn_failed", "Could not cancel an active turn during shutdown.", exception: ex);
+            }
         }
-        catch (OperationCanceledException ex)
-        {
-            logger.Log(AppLogLevel.Warning, "shutdown_cancel_turn_timed_out", "Timed out while cancelling the active turn during shutdown.", exception: ex);
-        }
-        catch (Exception ex)
-        {
-            logger.Log(AppLogLevel.Warning, "shutdown_cancel_turn_failed", "Could not cancel the active turn during shutdown.", exception: ex);
-        }
+
+        IsTurnRunning = false;
     }
 
     private async Task LoadModelOptionsAsync()
@@ -928,6 +1289,38 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             !string.IsNullOrWhiteSpace(activeTurnId);
     }
 
+    private bool CanManageThreads() =>
+        !IsShuttingDown &&
+        !string.IsNullOrWhiteSpace(SelectedProjectPath) &&
+        currentCodex.IsFound &&
+        currentAuth.Readiness is not (AuthReadiness.Unavailable or AuthReadiness.NotSignedIn);
+
+    private bool CanUseSelectedThread() => CanManageThreads() && SelectedThread is not null;
+
+    private bool CanArchiveSelectedThread() =>
+        CanUseSelectedThread() && SelectedThread?.IsArchived == false && !IsTurnRunning;
+
+    private bool CanUnarchiveSelectedThread() =>
+        CanUseSelectedThread() && SelectedThread?.IsArchived == true;
+
+    private bool CanSteerTurn() =>
+        !IsShuttingDown &&
+        IsTurnRunning &&
+        appServerClient is not null &&
+        !string.IsNullOrWhiteSpace(activeThreadId) &&
+        !string.IsNullOrWhiteSpace(activeTurnId) &&
+        !string.IsNullOrWhiteSpace(SteeringText);
+
+    private void RaiseThreadCommandStates()
+    {
+        newThreadCommand.RaiseCanExecuteChanged();
+        resumeThreadCommand.RaiseCanExecuteChanged();
+        forkThreadCommand.RaiseCanExecuteChanged();
+        archiveThreadCommand.RaiseCanExecuteChanged();
+        unarchiveThreadCommand.RaiseCanExecuteChanged();
+        steerTurnCommand.RaiseCanExecuteChanged();
+    }
+
     private bool CanUseGitProject() =>
         !IsShuttingDown && !IsGitBusy && !string.IsNullOrWhiteSpace(SelectedProjectPath);
 
@@ -971,10 +1364,18 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task<CodexAppServerClient> EnsureAppServerClientAsync()
     {
-        if (appServerClient is not null)
+        if (appServerClient?.IsHealthy == true)
         {
             return appServerClient;
         }
+
+        var isRecovery = appServerClient is not null || string.Equals(AppServerHealth, "Recovering", StringComparison.Ordinal);
+        if (appServerClient is not null)
+        {
+            await DisposeAppServerClientAsync().ConfigureAwait(true);
+        }
+
+        AppServerHealth = isRecovery ? "Recovering" : "Starting";
 
         var transport = await codexProcessService.StartAppServerTransportAsync(currentCodex).ConfigureAwait(true);
         var client = new CodexAppServerClient(
@@ -983,15 +1384,48 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             client.NotificationReceived += OnAppServerNotificationReceived;
-            await client.InitializeAsync().ConfigureAwait(true);
+            client.ConnectionFailed += OnAppServerConnectionFailed;
+            await client.InitializeAsync(CodexInitializeOptions.Default).ConfigureAwait(true);
             appServerClient = client;
+            AppServerHealth = "Healthy";
             return appServerClient;
         }
         catch
         {
             client.NotificationReceived -= OnAppServerNotificationReceived;
+            client.ConnectionFailed -= OnAppServerConnectionFailed;
             await client.DisposeAsync().ConfigureAwait(true);
+            AppServerHealth = "Unavailable";
             throw;
+        }
+    }
+
+    private void OnAppServerConnectionFailed(object? sender, AppServerConnectionFailedEventArgs args)
+    {
+        void ApplyFailure()
+        {
+            foreach (var threadId in runningThreadIds.ToArray())
+            {
+                UpdateThreadActivity(threadId, isRunning: false, "Recovery needed");
+            }
+
+            runningThreadIds.Clear();
+            activeTurnIds.Clear();
+            loadedThreadIds.Clear();
+            activeThreadLoaded = false;
+            activeTurnId = null;
+            IsTurnRunning = false;
+            AppServerHealth = "Recovering";
+            StatusMessage = $"Codex app-server stopped: {args.Exception.Message}. The next action will restart it.";
+        }
+
+        if (synchronizationContext is null)
+        {
+            ApplyFailure();
+        }
+        else
+        {
+            synchronizationContext.Post(_ => ApplyFailure(), null);
         }
     }
 
@@ -1008,47 +1442,148 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void ApplyNotification(AppServerNotification notification)
     {
-        threadService.ApplyNotification(notification);
-        activeTurnId = threadService.ActiveTurnId ?? activeTurnId;
+        var routedThreadId = threadWorkspace.ApplyNotification(notification);
+        if (string.IsNullOrWhiteSpace(routedThreadId))
+        {
+            threadService.ApplyNotification(notification);
+            routedThreadId = activeThreadId;
+        }
+
+        var routedService = !string.IsNullOrWhiteSpace(routedThreadId) && threadWorkspace.ThreadIds.Contains(routedThreadId)
+            ? threadWorkspace.GetRequired(routedThreadId)
+            : threadService;
+        if (!string.IsNullOrWhiteSpace(routedThreadId) && !string.IsNullOrWhiteSpace(routedService.ActiveTurnId))
+        {
+            activeTurnIds[routedThreadId] = routedService.ActiveTurnId;
+            threadWorkspace.RegisterTurn(routedThreadId, routedService.ActiveTurnId);
+        }
+
+        if (string.Equals(routedThreadId, activeThreadId, StringComparison.Ordinal))
+        {
+            threadService = routedService;
+            activeTurnId = routedService.ActiveTurnId ?? activeTurnId;
+        }
+
         if (notification.Method == "turn/completed")
         {
-            IsTurnRunning = false;
-            if (threadService.ActiveTurnStatus == CodexTurnStatus.Completed)
+            if (!string.IsNullOrWhiteSpace(routedThreadId))
             {
-                PromptText = string.Empty;
-                StatusMessage = "Codex turn completed";
+                runningThreadIds.Remove(routedThreadId);
+                activeTurnIds.Remove(routedThreadId);
+                UpdateThreadActivity(
+                    routedThreadId,
+                    isRunning: false,
+                    routedService.ActiveTurnStatus.ToString());
             }
-            else if (threadService.RequiresAuthentication)
+
+            if (string.Equals(routedThreadId, activeThreadId, StringComparison.Ordinal))
+            {
+                IsTurnRunning = false;
+                activeTurnId = null;
+            }
+
+            if (routedService.ActiveTurnStatus == CodexTurnStatus.Completed)
+            {
+                if (string.Equals(routedThreadId, activeThreadId, StringComparison.Ordinal))
+                {
+                    PromptText = string.Empty;
+                    StatusMessage = "Codex turn completed";
+                }
+            }
+            else if (routedService.RequiresAuthentication)
             {
                 StatusMessage = "Codex authentication failed. Sign in and retry.";
             }
             else
             {
-                StatusMessage = $"Codex turn {threadService.ActiveTurnStatus.ToString().ToLowerInvariant()}";
+                StatusMessage = $"Codex turn {routedService.ActiveTurnStatus.ToString().ToLowerInvariant()}";
             }
 
-            _ = SaveActiveThreadStateAsync();
+            if (!string.IsNullOrWhiteSpace(routedThreadId))
+            {
+                _ = SaveThreadStateAsync(routedThreadId, routedService);
+            }
             _ = RefreshGitAsync();
         }
 
+        if (!string.IsNullOrWhiteSpace(routedThreadId) &&
+            !string.IsNullOrWhiteSpace(SelectedProjectPath) &&
+            notification.Method is "thread/archived" or "thread/unarchived" &&
+            settings.ProjectThreads.Any(thread => string.Equals(thread.ThreadId, routedThreadId, StringComparison.Ordinal)))
+        {
+            threadStore.SetArchived(
+                settings,
+                SelectedProjectPath,
+                routedThreadId,
+                archived: notification.Method == "thread/archived");
+        }
+
         OnPropertyChanged(nameof(FinalResponse));
+        RaiseThreadCommandStates();
+    }
+
+    private void UpdateThreadActivity(string threadId, bool isRunning, string status)
+    {
+        var state = settings.ProjectThreads.FirstOrDefault(thread =>
+            string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
+        if (state is null)
+        {
+            return;
+        }
+
+        state.IsRunning = isRunning;
+        state.TurnStatus = status;
+        state.UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    private async Task SaveThreadStateAsync(string threadId, CodexThreadService service)
+    {
+        var persisted = settings.ProjectThreads.FirstOrDefault(thread =>
+            string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
+        if (persisted is null)
+        {
+            return;
+        }
+
+        persisted.FinalResponse = service.FinalResponse;
+        persisted.TimelineItems = [.. service.TimelineItems.TakeLast(100)];
+        persisted.RawEvents = [.. service.RawEvents.TakeLast(100)];
+        persisted.UpdatedAt = DateTimeOffset.UtcNow;
+        try
+        {
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            logger.Log(AppLogLevel.Warning, "thread_state_save_failed", "Could not persist thread state.", exception: ex);
+        }
     }
 
     private void RestorePersistedThreadState()
     {
-        var persisted = FindProjectThreadState();
-        if (persisted is null || string.IsNullOrWhiteSpace(persisted.ThreadId))
+        ProjectThreads.Clear();
+        if (string.IsNullOrWhiteSpace(SelectedProjectPath))
         {
             threadService.Reset();
+            SelectedThread = null;
             return;
         }
 
-        activeThreadId = persisted.ThreadId;
-        threadService.Restore(
-            persisted.ThreadId,
-            persisted.FinalResponse,
-            persisted.TimelineItems,
-            persisted.RawEvents);
+        foreach (var persisted in threadStore.GetProjectThreads(settings, SelectedProjectPath))
+        {
+            ProjectThreads.Add(persisted);
+            threadWorkspace.Restore(persisted);
+        }
+
+        SelectedThread = threadStore.GetActive(settings, SelectedProjectPath);
+        if (SelectedThread is null)
+        {
+            threadService = new CodexThreadService();
+            threadService.Reset();
+            OnPropertyChanged(nameof(TimelineItems));
+            OnPropertyChanged(nameof(RawEvents));
+            OnPropertyChanged(nameof(FinalResponse));
+        }
     }
 
     private ProjectThreadState? FindProjectThreadState()
@@ -1058,8 +1593,69 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return null;
         }
 
-        return settings.ProjectThreads.FirstOrDefault(thread =>
-            string.Equals(Path.GetFullPath(thread.ProjectPath), SelectedProjectPath, StringComparison.OrdinalIgnoreCase));
+        return SelectedThread ?? threadStore.GetActive(settings, SelectedProjectPath);
+    }
+
+    private void RefreshProjectThreads(string? selectedThreadId = null)
+    {
+        if (string.IsNullOrWhiteSpace(SelectedProjectPath))
+        {
+            ProjectThreads.Clear();
+            SelectedThread = null;
+            return;
+        }
+
+        selectedThreadId ??= SelectedThread?.ThreadId;
+        ProjectThreads.Clear();
+        foreach (var thread in threadStore.GetProjectThreads(settings, SelectedProjectPath))
+        {
+            ProjectThreads.Add(thread);
+        }
+
+        SelectedThread = ProjectThreads.FirstOrDefault(thread =>
+            string.Equals(thread.ThreadId, selectedThreadId, StringComparison.Ordinal));
+    }
+
+    private void SelectThread(ProjectThreadState? state)
+    {
+        activeThreadId = state?.ThreadId;
+        activeThreadLoaded = state is not null && loadedThreadIds.Contains(state.ThreadId);
+        activeTurnId = state is not null && activeTurnIds.TryGetValue(state.ThreadId, out var turnId) ? turnId : null;
+        IsTurnRunning = state is not null && runningThreadIds.Contains(state.ThreadId);
+
+        if (state is null)
+        {
+            threadService = new CodexThreadService();
+            threadService.Reset();
+        }
+        else
+        {
+            threadService = threadWorkspace.ThreadIds.Contains(state.ThreadId)
+                ? threadWorkspace.GetRequired(state.ThreadId)
+                : threadWorkspace.Restore(state);
+            if (!state.IsArchived && !string.IsNullOrWhiteSpace(SelectedProjectPath))
+            {
+                threadStore.SetActive(settings, SelectedProjectPath, state.ThreadId);
+            }
+        }
+
+        OnPropertyChanged(nameof(TimelineItems));
+        OnPropertyChanged(nameof(RawEvents));
+        OnPropertyChanged(nameof(FinalResponse));
+        RaiseThreadCommandStates();
+        _ = SaveSettingsAfterSelectionAsync();
+    }
+
+    private async Task SaveSettingsAfterSelectionAsync()
+    {
+        try
+        {
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            logger.Log(AppLogLevel.Warning, "thread_selection_save_failed", "Could not save thread selection.", exception: ex);
+        }
     }
 
     private async Task SaveActiveThreadStateAsync()
@@ -1076,9 +1672,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 persisted = new ProjectThreadState
                 {
-                    ProjectPath = SelectedProjectPath
+                    ProjectPath = SelectedProjectPath,
+                    ThreadId = activeThreadId,
+                    Title = $"Thread {ProjectThreads.Count + 1}"
                 };
-                settings.ProjectThreads.Add(persisted);
+                threadStore.Upsert(settings, persisted);
             }
 
             persisted.ProjectPath = SelectedProjectPath;
@@ -1087,6 +1685,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             persisted.TimelineItems = [.. threadService.TimelineItems.TakeLast(100)];
             persisted.RawEvents = [.. threadService.RawEvents.TakeLast(100)];
             persisted.UpdatedAt = DateTimeOffset.UtcNow;
+            threadStore.Upsert(settings, persisted);
 
             await settingsStore.SaveAsync(settings).ConfigureAwait(true);
         }
@@ -1117,7 +1716,23 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         Diagnostics.Add($"Sign-in: {AuthSummary}");
         Diagnostics.Add($"Codex home: {CodexHome}");
         Diagnostics.Add($"Settings: {SettingsPath}");
+        if (lastDoctorResult is not null)
+        {
+            Diagnostics.Add($"Codex doctor exit code: {lastDoctorResult.ExitCode}");
+            foreach (var line in SplitDiagnosticLines(lastDoctorResult.StandardOutput))
+            {
+                Diagnostics.Add($"Doctor: {line}");
+            }
+
+            foreach (var line in SplitDiagnosticLines(lastDoctorResult.StandardError))
+            {
+                Diagnostics.Add($"Doctor stderr: {line}");
+            }
+        }
     }
+
+    private static IEnumerable<string> SplitDiagnosticLines(string text) =>
+        text.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private void RaiseComputedProperties()
     {
@@ -1128,6 +1743,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(AuthDetail));
         OnPropertyChanged(nameof(CodexHome));
         OnPropertyChanged(nameof(SettingsPath));
+        runCodexDoctorCommand.RaiseCanExecuteChanged();
+        RaiseThreadCommandStates();
     }
 
     public async ValueTask DisposeAsync()
@@ -1143,6 +1760,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
 
         appServerClient.NotificationReceived -= OnAppServerNotificationReceived;
+        appServerClient.ConnectionFailed -= OnAppServerConnectionFailed;
         await appServerClient.DisposeAsync().ConfigureAwait(false);
         appServerClient = null;
     }

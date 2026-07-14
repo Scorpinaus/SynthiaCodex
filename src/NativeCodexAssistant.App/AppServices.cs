@@ -5,6 +5,7 @@ using NativeCodexAssistant.Core.Logging;
 using NativeCodexAssistant.Core.Git;
 using NativeCodexAssistant.Core.Projects;
 using NativeCodexAssistant.Core.Settings;
+using NativeCodexAssistant.Core.Codex.AppServer;
 using NativeCodexAssistant.Infrastructure;
 using NativeCodexAssistant.Infrastructure.Auth;
 using NativeCodexAssistant.Infrastructure.Codex;
@@ -26,6 +27,10 @@ public sealed class AppServices
         IRecentProjectService recentProjectService,
         IFolderPicker folderPicker,
         IUserInteractionService userInteractionService,
+        IThemeService themeService,
+        ICodexCliUtilityRunner codexCliUtilityRunner,
+        ThreadStore threadStore,
+        CodexThreadWorkspace threadWorkspace,
         IAppLogger logger)
     {
         SettingsStore = settingsStore;
@@ -36,6 +41,10 @@ public sealed class AppServices
         RecentProjectService = recentProjectService;
         FolderPicker = folderPicker;
         UserInteractionService = userInteractionService;
+        ThemeService = themeService;
+        CodexCliUtilityRunner = codexCliUtilityRunner;
+        ThreadStore = threadStore;
+        ThreadWorkspace = threadWorkspace;
         Logger = logger;
     }
 
@@ -55,6 +64,14 @@ public sealed class AppServices
 
     public IUserInteractionService UserInteractionService { get; }
 
+    public IThemeService ThemeService { get; }
+
+    public ICodexCliUtilityRunner CodexCliUtilityRunner { get; }
+
+    public ThreadStore ThreadStore { get; }
+
+    public CodexThreadWorkspace ThreadWorkspace { get; }
+
     public IAppLogger Logger { get; }
 
     public static AppServices Create()
@@ -69,6 +86,10 @@ public sealed class AppServices
         var recentProjectService = new RecentProjectService();
         var folderPicker = new WpfFolderPicker();
         var userInteractionService = new WpfUserInteractionService();
+        var themeService = new WpfThemeService();
+        var codexCliUtilityRunner = new CodexCliUtilityRunner(logger);
+        var threadStore = new ThreadStore();
+        var threadWorkspace = new CodexThreadWorkspace();
 
         logger.Log(AppLogLevel.Information, "app_services_created", "Application services were created.");
 
@@ -81,6 +102,10 @@ public sealed class AppServices
             recentProjectService,
             folderPicker,
             userInteractionService,
+            themeService,
+            codexCliUtilityRunner,
+            threadStore,
+            threadWorkspace,
             logger);
     }
 }

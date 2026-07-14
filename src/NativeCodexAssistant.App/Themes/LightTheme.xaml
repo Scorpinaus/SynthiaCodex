@@ -1,0 +1,13 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="InkBrush" Color="#16201D" />
+    <SolidColorBrush x:Key="MutedInkBrush" Color="#66736D" />
+    <SolidColorBrush x:Key="CanvasBrush" Color="#F6F7F4" />
+    <SolidColorBrush x:Key="PanelBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="RailBrush" Color="#E9EFEA" />
+    <SolidColorBrush x:Key="SignalBrush" Color="#2D6CDF" />
+    <SolidColorBrush x:Key="CopperBrush" Color="#B76135" />
+    <SolidColorBrush x:Key="LineBrush" Color="#D9E0DB" />
+    <SolidColorBrush x:Key="FieldBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="StatusBarBrush" Color="#16201D" />
+</ResourceDictionary>

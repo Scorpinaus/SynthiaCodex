@@ -3,51 +3,63 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              ShutdownMode="OnMainWindowClose">
     <Application.Resources>
-        <Color x:Key="InkColor">#16201D</Color>
-        <Color x:Key="MutedInkColor">#66736D</Color>
-        <Color x:Key="CanvasColor">#F6F7F4</Color>
-        <Color x:Key="PanelColor">#FFFFFF</Color>
-        <Color x:Key="RailColor">#E9EFEA</Color>
-        <Color x:Key="SignalColor">#2D6CDF</Color>
-        <Color x:Key="CopperColor">#B76135</Color>
-        <Color x:Key="LineColor">#D9E0DB</Color>
-
-        <SolidColorBrush x:Key="InkBrush" Color="{StaticResource InkColor}" />
-        <SolidColorBrush x:Key="MutedInkBrush" Color="{StaticResource MutedInkColor}" />
-        <SolidColorBrush x:Key="CanvasBrush" Color="{StaticResource CanvasColor}" />
-        <SolidColorBrush x:Key="PanelBrush" Color="{StaticResource PanelColor}" />
-        <SolidColorBrush x:Key="RailBrush" Color="{StaticResource RailColor}" />
-        <SolidColorBrush x:Key="SignalBrush" Color="{StaticResource SignalColor}" />
-        <SolidColorBrush x:Key="CopperBrush" Color="{StaticResource CopperColor}" />
-        <SolidColorBrush x:Key="LineBrush" Color="{StaticResource LineColor}" />
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/LightTheme.xaml" />
+            </ResourceDictionary.MergedDictionaries>
 
         <FontFamily x:Key="UiFont">Segoe UI Variable Text, Segoe UI</FontFamily>
         <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas</FontFamily>
 
         <Style TargetType="{x:Type Window}">
             <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
-            <Setter Property="Background" Value="{StaticResource CanvasBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="Background" Value="{DynamicResource CanvasBrush}" />
         </Style>
 
         <Style TargetType="{x:Type Button}">
             <Setter Property="MinHeight" Value="32" />
             <Setter Property="Padding" Value="12,5" />
-            <Setter Property="BorderBrush" Value="{StaticResource LineBrush}" />
-            <Setter Property="Background" Value="{StaticResource PanelBrush}" />
-            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+            <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
             <Setter Property="Cursor" Value="Hand" />
         </Style>
 
+        <Style TargetType="{x:Type TextBox}">
+            <Setter Property="Background" Value="{DynamicResource FieldBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource InkBrush}" />
+        </Style>
+
+        <Style TargetType="{x:Type ComboBox}">
+            <Setter Property="Background" Value="{DynamicResource FieldBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+        </Style>
+
+        <Style TargetType="{x:Type ListBox}">
+            <Setter Property="Background" Value="{DynamicResource FieldBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+        </Style>
+
+        <Style TargetType="{x:Type TabControl}">
+            <Setter Property="Background" Value="{DynamicResource CanvasBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+        </Style>
+
         <Style x:Key="PrimaryButton" TargetType="{x:Type Button}" BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="Background" Value="{StaticResource SignalBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource SignalBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SignalBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SignalBrush}" />
             <Setter Property="Foreground" Value="White" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
 
         <Style x:Key="SectionLabel" TargetType="{x:Type TextBlock}">
-            <Setter Property="Foreground" Value="{StaticResource MutedInkBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
             <Setter Property="FontSize" Value="12" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Margin" Value="0,0,0,8" />
@@ -58,5 +70,6 @@
             <Setter Property="FontSize" Value="12" />
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

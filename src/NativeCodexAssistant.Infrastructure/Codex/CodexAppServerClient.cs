@@ -14,6 +14,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     private readonly object gate = new();
     private Task? readLoop;
     private bool started;
+    private int connectionFailureReported;
     private int nextRequestId;
 
     public CodexAppServerClient(IAppServerTransport transport, CodexAppServerClientMetadata metadata)
@@ -24,8 +25,18 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
     public event EventHandler<AppServerNotification>? NotificationReceived;
 
-    public async Task<CodexAppServerSession> InitializeAsync(CancellationToken cancellationToken = default)
+    public event EventHandler<AppServerConnectionFailedEventArgs>? ConnectionFailed;
+
+    public bool IsHealthy { get; private set; }
+
+    public Task<CodexAppServerSession> InitializeAsync(CancellationToken cancellationToken = default) =>
+        InitializeAsync(CodexInitializeOptions.Default, cancellationToken);
+
+    public async Task<CodexAppServerSession> InitializeAsync(
+        CodexInitializeOptions options,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(options);
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
 
         var parameters = new JsonObject
@@ -35,6 +46,13 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                 ["name"] = metadata.Name,
                 ["title"] = metadata.Title,
                 ["version"] = metadata.Version
+            },
+            ["capabilities"] = new JsonObject
+            {
+                ["experimentalApi"] = options.ExperimentalApi,
+                ["optOutNotificationMethods"] = options.OptOutNotificationMethods is null
+                    ? null
+                    : new JsonArray(options.OptOutNotificationMethods.Select(method => JsonValue.Create(method)).ToArray())
             }
         };
 
@@ -43,6 +61,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
         await using var registration = cancellationToken.Register(() => CancelPendingResponse(response, cancellationToken));
         var result = await response.Task.WaitAsync(cancellationToken).ConfigureAwait(false) as JsonObject;
+        IsHealthy = true;
         return new CodexAppServerSession(
             ReadString(result, "userAgent"),
             ReadString(result, "platformFamily"),
@@ -149,6 +168,130 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         return models;
     }
 
+    public async Task<CodexThreadListResult> ListThreadsAsync(
+        CodexThreadListRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+
+        var parameters = new JsonObject();
+        if (!string.IsNullOrWhiteSpace(request.Cwd))
+        {
+            parameters["cwd"] = request.Cwd;
+        }
+
+        if (request.Archived is not null)
+        {
+            parameters["archived"] = request.Archived.Value;
+        }
+
+        if (request.Limit is not null)
+        {
+            parameters["limit"] = request.Limit.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Cursor))
+        {
+            parameters["cursor"] = request.Cursor;
+        }
+
+        var result = await SendRequestAsync("thread/list", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
+        var threads = new List<CodexThreadSummary>();
+        if (result?["data"] is JsonArray data)
+        {
+            foreach (var item in data.OfType<JsonObject>())
+            {
+                var threadId = ReadString(item, "id");
+                if (string.IsNullOrWhiteSpace(threadId))
+                {
+                    continue;
+                }
+
+                var preview = ReadString(item, "preview") ?? string.Empty;
+                threads.Add(new CodexThreadSummary(
+                    threadId,
+                    ReadString(item, "name") ?? preview,
+                    preview,
+                    ReadString(item, "cwd"),
+                    ReadUnixTimestamp(item, "createdAt"),
+                    ReadUnixTimestamp(item, "updatedAt"),
+                    ReadString(item, "status.type")));
+            }
+        }
+
+        return new CodexThreadListResult(threads, ReadString(result, "nextCursor"));
+    }
+
+    public async Task<CodexThreadForkResult> ForkThreadAsync(
+        CodexThreadForkRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var parameters = new JsonObject
+        {
+            ["threadId"] = request.ThreadId,
+            ["cwd"] = request.Cwd,
+            ["sandbox"] = request.Sandbox.ToProtocolValue()
+        };
+        if (!string.IsNullOrWhiteSpace(request.Model))
+        {
+            parameters["model"] = request.Model;
+        }
+
+        var result = await SendRequestAsync("thread/fork", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
+        var threadId = ReadString(result, "thread.id");
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            throw new CodexAppServerProtocolException("thread/fork response did not include result.thread.id.");
+        }
+
+        return new CodexThreadForkResult(threadId);
+    }
+
+    public Task ArchiveThreadAsync(string threadId, CancellationToken cancellationToken = default) =>
+        SendThreadIdRequestAsync("thread/archive", threadId, cancellationToken);
+
+    public Task UnarchiveThreadAsync(string threadId, CancellationToken cancellationToken = default) =>
+        SendThreadIdRequestAsync("thread/unarchive", threadId, cancellationToken);
+
+    public async Task<CodexTurnSteerResult> SteerTurnAsync(
+        CodexTurnSteerRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(request.Prompt))
+        {
+            throw new ArgumentException("Steering prompt is required.", nameof(request));
+        }
+
+        var result = await SendRequestAsync(
+            "turn/steer",
+            new JsonObject
+            {
+                ["threadId"] = request.ThreadId,
+                ["expectedTurnId"] = request.ExpectedTurnId,
+                ["input"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["type"] = "text",
+                        ["text"] = request.Prompt
+                    }
+                }
+            },
+            cancellationToken).ConfigureAwait(false) as JsonObject;
+        var turnId = ReadString(result, "turnId");
+        if (string.IsNullOrWhiteSpace(turnId))
+        {
+            throw new CodexAppServerProtocolException("turn/steer response did not include result.turnId.");
+        }
+
+        return new CodexTurnSteerResult(turnId);
+    }
+
     public async Task<CodexTurnStartResult> StartTurnAsync(
         CodexTurnStartRequest request,
         CancellationToken cancellationToken = default)
@@ -221,6 +364,23 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                 ["threadId"] = threadId,
                 ["turnId"] = turnId
             },
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task SendThreadIdRequestAsync(
+        string method,
+        string threadId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            throw new ArgumentException("Thread ID is required.", nameof(threadId));
+        }
+
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        await SendRequestAsync(
+            method,
+            new JsonObject { ["threadId"] = threadId },
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -316,13 +476,28 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             {
                 ProcessLine(line);
             }
+
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                ReportConnectionFailure(new EndOfStreamException("Codex app-server closed its output stream."));
+            }
         }
         catch (OperationCanceledException)
         {
         }
         catch (Exception ex)
         {
-            CompleteAllPending(ex);
+            ReportConnectionFailure(ex);
+        }
+    }
+
+    private void ReportConnectionFailure(Exception exception)
+    {
+        IsHealthy = false;
+        CompleteAllPending(exception);
+        if (Interlocked.Exchange(ref connectionFailureReported, 1) == 0)
+        {
+            ConnectionFailed?.Invoke(this, new AppServerConnectionFailedEventArgs(exception));
         }
     }
 
@@ -336,7 +511,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
         catch (JsonException ex)
         {
-            CompleteAllPending(new CodexAppServerProtocolException("App-server emitted invalid JSON.", ex));
+            ReportConnectionFailure(new CodexAppServerProtocolException("App-server emitted invalid JSON.", ex));
             return;
         }
 
@@ -468,6 +643,22 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         return current is JsonValue value && value.TryGetValue<bool>(out var boolValue)
             ? boolValue
             : null;
+    }
+
+    private static DateTimeOffset? ReadUnixTimestamp(JsonObject obj, string path)
+    {
+        JsonNode? current = obj;
+        foreach (var segment in path.Split('.'))
+        {
+            current = current is JsonObject currentObject ? currentObject[segment] : null;
+        }
+
+        if (current is JsonValue value && value.TryGetValue<long>(out var seconds))
+        {
+            return DateTimeOffset.FromUnixTimeSeconds(seconds);
+        }
+
+        return null;
     }
 
     private static IReadOnlyList<string> ReadReasoningEfforts(JsonObject model)

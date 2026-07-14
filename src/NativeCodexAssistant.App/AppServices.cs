@@ -15,6 +15,8 @@ using NativeCodexAssistant.Infrastructure.Projects;
 using NativeCodexAssistant.Infrastructure.Settings;
 using NativeCodexAssistant.Core.Worktrees;
 using NativeCodexAssistant.Infrastructure.Worktrees;
+using NativeCodexAssistant.Core.Terminal;
+using NativeCodexAssistant.Infrastructure.Terminal;
 
 namespace NativeCodexAssistant.App;
 
@@ -34,6 +36,7 @@ public sealed class AppServices
         ICodexCliUtilityRunner codexCliUtilityRunner,
         ThreadStore threadStore,
         CodexThreadWorkspace threadWorkspace,
+        ITerminalService terminalService,
         IAppLogger logger)
     {
         SettingsStore = settingsStore;
@@ -49,6 +52,7 @@ public sealed class AppServices
         CodexCliUtilityRunner = codexCliUtilityRunner;
         ThreadStore = threadStore;
         ThreadWorkspace = threadWorkspace;
+        TerminalService = terminalService;
         Logger = logger;
     }
 
@@ -78,6 +82,8 @@ public sealed class AppServices
 
     public CodexThreadWorkspace ThreadWorkspace { get; }
 
+    public ITerminalService TerminalService { get; }
+
     public IAppLogger Logger { get; }
 
     public static AppServices Create()
@@ -97,6 +103,7 @@ public sealed class AppServices
         var codexCliUtilityRunner = new CodexCliUtilityRunner(logger);
         var threadStore = new ThreadStore();
         var threadWorkspace = new CodexThreadWorkspace();
+        var terminalService = new WindowsConPtyTerminalService(logger);
 
         logger.Log(AppLogLevel.Information, "app_services_created", "Application services were created.");
 
@@ -114,6 +121,7 @@ public sealed class AppServices
             codexCliUtilityRunner,
             threadStore,
             threadWorkspace,
+            terminalService,
             logger);
     }
 }

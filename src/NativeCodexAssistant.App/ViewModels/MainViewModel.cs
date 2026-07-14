@@ -10,6 +10,7 @@ using NativeCodexAssistant.Core.Git;
 using NativeCodexAssistant.Core.Logging;
 using NativeCodexAssistant.Core.Projects;
 using NativeCodexAssistant.Core.Settings;
+using NativeCodexAssistant.Core.Terminal;
 using NativeCodexAssistant.Core.Worktrees;
 using NativeCodexAssistant.Infrastructure.Codex;
 
@@ -30,6 +31,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly ICodexCliUtilityRunner codexCliUtilityRunner;
     private readonly ThreadStore threadStore;
     private readonly CodexThreadWorkspace threadWorkspace;
+    private readonly ITerminalService terminalService;
     private readonly IAppLogger logger;
     private CodexThreadService threadService = new();
     private readonly SynchronizationContext? synchronizationContext;
@@ -54,6 +56,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand commitCommand;
     private readonly RelayCommand openInEditorCommand;
     private readonly RelayCommand revealInExplorerCommand;
+    private readonly AsyncRelayCommand startTerminalCommand;
+    private readonly AsyncRelayCommand sendTerminalInputCommand;
+    private readonly AsyncRelayCommand killTerminalCommand;
+    private readonly RelayCommand clearTerminalCommand;
+    private readonly RelayCommand toggleTerminalCommand;
 
     private AppSettings settings = new();
     private CodexInstallation currentCodex = CodexInstallation.Missing("Detection has not run yet.");
@@ -74,12 +81,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string gitStatusMessage = "Select a project to inspect Git changes";
     private string selectedDiff = "Select a changed file to inspect its diff.";
     private string commitMessage = string.Empty;
+    private string terminalInput = string.Empty;
+    private string terminalOutput = string.Empty;
+    private string terminalStatus = "Not started";
+    private string terminalWorkingDirectory = "No terminal session";
     private GitChangedFile? selectedGitFile;
     private ProjectThreadState? selectedThread;
     private bool isBusy;
     private bool isGitBusy;
     private bool isShowingStagedDiff;
     private bool isTurnRunning;
+    private bool isTerminalVisible;
     private bool activeThreadLoaded;
     private bool isShuttingDown;
     private Task? shutdownTask;
@@ -88,6 +100,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly HashSet<string> loadedThreadIds = new(StringComparer.Ordinal);
     private readonly HashSet<string> runningThreadIds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> activeTurnIds = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, TerminalState> terminalStates = new(StringComparer.OrdinalIgnoreCase);
 
     public MainViewModel(
         ISettingsStore settingsStore,
@@ -103,6 +116,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ICodexCliUtilityRunner codexCliUtilityRunner,
         ThreadStore threadStore,
         CodexThreadWorkspace threadWorkspace,
+        ITerminalService terminalService,
         IAppLogger logger)
     {
         this.settingsStore = settingsStore;
@@ -118,6 +132,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         this.codexCliUtilityRunner = codexCliUtilityRunner;
         this.threadStore = threadStore;
         this.threadWorkspace = threadWorkspace;
+        this.terminalService = terminalService;
         this.logger = logger;
         synchronizationContext = SynchronizationContext.Current;
 
@@ -148,6 +163,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         CommitCommand = commitCommand = new AsyncRelayCommand(CommitAsync, CanCommit);
         OpenInEditorCommand = openInEditorCommand = new RelayCommand(OpenInEditor, CanOpenProjectTarget);
         RevealInExplorerCommand = revealInExplorerCommand = new RelayCommand(RevealInExplorer, CanOpenProjectTarget);
+        StartTerminalCommand = startTerminalCommand = new AsyncRelayCommand(StartTerminalAsync, CanStartTerminal);
+        SendTerminalInputCommand = sendTerminalInputCommand = new AsyncRelayCommand(SendTerminalInputAsync, CanSendTerminalInput);
+        KillTerminalCommand = killTerminalCommand = new AsyncRelayCommand(KillTerminalAsync, CanKillTerminal);
+        ClearTerminalCommand = clearTerminalCommand = new RelayCommand(ClearTerminal, CanClearTerminal);
+        ToggleTerminalCommand = toggleTerminalCommand = new RelayCommand(ToggleTerminal, () => !IsShuttingDown);
     }
 
     public event EventHandler? CloseRequested;
@@ -235,6 +255,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public ICommand RevealInExplorerCommand { get; }
 
+    public ICommand StartTerminalCommand { get; }
+
+    public ICommand SendTerminalInputCommand { get; }
+
+    public ICommand KillTerminalCommand { get; }
+
+    public ICommand ClearTerminalCommand { get; }
+
+    public ICommand ToggleTerminalCommand { get; }
+
     public string? SelectedProjectPath
     {
         get => selectedProjectPath;
@@ -247,6 +277,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 openInEditorCommand.RaiseCanExecuteChanged();
                 revealInExplorerCommand.RaiseCanExecuteChanged();
                 RaiseThreadCommandStates();
+                RefreshVisibleTerminal();
             }
         }
     }
@@ -265,6 +296,44 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public string ActiveWorkspacePath => SelectedThread?.WorkspacePath ?? SelectedProjectPath ?? "No workspace selected";
 
     public string ActiveWorkspaceLabel => SelectedThread?.WorkspaceModeLabel ?? "Current checkout";
+
+    public bool IsTerminalVisible
+    {
+        get => isTerminalVisible;
+        set => SetProperty(ref isTerminalVisible, value);
+    }
+
+    public string TerminalInput
+    {
+        get => terminalInput;
+        set
+        {
+            if (SetProperty(ref terminalInput, value))
+            {
+                sendTerminalInputCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string TerminalOutput
+    {
+        get => terminalOutput;
+        private set => SetProperty(ref terminalOutput, value);
+    }
+
+    public string TerminalStatus
+    {
+        get => terminalStatus;
+        private set => SetProperty(ref terminalStatus, value);
+    }
+
+    public string TerminalWorkingDirectory
+    {
+        get => terminalWorkingDirectory;
+        private set => SetProperty(ref terminalWorkingDirectory, value);
+    }
+
+    public bool IsTerminalRunning => GetCurrentTerminalState()?.Session.IsRunning == true;
 
     public string CodexSummary => currentCodex.Summary;
 
@@ -329,6 +398,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(nameof(ActiveWorkspacePath));
             OnPropertyChanged(nameof(ActiveWorkspaceLabel));
             removeWorktreeCommand.RaiseCanExecuteChanged();
+            RefreshVisibleTerminal();
             _ = RefreshGitAsync();
         }
     }
@@ -463,6 +533,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 cancelTurnCommand.RaiseCanExecuteChanged();
                 loadModelsCommand.RaiseCanExecuteChanged();
                 RaiseGitCommandStates();
+                RaiseTerminalCommandStates();
+                toggleTerminalCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -665,6 +737,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
             await client.ArchiveThreadAsync(SelectedThread.ThreadId).ConfigureAwait(true);
+            await StopAndRemoveTerminalAsync(GetTerminalKey(SelectedThread)).ConfigureAwait(true);
             threadStore.SetArchived(settings, SelectedProjectPath, SelectedThread.ThreadId, archived: true);
             StatusMessage = "Codex thread archived";
             RefreshProjectThreads(SelectedThread.ThreadId);
@@ -769,6 +842,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
+            await StopAndRemoveTerminalAsync(GetTerminalKey(thread)).ConfigureAwait(true);
             var repository = await gitService.GetRepositoryStateAsync(SelectedProjectPath).ConfigureAwait(true);
             if (!repository.IsRepository || string.IsNullOrWhiteSpace(repository.RootPath))
             {
@@ -790,6 +864,250 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             StatusMessage = ex.Message;
             logger.Log(AppLogLevel.Warning, "assistant_worktree_remove_failed", "Could not remove the selected assistant worktree.", exception: ex);
         }
+    }
+
+    private async Task StartTerminalAsync()
+    {
+        if (!CanStartTerminal())
+        {
+            return;
+        }
+
+        var key = GetCurrentTerminalKey();
+        try
+        {
+            if (terminalStates.TryGetValue(key, out var previous))
+            {
+                await previous.Session.DisposeAsync().ConfigureAwait(true);
+                terminalStates.Remove(key);
+            }
+
+            var workingDirectory = GetActiveWorkspacePath();
+            var session = await terminalService.StartSessionAsync(
+                new TerminalStartRequest(workingDirectory, 120, 30)).ConfigureAwait(true);
+            var state = new TerminalState(session);
+            terminalStates[key] = state;
+            session.OutputReceived += (_, args) => HandleTerminalOutput(key, args.Text);
+            session.Exited += (_, args) => HandleTerminalExited(key, args.ExitCode);
+            IsTerminalVisible = true;
+            RefreshVisibleTerminal();
+            StatusMessage = "PowerShell terminal started";
+            logger.Log(
+                AppLogLevel.Information,
+                "integrated_terminal_started",
+                "An integrated terminal session was started.",
+                new Dictionary<string, string?> { ["key"] = key, ["workingDirectory"] = workingDirectory });
+        }
+        catch (Exception ex)
+        {
+            TerminalStatus = "Start failed";
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Error, "integrated_terminal_start_failed", "Could not start an integrated terminal.", exception: ex);
+        }
+        finally
+        {
+            RaiseTerminalCommandStates();
+        }
+    }
+
+    private async Task SendTerminalInputAsync()
+    {
+        var state = GetCurrentTerminalState();
+        if (state?.Session.IsRunning != true || string.IsNullOrWhiteSpace(TerminalInput))
+        {
+            return;
+        }
+
+        var input = TerminalInput;
+        try
+        {
+            await state.Session.WriteInputAsync(input + "\r\n").ConfigureAwait(true);
+            TerminalInput = string.Empty;
+            StatusMessage = "Terminal input sent";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Warning, "integrated_terminal_input_failed", "Could not write to the integrated terminal.", exception: ex);
+        }
+    }
+
+    private void ClearTerminal()
+    {
+        var state = GetCurrentTerminalState();
+        if (state is null)
+        {
+            return;
+        }
+
+        state.Output.Clear();
+        TerminalOutput = string.Empty;
+        clearTerminalCommand.RaiseCanExecuteChanged();
+        StatusMessage = "Terminal output cleared";
+    }
+
+    private async Task KillTerminalAsync()
+    {
+        var state = GetCurrentTerminalState();
+        if (state?.Session.IsRunning != true)
+        {
+            return;
+        }
+
+        try
+        {
+            await state.Session.StopAsync().ConfigureAwait(true);
+            TerminalStatus = "Exited";
+            StatusMessage = "Terminal session stopped";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Warning, "integrated_terminal_stop_failed", "Could not stop the integrated terminal.", exception: ex);
+        }
+        finally
+        {
+            RaiseTerminalCommandStates();
+        }
+    }
+
+    private void ToggleTerminal()
+    {
+        IsTerminalVisible = !IsTerminalVisible;
+        StatusMessage = IsTerminalVisible ? "Terminal panel shown" : "Terminal panel hidden";
+    }
+
+    private void HandleTerminalOutput(string key, string text)
+    {
+        void Apply()
+        {
+            if (!terminalStates.TryGetValue(key, out var state))
+            {
+                return;
+            }
+
+            state.Output.Append(text);
+            const int maximumOutputCharacters = 250_000;
+            if (state.Output.Length > maximumOutputCharacters)
+            {
+                state.Output.Remove(0, state.Output.Length - maximumOutputCharacters);
+            }
+
+            if (string.Equals(key, GetCurrentTerminalKeyOrNull(), StringComparison.OrdinalIgnoreCase))
+            {
+                TerminalOutput = state.Output.ToString();
+                clearTerminalCommand.RaiseCanExecuteChanged();
+            }
+        }
+
+        if (synchronizationContext is null)
+        {
+            Apply();
+        }
+        else
+        {
+            synchronizationContext.Post(_ => Apply(), null);
+        }
+    }
+
+    private void HandleTerminalExited(string key, int exitCode)
+    {
+        void Apply()
+        {
+            if (!terminalStates.TryGetValue(key, out var state))
+            {
+                return;
+            }
+
+            state.ExitCode = exitCode;
+            if (string.Equals(key, GetCurrentTerminalKeyOrNull(), StringComparison.OrdinalIgnoreCase))
+            {
+                TerminalStatus = $"Exited ({exitCode})";
+                OnPropertyChanged(nameof(IsTerminalRunning));
+                RaiseTerminalCommandStates();
+            }
+        }
+
+        if (synchronizationContext is null)
+        {
+            Apply();
+        }
+        else
+        {
+            synchronizationContext.Post(_ => Apply(), null);
+        }
+    }
+
+    private void RefreshVisibleTerminal()
+    {
+        var state = GetCurrentTerminalState();
+        TerminalOutput = state?.Output.ToString() ?? string.Empty;
+        TerminalWorkingDirectory = state?.Session.WorkingDirectory
+            ?? (GetActiveWorkspacePathIfAvailable() ?? "No terminal session");
+        TerminalStatus = state is null
+            ? "Not started"
+            : state.Session.IsRunning ? "Running" : $"Exited ({state.ExitCode ?? 0})";
+        OnPropertyChanged(nameof(IsTerminalRunning));
+        RaiseTerminalCommandStates();
+    }
+
+    private string? GetActiveWorkspacePathIfAvailable()
+    {
+        var path = SelectedThread?.WorkspacePath ?? SelectedProjectPath;
+        return string.IsNullOrWhiteSpace(path) ? null : Path.GetFullPath(path);
+    }
+
+    private string GetCurrentTerminalKey() => GetCurrentTerminalKeyOrNull()
+        ?? throw new InvalidOperationException("Select a project before starting a terminal.");
+
+    private string? GetCurrentTerminalKeyOrNull()
+    {
+        if (!string.IsNullOrWhiteSpace(SelectedThread?.ThreadId))
+        {
+            return SelectedThread.ThreadId;
+        }
+
+        return string.IsNullOrWhiteSpace(SelectedProjectPath)
+            ? null
+            : $"project:{Path.GetFullPath(SelectedProjectPath)}";
+    }
+
+    private static string GetTerminalKey(ProjectThreadState thread) => thread.ThreadId;
+
+    private TerminalState? GetCurrentTerminalState()
+    {
+        var key = GetCurrentTerminalKeyOrNull();
+        return key is not null && terminalStates.TryGetValue(key, out var state) ? state : null;
+    }
+
+    private async Task StopAndRemoveTerminalAsync(string key)
+    {
+        if (!terminalStates.Remove(key, out var state))
+        {
+            return;
+        }
+
+        await state.Session.DisposeAsync().ConfigureAwait(true);
+        RefreshVisibleTerminal();
+    }
+
+    private async Task DisposeTerminalSessionsAsync()
+    {
+        var states = terminalStates.Values.ToArray();
+        terminalStates.Clear();
+        foreach (var state in states)
+        {
+            try
+            {
+                await state.Session.DisposeAsync().ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                logger.Log(AppLogLevel.Warning, "integrated_terminal_dispose_failed", "Could not dispose an integrated terminal session.", exception: ex);
+            }
+        }
+
+        RefreshVisibleTerminal();
     }
 
     private async Task RefreshDiagnosticsAsync()
@@ -1317,6 +1635,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         StatusMessage = "Closing application";
 
         await TryCancelRunningTurnForShutdownAsync(cancellationToken).ConfigureAwait(true);
+        await DisposeTerminalSessionsAsync().ConfigureAwait(true);
         await SaveActiveThreadStateAsync().ConfigureAwait(true);
         await DisposeAppServerClientAsync().ConfigureAwait(true);
 
@@ -1462,6 +1781,37 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         !string.IsNullOrWhiteSpace(activeThreadId) &&
         !string.IsNullOrWhiteSpace(activeTurnId) &&
         !string.IsNullOrWhiteSpace(SteeringText);
+
+    private bool CanStartTerminal()
+    {
+        if (IsShuttingDown || string.IsNullOrWhiteSpace(SelectedProjectPath))
+        {
+            return false;
+        }
+
+        var workspace = GetActiveWorkspacePathIfAvailable();
+        return !string.IsNullOrWhiteSpace(workspace) &&
+            Directory.Exists(workspace) &&
+            GetCurrentTerminalState()?.Session.IsRunning != true;
+    }
+
+    private bool CanSendTerminalInput() =>
+        !IsShuttingDown &&
+        GetCurrentTerminalState()?.Session.IsRunning == true &&
+        !string.IsNullOrWhiteSpace(TerminalInput);
+
+    private bool CanKillTerminal() =>
+        !IsShuttingDown && GetCurrentTerminalState()?.Session.IsRunning == true;
+
+    private bool CanClearTerminal() => GetCurrentTerminalState()?.Output.Length > 0;
+
+    private void RaiseTerminalCommandStates()
+    {
+        startTerminalCommand.RaiseCanExecuteChanged();
+        sendTerminalInputCommand.RaiseCanExecuteChanged();
+        killTerminalCommand.RaiseCanExecuteChanged();
+        clearTerminalCommand.RaiseCanExecuteChanged();
+    }
 
     private void RaiseThreadCommandStates()
     {
@@ -1929,5 +2279,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         appServerClient.ConnectionFailed -= OnAppServerConnectionFailed;
         await appServerClient.DisposeAsync().ConfigureAwait(false);
         appServerClient = null;
+    }
+
+    private sealed class TerminalState(ITerminalSession session)
+    {
+        public ITerminalSession Session { get; } = session;
+
+        public System.Text.StringBuilder Output { get; } = new();
+
+        public int? ExitCode { get; set; }
     }
 }

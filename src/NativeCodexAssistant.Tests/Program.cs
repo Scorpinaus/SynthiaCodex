@@ -6,6 +6,7 @@ using NativeCodexAssistant.Core.Codex.AppServer;
 using NativeCodexAssistant.Core.Git;
 using NativeCodexAssistant.Core.Logging;
 using NativeCodexAssistant.Core.Settings;
+using NativeCodexAssistant.Core.Terminal;
 using NativeCodexAssistant.Core.Worktrees;
 using NativeCodexAssistant.Infrastructure.Auth;
 using NativeCodexAssistant.Infrastructure.Codex;
@@ -13,9 +14,11 @@ using NativeCodexAssistant.Infrastructure.Git;
 using NativeCodexAssistant.Infrastructure.Logging;
 using NativeCodexAssistant.Infrastructure.Projects;
 using NativeCodexAssistant.Infrastructure.Settings;
+using NativeCodexAssistant.Infrastructure.Terminal;
 using NativeCodexAssistant.Infrastructure.Worktrees;
 using System.Runtime.CompilerServices;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json.Nodes;
 
 var tests = new List<(string Name, Func<Task> Run)>
@@ -62,6 +65,10 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("worktree service refuses unowned cleanup", TestWorktreeServiceRefusesUnownedCleanupAsync),
     ("worktree service removes owned clean worktree", TestWorktreeServiceRemovesOwnedCleanWorktreeAsync),
     ("view model starts worktree task in isolated cwd", TestViewModelStartsWorktreeTaskInIsolatedCwdAsync),
+    ("conpty terminal starts powershell in requested cwd", TestConPtyTerminalStartsInRequestedCwdAsync),
+    ("view model starts terminal in active worktree", TestViewModelStartsTerminalInActiveWorktreeAsync),
+    ("view model keeps terminal output isolated by thread", TestViewModelKeepsTerminalOutputIsolatedByThreadAsync),
+    ("view model terminal actions and shutdown own sessions", TestViewModelTerminalActionsAndShutdownOwnSessionsAsync),
     ("app-server cancellation sends turn interrupt", TestAppServerCancellationSendsInterruptAsync),
     ("live codex app-server initializes when enabled", TestLiveCodexAppServerInitializesWhenEnabledAsync)
 };
@@ -1511,6 +1518,133 @@ static async Task TestViewModelStartsWorktreeTaskInIsolatedCwdAsync()
     await viewModel.DisposeAsync();
 }
 
+static async Task TestConPtyTerminalStartsInRequestedCwdAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var output = new StringBuilder();
+    var exited = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var service = new WindowsConPtyTerminalService(new TestLogger());
+    await using var session = await service.StartSessionAsync(new TerminalStartRequest(temp.Root, 100, 30));
+    session.OutputReceived += (_, args) => output.Append(args.Text);
+    session.Exited += (_, args) => exited.TrySetResult(args.ExitCode);
+
+    await session.WriteInputAsync("Write-Output 'PHASE5_CONPTY_OK'; Write-Output (Get-Location).Path; exit\r\n");
+    var exitCode = await exited.Task.WaitAsync(TimeSpan.FromSeconds(15));
+
+    AssertEqual(0, exitCode, "PowerShell terminal exit code");
+    AssertTrue(output.ToString().Contains("PHASE5_CONPTY_OK", StringComparison.Ordinal), "PowerShell output streamed");
+    AssertTrue(output.ToString().Contains(temp.Root, StringComparison.OrdinalIgnoreCase), "PowerShell terminal cwd");
+}
+
+static async Task TestViewModelStartsTerminalInActiveWorktreeAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var project = temp.CreateDirectory("Repo");
+    var worktree = temp.CreateDirectory("Repo.worktrees\\terminal-thread");
+    var settings = new AppSettings
+    {
+        ProjectThreads =
+        [
+            new ProjectThreadState
+            {
+                ProjectPath = project,
+                ThreadId = "thr_terminal",
+                Title = "Terminal thread",
+                IsActive = true,
+                Mode = "worktree",
+                WorkspacePath = worktree
+            }
+        ]
+    };
+    var terminals = new FakeTerminalService();
+    var viewModel = CreateMainViewModel(
+        new FakeAppServerTransport(),
+        project,
+        AuthReadiness.LikelySignedIn,
+        new FakeSettingsStore(settings),
+        terminalService: terminals);
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "thr_terminal", "terminal worktree thread selected");
+
+    viewModel.StartTerminalCommand.Execute(null);
+    await WaitUntilAsync(() => terminals.StartRequests.Count == 1, "terminal session started");
+
+    AssertEqual(Path.GetFullPath(worktree), terminals.StartRequests[0].WorkingDirectory, "terminal worktree cwd");
+    AssertEqual(Path.GetFullPath(worktree), viewModel.TerminalWorkingDirectory, "terminal cwd indicator");
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelKeepsTerminalOutputIsolatedByThreadAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var project = temp.CreateDirectory("Repo");
+    var settings = new AppSettings
+    {
+        ProjectThreads =
+        [
+            new ProjectThreadState { ProjectPath = project, ThreadId = "thr_one", Title = "One", IsActive = true, WorkspacePath = project },
+            new ProjectThreadState { ProjectPath = project, ThreadId = "thr_two", Title = "Two", WorkspacePath = project }
+        ]
+    };
+    var terminals = new FakeTerminalService();
+    var viewModel = CreateMainViewModel(
+        new FakeAppServerTransport(),
+        project,
+        AuthReadiness.LikelySignedIn,
+        new FakeSettingsStore(settings),
+        terminalService: terminals);
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "thr_one", "first terminal thread selected");
+    viewModel.StartTerminalCommand.Execute(null);
+    await WaitUntilAsync(() => terminals.Sessions.Count == 1, "first terminal started");
+    terminals.Sessions[0].EmitOutput("ONE_OUTPUT");
+    await WaitUntilAsync(() => viewModel.TerminalOutput.Contains("ONE_OUTPUT", StringComparison.Ordinal), "first terminal output shown");
+
+    viewModel.SelectedThread = viewModel.ProjectThreads.Single(thread => thread.ThreadId == "thr_two");
+    viewModel.StartTerminalCommand.Execute(null);
+    await WaitUntilAsync(() => terminals.Sessions.Count == 2, "second terminal started");
+    terminals.Sessions[1].EmitOutput("TWO_OUTPUT");
+    await WaitUntilAsync(() => viewModel.TerminalOutput.Contains("TWO_OUTPUT", StringComparison.Ordinal), "second terminal output shown");
+    AssertTrue(!viewModel.TerminalOutput.Contains("ONE_OUTPUT", StringComparison.Ordinal), "first output hidden from second thread");
+
+    viewModel.SelectedThread = viewModel.ProjectThreads.Single(thread => thread.ThreadId == "thr_one");
+    AssertTrue(viewModel.TerminalOutput.Contains("ONE_OUTPUT", StringComparison.Ordinal), "first output restored");
+    AssertTrue(!viewModel.TerminalOutput.Contains("TWO_OUTPUT", StringComparison.Ordinal), "second output isolated");
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelTerminalActionsAndShutdownOwnSessionsAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var terminals = new FakeTerminalService();
+    var viewModel = CreateMainViewModel(
+        new FakeAppServerTransport(),
+        temp.Root,
+        AuthReadiness.LikelySignedIn,
+        terminalService: terminals);
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "terminal project selected");
+    viewModel.StartTerminalCommand.Execute(null);
+    await WaitUntilAsync(() => terminals.Sessions.Count == 1, "project terminal started");
+
+    viewModel.TerminalInput = "Get-Date";
+    viewModel.SendTerminalInputCommand.Execute(null);
+    await WaitUntilAsync(() => terminals.Sessions[0].Inputs.Count == 1, "terminal input sent");
+    AssertEqual("Get-Date\r\n", terminals.Sessions[0].Inputs[0], "terminal command newline");
+    terminals.Sessions[0].EmitOutput("CLEAR_ME");
+    await WaitUntilAsync(() => viewModel.TerminalOutput.Contains("CLEAR_ME", StringComparison.Ordinal), "terminal output before clear");
+    viewModel.ClearTerminalCommand.Execute(null);
+    AssertEqual(string.Empty, viewModel.TerminalOutput, "terminal output cleared");
+
+    viewModel.KillTerminalCommand.Execute(null);
+    await WaitUntilAsync(() => terminals.Sessions[0].StopCount == 1, "terminal killed");
+    await viewModel.DisposeAsync();
+    AssertTrue(terminals.Sessions.All(session => session.IsDisposed), "all terminal sessions disposed on shutdown");
+}
+
 static async Task<string> CreateCommittedRepositoryAsync(TempWorkspace temp, string name)
 {
     var repository = temp.CreateDirectory(name);
@@ -1668,7 +1802,8 @@ static MainViewModel CreateMainViewModel(
     IThemeService? themeService = null,
     ICodexCliUtilityRunner? cliUtilityRunner = null,
     ICodexProcessService? processService = null,
-    IWorktreeService? worktreeService = null)
+    IWorktreeService? worktreeService = null,
+    ITerminalService? terminalService = null)
 {
     var installation = new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation");
     return new MainViewModel(
@@ -1685,6 +1820,7 @@ static MainViewModel CreateMainViewModel(
         cliUtilityRunner ?? new FakeCodexCliUtilityRunner(),
         new ThreadStore(),
         new CodexThreadWorkspace(),
+        terminalService ?? new FakeTerminalService(),
         new TestLogger());
 }
 
@@ -1949,6 +2085,82 @@ internal sealed class FakeWorktreeService(string repositoryRoot, string worktree
         cancellationToken.ThrowIfCancellationRequested();
         worktrees.RemoveAll(item => string.Equals(item.Path, requestedWorktreePath, StringComparison.OrdinalIgnoreCase));
         return Task.CompletedTask;
+    }
+}
+
+internal sealed class FakeTerminalService : ITerminalService
+{
+    public List<TerminalStartRequest> StartRequests { get; } = [];
+
+    public List<FakeTerminalSession> Sessions { get; } = [];
+
+    public Task<ITerminalSession> StartSessionAsync(
+        TerminalStartRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        StartRequests.Add(request);
+        var session = new FakeTerminalSession(request.WorkingDirectory);
+        Sessions.Add(session);
+        return Task.FromResult<ITerminalSession>(session);
+    }
+}
+
+internal sealed class FakeTerminalSession(string workingDirectory) : ITerminalSession
+{
+    public event EventHandler<TerminalOutputEventArgs>? OutputReceived;
+
+    public event EventHandler<TerminalExitedEventArgs>? Exited;
+
+    public string Id { get; } = Guid.NewGuid().ToString("N");
+
+    public string WorkingDirectory { get; } = Path.GetFullPath(workingDirectory);
+
+    public bool IsRunning { get; private set; } = true;
+
+    public List<string> Inputs { get; } = [];
+
+    public int StopCount { get; private set; }
+
+    public bool IsDisposed { get; private set; }
+
+    public Task WriteInputAsync(string text, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Inputs.Add(text);
+        return Task.CompletedTask;
+    }
+
+    public Task ResizeAsync(int columns, int rows, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        StopCount++;
+        if (IsRunning)
+        {
+            IsRunning = false;
+            Exited?.Invoke(this, new TerminalExitedEventArgs(0));
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public void EmitOutput(string text) => OutputReceived?.Invoke(this, new TerminalOutputEventArgs(text));
+
+    public async ValueTask DisposeAsync()
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        await StopAsync();
+        IsDisposed = true;
     }
 }
 

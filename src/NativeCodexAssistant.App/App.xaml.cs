@@ -43,6 +43,7 @@ public partial class App : Application
             services.CodexCliUtilityRunner,
             services.ThreadStore,
             services.ThreadWorkspace,
+            services.TerminalService,
             services.Logger);
 
         MainWindow = new MainWindow(mainViewModel);

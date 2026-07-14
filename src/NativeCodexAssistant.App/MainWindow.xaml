@@ -10,6 +10,9 @@
         MinWidth="1100"
         Height="760"
         Width="1240">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+    </Window.Resources>
     <Grid Background="{DynamicResource CanvasBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="64" />
@@ -36,6 +39,7 @@
                               Margin="0,0,8,0"
                               ToolTip="Application theme" />
                     <Button Content="Refresh" Command="{Binding RefreshDiagnosticsCommand}" Margin="0,0,8,0" />
+                    <Button Content="Terminal" Command="{Binding ToggleTerminalCommand}" Margin="0,0,8,0" ToolTip="Show or hide the integrated terminal tab" />
                     <Button Content="Sign in" Command="{Binding SignInChatGptCommand}" Style="{StaticResource PrimaryButton}" />
                     <Button Content="Exit" Command="{Binding ExitApplicationCommand}" Margin="8,0,0,0" />
                 </StackPanel>
@@ -284,6 +288,66 @@
                         </Grid>
                     </Grid>
                 </Border>
+                    </TabItem>
+
+                    <TabItem Header="Terminal"
+                             Visibility="{Binding IsTerminalVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" Padding="18">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="PowerShell terminal" Style="{StaticResource SectionLabel}" />
+                                        <TextBlock Text="{Binding TerminalWorkingDirectory}" FontFamily="{StaticResource MonoFont}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding TerminalStatus, StringFormat=Status: {0}}" Foreground="{DynamicResource MutedInkBrush}" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button Content="Start PowerShell" Command="{Binding StartTerminalCommand}" Margin="0,0,8,0" />
+                                        <Button Content="Clear" Command="{Binding ClearTerminalCommand}" Margin="0,0,8,0" />
+                                        <Button Content="Kill" Command="{Binding KillTerminalCommand}" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <TextBox Grid.Row="1"
+                                         Text="{Binding TerminalOutput, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         FontFamily="{StaticResource MonoFont}"
+                                         FontSize="12"
+                                         AcceptsReturn="True"
+                                         TextWrapping="NoWrap"
+                                         HorizontalScrollBarVisibility="Auto"
+                                         VerticalScrollBarVisibility="Auto"
+                                         Padding="10"
+                                         Margin="0,14,0,12"
+                                         ToolTip="Select text and press Ctrl+C to copy" />
+
+                                <Grid Grid.Row="2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Text="{Binding TerminalInput, UpdateSourceTrigger=PropertyChanged}"
+                                             FontFamily="{StaticResource MonoFont}"
+                                             Padding="9"
+                                             ToolTip="Paste or type a PowerShell command" />
+                                    <Button Grid.Column="1"
+                                            Content="Send"
+                                            Command="{Binding SendTerminalInputCommand}"
+                                            Style="{StaticResource PrimaryButton}"
+                                            MinWidth="88"
+                                            Margin="10,0,0,0" />
+                                </Grid>
+                            </Grid>
+                        </Border>
                     </TabItem>
 
                     <TabItem Header="Changes">

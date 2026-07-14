@@ -35,6 +35,7 @@ public partial class App : Application
             services.CodexProcessService,
             services.AuthService,
             services.GitService,
+            services.WorktreeService,
             services.RecentProjectService,
             services.FolderPicker,
             services.UserInteractionService,

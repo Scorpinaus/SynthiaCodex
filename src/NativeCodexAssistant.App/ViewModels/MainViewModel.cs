@@ -10,6 +10,7 @@ using NativeCodexAssistant.Core.Git;
 using NativeCodexAssistant.Core.Logging;
 using NativeCodexAssistant.Core.Projects;
 using NativeCodexAssistant.Core.Settings;
+using NativeCodexAssistant.Core.Worktrees;
 using NativeCodexAssistant.Infrastructure.Codex;
 
 namespace NativeCodexAssistant.App.ViewModels;
@@ -21,6 +22,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly ICodexProcessService codexProcessService;
     private readonly IAuthService authService;
     private readonly IGitService gitService;
+    private readonly IWorktreeService worktreeService;
     private readonly IRecentProjectService recentProjectService;
     private readonly IFolderPicker folderPicker;
     private readonly IUserInteractionService userInteractionService;
@@ -43,6 +45,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand archiveThreadCommand;
     private readonly AsyncRelayCommand unarchiveThreadCommand;
     private readonly AsyncRelayCommand steerTurnCommand;
+    private readonly AsyncRelayCommand removeWorktreeCommand;
     private readonly AsyncRelayCommand showWorkingDiffCommand;
     private readonly AsyncRelayCommand showStagedDiffCommand;
     private readonly AsyncRelayCommand stageSelectedFileCommand;
@@ -62,6 +65,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string modelOverride = string.Empty;
     private string reasoningEffortOverride = string.Empty;
     private string selectedTheme = "System";
+    private string newThreadWorkspaceMode = "Current checkout";
     private string steeringText = string.Empty;
     private string appServerHealth = "Stopped";
     private string statusMessage = "Starting";
@@ -91,6 +95,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ICodexProcessService codexProcessService,
         IAuthService authService,
         IGitService gitService,
+        IWorktreeService worktreeService,
         IRecentProjectService recentProjectService,
         IFolderPicker folderPicker,
         IUserInteractionService userInteractionService,
@@ -105,6 +110,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         this.codexProcessService = codexProcessService;
         this.authService = authService;
         this.gitService = gitService;
+        this.worktreeService = worktreeService;
         this.recentProjectService = recentProjectService;
         this.folderPicker = folderPicker;
         this.userInteractionService = userInteractionService;
@@ -124,6 +130,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ArchiveThreadCommand = archiveThreadCommand = new AsyncRelayCommand(ArchiveSelectedThreadAsync, CanArchiveSelectedThread);
         UnarchiveThreadCommand = unarchiveThreadCommand = new AsyncRelayCommand(UnarchiveSelectedThreadAsync, CanUnarchiveSelectedThread);
         SteerTurnCommand = steerTurnCommand = new AsyncRelayCommand(SteerTurnAsync, CanSteerTurn);
+        RemoveWorktreeCommand = removeWorktreeCommand = new AsyncRelayCommand(RemoveSelectedWorktreeAsync, CanRemoveSelectedWorktree);
         OpenRecentProjectCommand = new AsyncRelayCommand(OpenRecentProjectAsync);
         SignInChatGptCommand = new AsyncRelayCommand(() => StartLoginAsync(LoginMethod.ChatGpt));
         SignInDeviceCodeCommand = new AsyncRelayCommand(() => StartLoginAsync(LoginMethod.DeviceCode));
@@ -172,6 +179,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public IReadOnlyList<string> ThemeOptions { get; } = ["System", "Light", "Dark"];
 
+    public IReadOnlyList<string> WorkspaceModeOptions { get; } = ["Current checkout", "New worktree"];
+
     public ICommand BrowseProjectCommand { get; }
 
     public ICommand RefreshDiagnosticsCommand { get; }
@@ -189,6 +198,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public ICommand UnarchiveThreadCommand { get; }
 
     public ICommand SteerTurnCommand { get; }
+
+    public ICommand RemoveWorktreeCommand { get; }
 
     public ICommand OpenRecentProjectCommand { get; }
 
@@ -244,6 +255,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         string.IsNullOrWhiteSpace(SelectedProjectPath)
             ? "No project selected"
             : new DirectoryInfo(SelectedProjectPath).Name;
+
+    public string NewThreadWorkspaceMode
+    {
+        get => newThreadWorkspaceMode;
+        set => SetProperty(ref newThreadWorkspaceMode, value == "New worktree" ? value : "Current checkout");
+    }
+
+    public string ActiveWorkspacePath => SelectedThread?.WorkspacePath ?? SelectedProjectPath ?? "No workspace selected";
+
+    public string ActiveWorkspaceLabel => SelectedThread?.WorkspaceModeLabel ?? "Current checkout";
 
     public string CodexSummary => currentCodex.Summary;
 
@@ -305,6 +326,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             }
 
             SelectThread(value);
+            OnPropertyChanged(nameof(ActiveWorkspacePath));
+            OnPropertyChanged(nameof(ActiveWorkspaceLabel));
+            removeWorktreeCommand.RaiseCanExecuteChanged();
+            _ = RefreshGitAsync();
         }
     }
 
@@ -517,10 +542,31 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
             var result = await client.StartThreadAsync(CodexThreadStartOptions.Default).ConfigureAwait(true);
-            var state = CreateThreadState(result.ThreadId, $"Thread {ProjectThreads.Count + 1}");
+            AssistantWorktree? worktree = null;
+            if (string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal))
+            {
+                var repository = await gitService.GetRepositoryStateAsync(SelectedProjectPath!).ConfigureAwait(true);
+                if (!repository.IsRepository || string.IsNullOrWhiteSpace(repository.RootPath))
+                {
+                    throw new InvalidOperationException("A new worktree requires a detected Git repository.");
+                }
+
+                worktree = await worktreeService.CreateAsync(new WorktreeCreateRequest(
+                    repository.RootPath,
+                    $"thread-{ProjectThreads.Count + 1}",
+                    result.ThreadId)).ConfigureAwait(true);
+            }
+
+            var state = CreateThreadState(
+                result.ThreadId,
+                $"Thread {ProjectThreads.Count + 1}",
+                worktree?.Path,
+                worktree?.Branch);
             loadedThreadIds.Add(result.ThreadId);
             RefreshProjectThreads(result.ThreadId);
-            StatusMessage = "New Codex thread created";
+            StatusMessage = worktree is null
+                ? "New Codex thread created in the current checkout"
+                : $"New Codex thread created in worktree {worktree.TaskId}";
             await settingsStore.SaveAsync(settings).ConfigureAwait(true);
         }
         catch (Exception ex)
@@ -540,9 +586,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
+            var workspacePath = GetActiveWorkspacePath();
             var result = await client.ResumeThreadAsync(new CodexThreadResumeRequest(
                 SelectedThread.ThreadId,
-                SelectedProjectPath,
+                workspacePath,
                 CodexSandbox.WorkspaceWrite,
                 NormalizeOverride(ModelOverride))).ConfigureAwait(true);
             loadedThreadIds.Add(result.ThreadId);
@@ -566,13 +613,35 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
+            var sourceThread = SelectedThread;
+            var sourceWorkspace = GetActiveWorkspacePath();
             var result = await client.ForkThreadAsync(new CodexThreadForkRequest(
-                SelectedThread.ThreadId,
-                SelectedProjectPath,
+                sourceThread.ThreadId,
+                sourceWorkspace,
                 CodexSandbox.WorkspaceWrite,
                 NormalizeOverride(ModelOverride))).ConfigureAwait(true);
-            var state = CreateThreadState(result.ThreadId, $"Fork of {SelectedThread.DisplayTitle}");
-            state.Preview = SelectedThread.Preview;
+            AssistantWorktree? worktree = null;
+            if (string.Equals(sourceThread.Mode, "worktree", StringComparison.OrdinalIgnoreCase))
+            {
+                var repository = await gitService.GetRepositoryStateAsync(SelectedProjectPath).ConfigureAwait(true);
+                if (!repository.IsRepository || string.IsNullOrWhiteSpace(repository.RootPath))
+                {
+                    throw new InvalidOperationException("The source project is no longer a Git repository.");
+                }
+
+                worktree = await worktreeService.CreateAsync(new WorktreeCreateRequest(
+                    repository.RootPath,
+                    $"fork-{result.ThreadId}",
+                    result.ThreadId,
+                    sourceThread.WorktreeBranch ?? "HEAD")).ConfigureAwait(true);
+            }
+
+            var state = CreateThreadState(
+                result.ThreadId,
+                $"Fork of {sourceThread.DisplayTitle}",
+                worktree?.Path,
+                worktree?.Branch);
+            state.Preview = sourceThread.Preview;
             loadedThreadIds.Add(result.ThreadId);
             RefreshProjectThreads(result.ThreadId);
             StatusMessage = "Codex thread forked";
@@ -654,7 +723,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private ProjectThreadState CreateThreadState(string threadId, string title)
+    private ProjectThreadState CreateThreadState(
+        string threadId,
+        string title,
+        string? workspacePath = null,
+        string? worktreeBranch = null)
     {
         var projectPath = SelectedProjectPath
             ?? throw new InvalidOperationException("A project must be selected before creating a thread record.");
@@ -663,6 +736,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             ProjectPath = projectPath,
             ThreadId = threadId,
             Title = title,
+            Mode = string.IsNullOrWhiteSpace(workspacePath) ? "local" : "worktree",
+            WorkspacePath = string.IsNullOrWhiteSpace(workspacePath) ? projectPath : Path.GetFullPath(workspacePath),
+            WorktreeBranch = worktreeBranch,
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
@@ -671,6 +747,49 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         threadStore.SetActive(settings, projectPath, threadId);
         threadWorkspace.Restore(state);
         return state;
+    }
+
+    private async Task RemoveSelectedWorktreeAsync()
+    {
+        if (!CanRemoveSelectedWorktree() || SelectedThread?.WorkspacePath is null || SelectedProjectPath is null)
+        {
+            return;
+        }
+
+        var thread = SelectedThread;
+        var worktreePath = Path.GetFullPath(thread.WorkspacePath);
+        var confirmed = userInteractionService.ConfirmDestructiveAction(
+            "Remove assistant worktree",
+            $"Remove this assistant-created worktree?\n\n{worktreePath}\n\nGit will refuse if it contains uncommitted changes. The branch will be preserved.");
+        if (!confirmed)
+        {
+            StatusMessage = "Worktree cleanup cancelled";
+            return;
+        }
+
+        try
+        {
+            var repository = await gitService.GetRepositoryStateAsync(SelectedProjectPath).ConfigureAwait(true);
+            if (!repository.IsRepository || string.IsNullOrWhiteSpace(repository.RootPath))
+            {
+                throw new InvalidOperationException("The selected project is no longer a Git repository.");
+            }
+
+            await worktreeService.RemoveAsync(repository.RootPath, worktreePath).ConfigureAwait(true);
+            thread.Mode = "worktree-removed";
+            thread.TurnStatus = "Workspace removed";
+            thread.UpdatedAt = DateTimeOffset.UtcNow;
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+            OnPropertyChanged(nameof(ActiveWorkspaceLabel));
+            removeWorktreeCommand.RaiseCanExecuteChanged();
+            StatusMessage = "Assistant worktree removed; its Git branch was preserved";
+            await RefreshGitAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Warning, "assistant_worktree_remove_failed", "Could not remove the selected assistant worktree.", exception: ex);
+        }
     }
 
     private async Task RefreshDiagnosticsAsync()
@@ -756,7 +875,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         GitStatusMessage = "Refreshing Git status";
         try
         {
-            var state = await gitService.GetRepositoryStateAsync(SelectedProjectPath).ConfigureAwait(true);
+            var workspacePath = SelectedThread?.WorkspacePath ?? SelectedProjectPath;
+            if (!Directory.Exists(workspacePath))
+            {
+                ResetGitState($"The active workspace is unavailable: {workspacePath}");
+                return;
+            }
+
+            var state = await gitService.GetRepositoryStateAsync(workspacePath).ConfigureAwait(true);
             ChangedFiles.Clear();
             gitRepositoryRoot = state.RootPath;
             gitBranch = state.Branch ?? "No repository";
@@ -1040,12 +1166,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             IsTurnRunning = true;
 
             var submittedPrompt = PromptText.Trim();
+            var workspacePath = GetActiveWorkspacePath();
             settings.LastModelOverride = NormalizeOverride(ModelOverride);
             settings.LastReasoningEffortOverride = NormalizeOverride(ReasoningEffortOverride);
             var turn = await client.StartTurnAsync(new CodexTurnStartRequest(
                 activeThreadId,
                 submittedPrompt,
-                SelectedProjectPath,
+                workspacePath,
                 CodexSandbox.WorkspaceWrite,
                 NormalizeOverride(ModelOverride),
                 ParseReasoningEffort(ReasoningEffortOverride))).ConfigureAwait(true);
@@ -1079,7 +1206,26 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (string.IsNullOrWhiteSpace(activeThreadId))
         {
             var thread = await client.StartThreadAsync(CodexThreadStartOptions.Default).ConfigureAwait(true);
-            CreateThreadState(thread.ThreadId, $"Thread {ProjectThreads.Count + 1}");
+            AssistantWorktree? worktree = null;
+            if (string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal))
+            {
+                var repository = await gitService.GetRepositoryStateAsync(SelectedProjectPath).ConfigureAwait(true);
+                if (!repository.IsRepository || string.IsNullOrWhiteSpace(repository.RootPath))
+                {
+                    throw new InvalidOperationException("A new worktree requires a detected Git repository.");
+                }
+
+                worktree = await worktreeService.CreateAsync(new WorktreeCreateRequest(
+                    repository.RootPath,
+                    $"thread-{ProjectThreads.Count + 1}",
+                    thread.ThreadId)).ConfigureAwait(true);
+            }
+
+            CreateThreadState(
+                thread.ThreadId,
+                $"Thread {ProjectThreads.Count + 1}",
+                worktree?.Path,
+                worktree?.Branch);
             RefreshProjectThreads(thread.ThreadId);
             loadedThreadIds.Add(thread.ThreadId);
             activeThreadLoaded = true;
@@ -1095,7 +1241,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             var resumed = await client.ResumeThreadAsync(new CodexThreadResumeRequest(
                 activeThreadId,
-                SelectedProjectPath,
+                GetActiveWorkspacePath(),
                 CodexSandbox.WorkspaceWrite)).ConfigureAwait(true);
             activeThreadLoaded = true;
             loadedThreadIds.Add(resumed.ThreadId);
@@ -1303,6 +1449,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool CanUnarchiveSelectedThread() =>
         CanUseSelectedThread() && SelectedThread?.IsArchived == true;
 
+    private bool CanRemoveSelectedWorktree() =>
+        CanUseSelectedThread() &&
+        SelectedThread?.IsRunning == false &&
+        string.Equals(SelectedThread.Mode, "worktree", StringComparison.OrdinalIgnoreCase) &&
+        !string.IsNullOrWhiteSpace(SelectedThread.WorkspacePath);
+
     private bool CanSteerTurn() =>
         !IsShuttingDown &&
         IsTurnRunning &&
@@ -1319,6 +1471,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         archiveThreadCommand.RaiseCanExecuteChanged();
         unarchiveThreadCommand.RaiseCanExecuteChanged();
         steerTurnCommand.RaiseCanExecuteChanged();
+        removeWorktreeCommand.RaiseCanExecuteChanged();
     }
 
     private bool CanUseGitProject() =>
@@ -1348,6 +1501,19 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private bool CanOpenProjectTarget() =>
         !IsShuttingDown && !string.IsNullOrWhiteSpace(SelectedProjectPath);
+
+    private string GetActiveWorkspacePath()
+    {
+        var path = SelectedThread?.WorkspacePath ?? SelectedProjectPath
+            ?? throw new InvalidOperationException("Select a project before starting a Codex task.");
+        path = Path.GetFullPath(path);
+        if (!Directory.Exists(path))
+        {
+            throw new InvalidOperationException($"The active workspace is unavailable: {path}");
+        }
+
+        return path;
+    }
 
     private void RaiseGitCommandStates()
     {

@@ -42,6 +42,8 @@ public sealed class ThreadStore
         existing.IsRunning = state.IsRunning;
         existing.TurnStatus = state.TurnStatus;
         existing.Mode = state.Mode;
+        existing.WorkspacePath = state.WorkspacePath;
+        existing.WorktreeBranch = state.WorktreeBranch;
         existing.FinalResponse = state.FinalResponse;
         existing.TimelineItems = state.TimelineItems;
         existing.RawEvents = state.RawEvents;

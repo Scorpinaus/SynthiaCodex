@@ -13,6 +13,8 @@ using NativeCodexAssistant.Infrastructure.Logging;
 using NativeCodexAssistant.Infrastructure.Git;
 using NativeCodexAssistant.Infrastructure.Projects;
 using NativeCodexAssistant.Infrastructure.Settings;
+using NativeCodexAssistant.Core.Worktrees;
+using NativeCodexAssistant.Infrastructure.Worktrees;
 
 namespace NativeCodexAssistant.App;
 
@@ -24,6 +26,7 @@ public sealed class AppServices
         ICodexProcessService codexProcessService,
         IAuthService authService,
         IGitService gitService,
+        IWorktreeService worktreeService,
         IRecentProjectService recentProjectService,
         IFolderPicker folderPicker,
         IUserInteractionService userInteractionService,
@@ -38,6 +41,7 @@ public sealed class AppServices
         CodexProcessService = codexProcessService;
         AuthService = authService;
         GitService = gitService;
+        WorktreeService = worktreeService;
         RecentProjectService = recentProjectService;
         FolderPicker = folderPicker;
         UserInteractionService = userInteractionService;
@@ -57,6 +61,8 @@ public sealed class AppServices
     public IAuthService AuthService { get; }
 
     public IGitService GitService { get; }
+
+    public IWorktreeService WorktreeService { get; }
 
     public IRecentProjectService RecentProjectService { get; }
 
@@ -83,6 +89,7 @@ public sealed class AppServices
         var codexProcessService = new CodexProcessService(logger);
         var authService = new CodexAuthService(logger);
         var gitService = new GitService(logger);
+        var worktreeService = new WorktreeService(logger);
         var recentProjectService = new RecentProjectService();
         var folderPicker = new WpfFolderPicker();
         var userInteractionService = new WpfUserInteractionService();
@@ -99,6 +106,7 @@ public sealed class AppServices
             codexProcessService,
             authService,
             gitService,
+            worktreeService,
             recentProjectService,
             folderPicker,
             userInteractionService,

@@ -6,12 +6,14 @@ using NativeCodexAssistant.Core.Codex.AppServer;
 using NativeCodexAssistant.Core.Git;
 using NativeCodexAssistant.Core.Logging;
 using NativeCodexAssistant.Core.Settings;
+using NativeCodexAssistant.Core.Worktrees;
 using NativeCodexAssistant.Infrastructure.Auth;
 using NativeCodexAssistant.Infrastructure.Codex;
 using NativeCodexAssistant.Infrastructure.Git;
 using NativeCodexAssistant.Infrastructure.Logging;
 using NativeCodexAssistant.Infrastructure.Projects;
 using NativeCodexAssistant.Infrastructure.Settings;
+using NativeCodexAssistant.Infrastructure.Worktrees;
 using System.Runtime.CompilerServices;
 using System.Diagnostics;
 using System.Text.Json.Nodes;
@@ -55,6 +57,11 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("git service reads status and diffs", TestGitServiceReadsStatusAndDiffsAsync),
     ("git service stages commits and reverts", TestGitServiceStagesCommitsAndRevertsAsync),
     ("git service refuses non-repository folders", TestGitServiceRefusesNonRepositoryFoldersAsync),
+    ("worktree service creates isolated sibling worktree", TestWorktreeServiceCreatesIsolatedSiblingAsync),
+    ("worktree service lists only assistant worktrees", TestWorktreeServiceListsOnlyAssistantWorktreesAsync),
+    ("worktree service refuses unowned cleanup", TestWorktreeServiceRefusesUnownedCleanupAsync),
+    ("worktree service removes owned clean worktree", TestWorktreeServiceRemovesOwnedCleanWorktreeAsync),
+    ("view model starts worktree task in isolated cwd", TestViewModelStartsWorktreeTaskInIsolatedCwdAsync),
     ("app-server cancellation sends turn interrupt", TestAppServerCancellationSendsInterruptAsync),
     ("live codex app-server initializes when enabled", TestLiveCodexAppServerInitializesWhenEnabledAsync)
 };
@@ -127,6 +134,8 @@ static async Task TestSettingsRoundTripAsync()
     {
         ProjectPath = temp.CreateDirectory("ThreadRepo"),
         ThreadId = "thr_saved",
+        Mode = "worktree",
+        WorkspacePath = temp.CreateDirectory("ThreadWorkspace"),
         FinalResponse = "Saved final response",
         TimelineItems =
         [
@@ -151,6 +160,8 @@ static async Task TestSettingsRoundTripAsync()
     AssertEqual(1, loaded.RecentProjects.Count, "recent project count");
     AssertEqual(1, loaded.ProjectThreads.Count, "project thread count");
     AssertEqual("thr_saved", loaded.ProjectThreads[0].ThreadId, "project thread id");
+    AssertEqual("worktree", loaded.ProjectThreads[0].Mode, "project thread mode");
+    AssertEqual(settings.ProjectThreads[0].WorkspacePath, loaded.ProjectThreads[0].WorkspacePath, "project thread workspace path");
     AssertEqual("Saved final response", loaded.ProjectThreads[0].FinalResponse, "project thread final response");
     AssertTrue(File.Exists(store.SettingsPath), "settings file exists");
 }
@@ -1389,6 +1400,127 @@ static async Task TestGitServiceRefusesNonRepositoryFoldersAsync()
     AssertTrue(actionRefused, "git action outside repository refused");
 }
 
+static async Task TestWorktreeServiceCreatesIsolatedSiblingAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var repository = await CreateCommittedRepositoryAsync(temp, "Primary Repo");
+    var service = new WorktreeService(new TestLogger());
+
+    var worktree = await service.CreateAsync(new WorktreeCreateRequest(repository, "Fix unsafe: path?", "thr_isolated"));
+
+    var expectedContainer = Path.Combine(temp.Root, "Primary Repo.worktrees");
+    AssertTrue(worktree.Path.StartsWith(expectedContainer + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "sibling worktree layout");
+    AssertTrue(worktree.Branch.StartsWith("codex/", StringComparison.Ordinal), "assistant branch prefix");
+    AssertEqual("thr_isolated", worktree.ThreadId, "worktree thread association");
+
+    await File.WriteAllTextAsync(Path.Combine(worktree.Path, "isolated.txt"), "worktree only\n");
+    AssertTrue(!File.Exists(Path.Combine(repository, "isolated.txt")), "main checkout remains unchanged");
+
+    File.Delete(Path.Combine(worktree.Path, "isolated.txt"));
+    await service.RemoveAsync(repository, worktree.Path);
+}
+
+static async Task TestWorktreeServiceListsOnlyAssistantWorktreesAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var repository = await CreateCommittedRepositoryAsync(temp, "Repo");
+    var service = new WorktreeService(new TestLogger());
+    var owned = await service.CreateAsync(new WorktreeCreateRequest(repository, "assistant task", "thr_owned"));
+    var userPath = Path.Combine(temp.Root, "user-worktree");
+    await RunGitAsync(repository, "worktree", "add", "-b", "user/worktree", userPath, "HEAD");
+
+    var listed = await service.ListAsync(repository);
+
+    AssertEqual(1, listed.Count, "only assistant worktree listed");
+    AssertEqual(Path.GetFullPath(owned.Path), listed[0].Path, "assistant worktree path listed");
+
+    await RunGitAsync(repository, "worktree", "remove", userPath);
+    await service.RemoveAsync(repository, owned.Path);
+}
+
+static async Task TestWorktreeServiceRefusesUnownedCleanupAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var repository = await CreateCommittedRepositoryAsync(temp, "Repo");
+    var service = new WorktreeService(new TestLogger());
+    var userPath = Path.Combine(temp.Root, "user-worktree");
+    await RunGitAsync(repository, "worktree", "add", "-b", "user/worktree", userPath, "HEAD");
+
+    var refused = false;
+    try
+    {
+        await service.RemoveAsync(repository, userPath);
+    }
+    catch (InvalidOperationException ex)
+    {
+        refused = ex.Message.Contains("assistant-created", StringComparison.OrdinalIgnoreCase);
+    }
+
+    AssertTrue(refused, "unowned worktree cleanup refused");
+    AssertTrue(Directory.Exists(userPath), "user worktree remains present");
+    await RunGitAsync(repository, "worktree", "remove", userPath);
+}
+
+static async Task TestWorktreeServiceRemovesOwnedCleanWorktreeAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var repository = await CreateCommittedRepositoryAsync(temp, "Repo");
+    var service = new WorktreeService(new TestLogger());
+    var owned = await service.CreateAsync(new WorktreeCreateRequest(repository, "completed task", "thr_done"));
+
+    await service.RemoveAsync(repository, owned.Path);
+
+    AssertTrue(!Directory.Exists(owned.Path), "owned worktree directory removed");
+    AssertEqual(0, (await service.ListAsync(repository)).Count, "ownership record removed");
+}
+
+static async Task TestViewModelStartsWorktreeTaskInIsolatedCwdAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var repository = temp.CreateDirectory("Repo");
+    var worktreePath = temp.CreateDirectory("Repo.worktrees\\thr-worktree");
+    var transport = new FakeAppServerTransport();
+    var worktrees = new FakeWorktreeService(repository, worktreePath);
+    var viewModel = CreateMainViewModel(
+        transport,
+        repository,
+        AuthReadiness.LikelySignedIn,
+        worktreeService: worktrees);
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "worktree project selected");
+
+    viewModel.NewThreadWorkspaceMode = "New worktree";
+    viewModel.PromptText = "Make an isolated change.";
+    viewModel.SubmitPromptCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(1);
+    transport.ServerSend("""{"id":0,"result":{"userAgent":"test"}}""");
+    await transport.WaitForClientMessageCountAsync(3);
+    transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thr_worktree"}}}""");
+    await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "thr_worktree", "worktree thread created");
+
+    AssertEqual("worktree", viewModel.SelectedThread!.Mode, "thread worktree mode");
+    AssertEqual(Path.GetFullPath(worktreePath), viewModel.ActiveWorkspacePath, "active worktree path label");
+    await transport.WaitForClientMessageCountAsync(4);
+    var startTurn = ParseMessage(transport.ClientMessages[3]);
+
+    AssertJsonString(Path.GetFullPath(worktreePath), startTurn, "params.cwd", "worktree turn cwd");
+    transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn_worktree"}}}""");
+    transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thr_worktree","turn":{"id":"turn_worktree","status":"completed"}}}""");
+    await WaitUntilAsync(() => !viewModel.IsTurnRunning, "worktree turn completed");
+    await viewModel.DisposeAsync();
+}
+
+static async Task<string> CreateCommittedRepositoryAsync(TempWorkspace temp, string name)
+{
+    var repository = temp.CreateDirectory(name);
+    await InitializeGitRepositoryAsync(repository);
+    await File.WriteAllTextAsync(Path.Combine(repository, "README.md"), "initial\n");
+    await RunGitAsync(repository, "add", "--", "README.md");
+    await RunGitAsync(repository, "commit", "-m", "initial");
+    return repository;
+}
+
 static async Task InitializeGitRepositoryAsync(string repository)
 {
     await RunGitAsync(repository, "init", "-b", "main");
@@ -1535,7 +1667,8 @@ static MainViewModel CreateMainViewModel(
     FakeSettingsStore? settingsStore = null,
     IThemeService? themeService = null,
     ICodexCliUtilityRunner? cliUtilityRunner = null,
-    ICodexProcessService? processService = null)
+    ICodexProcessService? processService = null,
+    IWorktreeService? worktreeService = null)
 {
     var installation = new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation");
     return new MainViewModel(
@@ -1544,6 +1677,7 @@ static MainViewModel CreateMainViewModel(
         processService ?? new FakeCodexProcessService(transport),
         new FakeAuthService(new AuthenticationState(readiness, readiness.ToString(), "Test auth state.", @"C:\Users\Test\.codex")),
         new FakeGitService(projectPath),
+        worktreeService ?? new FakeWorktreeService(projectPath, Path.Combine(projectPath, ".test-worktree")),
         new RecentProjectService(),
         new FakeFolderPicker(projectPath),
         new FakeUserInteractionService(),
@@ -1777,6 +1911,45 @@ internal sealed class FakeGitService(string repositoryRoot) : IGitService
 
     public Task<GitCommitResult> CommitAsync(string repositoryRoot, string message, CancellationToken cancellationToken = default) =>
         Task.FromResult(new GitCommitResult("abc1234", "test commit"));
+}
+
+internal sealed class FakeWorktreeService(string repositoryRoot, string worktreePath) : IWorktreeService
+{
+    private readonly List<AssistantWorktree> worktrees = [];
+
+    public Task<AssistantWorktree> CreateAsync(
+        WorktreeCreateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var created = new AssistantWorktree(
+            Path.GetFullPath(repositoryRoot),
+            Path.GetFullPath(worktreePath),
+            "codex/test-worktree",
+            "test-worktree",
+            request.ThreadId,
+            DateTimeOffset.UtcNow);
+        worktrees.Add(created);
+        return Task.FromResult(created);
+    }
+
+    public Task<IReadOnlyList<AssistantWorktree>> ListAsync(
+        string requestedRepositoryRoot,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult<IReadOnlyList<AssistantWorktree>>([.. worktrees]);
+    }
+
+    public Task RemoveAsync(
+        string requestedRepositoryRoot,
+        string requestedWorktreePath,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        worktrees.RemoveAll(item => string.Equals(item.Path, requestedWorktreePath, StringComparison.OrdinalIgnoreCase));
+        return Task.CompletedTask;
+    }
 }
 
 internal sealed class FakeUserInteractionService : IUserInteractionService

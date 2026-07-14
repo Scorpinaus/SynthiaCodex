@@ -24,6 +24,8 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
 {
     private bool isArchived;
     private bool isRunning;
+    private string mode = "local";
+    private string? worktreeBranch;
     private string turnStatus = "Idle";
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -87,7 +89,39 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
         }
     }
 
-    public string Mode { get; set; } = "local";
+    public string Mode
+    {
+        get => mode;
+        set
+        {
+            if (string.Equals(mode, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            mode = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(WorkspaceModeLabel));
+        }
+    }
+
+    public string? WorkspacePath { get; set; }
+
+    public string? WorktreeBranch
+    {
+        get => worktreeBranch;
+        set
+        {
+            if (string.Equals(worktreeBranch, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            worktreeBranch = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(WorkspaceModeLabel));
+        }
+    }
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
@@ -104,6 +138,13 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
         : Title;
 
     public string ActivityLabel => IsArchived ? "Archived" : TurnStatus;
+
+    public string WorkspaceModeLabel => Mode.ToLowerInvariant() switch
+    {
+        "worktree" => string.IsNullOrWhiteSpace(WorktreeBranch) ? "Worktree" : $"Worktree · {WorktreeBranch}",
+        "worktree-removed" => "Worktree removed",
+        _ => "Current checkout"
+    };
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));

@@ -17,6 +17,7 @@ using NativeCodexAssistant.Core.Worktrees;
 using NativeCodexAssistant.Infrastructure.Worktrees;
 using NativeCodexAssistant.Core.Terminal;
 using NativeCodexAssistant.Infrastructure.Terminal;
+using System.Reflection;
 
 namespace NativeCodexAssistant.App;
 
@@ -25,7 +26,7 @@ public sealed class AppServices
     private AppServices(
         ISettingsStore settingsStore,
         ICodexDiscoveryService codexDiscoveryService,
-        ICodexProcessService codexProcessService,
+        IAppServerSessionCoordinator appServerSessionCoordinator,
         IAuthService authService,
         IGitService gitService,
         IWorktreeService worktreeService,
@@ -41,7 +42,7 @@ public sealed class AppServices
     {
         SettingsStore = settingsStore;
         CodexDiscoveryService = codexDiscoveryService;
-        CodexProcessService = codexProcessService;
+        AppServerSessionCoordinator = appServerSessionCoordinator;
         AuthService = authService;
         GitService = gitService;
         WorktreeService = worktreeService;
@@ -60,7 +61,7 @@ public sealed class AppServices
 
     public ICodexDiscoveryService CodexDiscoveryService { get; }
 
-    public ICodexProcessService CodexProcessService { get; }
+    public IAppServerSessionCoordinator AppServerSessionCoordinator { get; }
 
     public IAuthService AuthService { get; }
 
@@ -90,9 +91,18 @@ public sealed class AppServices
     {
         var appDataDirectory = SystemPaths.AppDataDirectory;
         var logger = new FileAppLogger(appDataDirectory);
-        var settingsStore = new JsonSettingsStore(appDataDirectory, logger);
+        var settingsStore = new CoalescingSettingsStore(
+            new JsonSettingsStore(appDataDirectory, logger),
+            logger);
         var codexDiscoveryService = new CodexDiscoveryService(logger);
         var codexProcessService = new CodexProcessService(logger);
+        var appServerSessionCoordinator = new AppServerSessionCoordinator(
+            codexProcessService,
+            logger,
+            new CodexAppServerClientMetadata(
+                "native_codex_assistant",
+                "Native Codex Assistant",
+                Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.1.0"));
         var authService = new CodexAuthService(logger);
         var gitService = new GitService(logger);
         var worktreeService = new WorktreeService(logger);
@@ -110,7 +120,7 @@ public sealed class AppServices
         return new AppServices(
             settingsStore,
             codexDiscoveryService,
-            codexProcessService,
+            appServerSessionCoordinator,
             authService,
             gitService,
             worktreeService,

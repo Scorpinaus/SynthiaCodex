@@ -1,4 +1,5 @@
 using System.Threading;
+using System.Diagnostics;
 using System.Windows;
 using NativeCodexAssistant.App.ViewModels;
 using NativeCodexAssistant.Core.Logging;
@@ -14,6 +15,7 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        var startupTimer = Stopwatch.StartNew();
         instanceMutex = new Mutex(initiallyOwned: true, MutexName, out var isFirstInstance);
         if (!isFirstInstance)
         {
@@ -32,7 +34,7 @@ public partial class App : Application
         mainViewModel = new MainViewModel(
             services.SettingsStore,
             services.CodexDiscoveryService,
-            services.CodexProcessService,
+            services.AppServerSessionCoordinator,
             services.AuthService,
             services.GitService,
             services.WorktreeService,
@@ -48,9 +50,29 @@ public partial class App : Application
 
         MainWindow = new MainWindow(mainViewModel);
         MainWindow.Show();
-        _ = mainViewModel.InitializeAsync();
+        services.Logger.Log(
+            AppLogLevel.Information,
+            "startup_shell_visible",
+            "The application shell became visible.",
+            new Dictionary<string, string?> { ["elapsedMilliseconds"] = startupTimer.ElapsedMilliseconds.ToString() });
+        _ = InitializeMainViewModelAsync(services.Logger, startupTimer);
 
         base.OnStartup(e);
+    }
+
+    private async Task InitializeMainViewModelAsync(IAppLogger logger, Stopwatch startupTimer)
+    {
+        if (mainViewModel is null)
+        {
+            return;
+        }
+
+        await mainViewModel.InitializeAsync().ConfigureAwait(true);
+        logger.Log(
+            AppLogLevel.Information,
+            "startup_ready",
+            "The application completed startup diagnostics and became ready.",
+            new Dictionary<string, string?> { ["elapsedMilliseconds"] = startupTimer.ElapsedMilliseconds.ToString() });
     }
 
     protected override void OnExit(ExitEventArgs e)

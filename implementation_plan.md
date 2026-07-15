@@ -591,6 +591,8 @@ Phase 5A should avoid a broad application-layer rewrite. Small extractions neede
 
 ## 12B. Phase 5B: Architecture and Performance Optimization
 
+**Status:** Complete — 15 July 2026. The completed checklist, architecture, measurements, and verification record are maintained in `phase_5b_architecture_optimization.md` and `docs/current-architecture.md`.
+
 ### Goals
 
 Reduce application-layer concentration, improve streaming and rendering efficiency, and establish maintainable feature boundaries before Phase 6 expands the product surface.

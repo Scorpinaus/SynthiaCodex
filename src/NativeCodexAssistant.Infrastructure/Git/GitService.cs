@@ -267,7 +267,15 @@ public sealed class GitService(IAppLogger logger) : IGitService
 
         var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            await TerminateAsync(process).ConfigureAwait(false);
+            throw;
+        }
         var result = new GitCommandResult(
             process.ExitCode,
             await outputTask.ConfigureAwait(false),
@@ -294,6 +302,16 @@ public sealed class GitService(IAppLogger logger) : IGitService
         }
 
         return result;
+    }
+
+    private static async Task TerminateAsync(Process process)
+    {
+        if (!process.HasExited)
+        {
+            process.Kill(entireProcessTree: true);
+        }
+
+        await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
     private static void EnsureRepositoryRoot(string repositoryRoot)

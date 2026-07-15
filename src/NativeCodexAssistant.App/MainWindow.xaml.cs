@@ -41,9 +41,7 @@ public partial class MainWindow : Window
             DispatcherPriority.Input,
             () =>
             {
-                var composer = viewModel.IsTurnRunning ? GuidanceBox : PromptBox;
-                composer.Focus();
-                composer.CaretIndex = composer.Text.Length;
+                TaskFeature.FocusComposer(viewModel.IsTurnRunning);
             });
     }
 

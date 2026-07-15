@@ -35,7 +35,15 @@ public sealed class CodexCliUtilityRunner(IAppLogger logger) : ICodexCliUtilityR
         process.Start();
         var standardOutput = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var standardError = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            await TerminateAsync(process).ConfigureAwait(false);
+            throw;
+        }
 
         var result = new CodexCliUtilityResult(
             command,
@@ -54,6 +62,16 @@ public sealed class CodexCliUtilityRunner(IAppLogger logger) : ICodexCliUtilityR
             });
 
         return result;
+    }
+
+    private static async Task TerminateAsync(Process process)
+    {
+        if (!process.HasExited)
+        {
+            process.Kill(entireProcessTree: true);
+        }
+
+        await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
     private static ProcessStartInfo CreateStartInfo(string executablePath, string command)

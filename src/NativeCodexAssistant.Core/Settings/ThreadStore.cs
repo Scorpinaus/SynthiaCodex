@@ -14,6 +14,7 @@ public sealed class ThreadStore
             .Where(thread => includeArchived || !thread.IsArchived)
             .OrderByDescending(thread => thread.IsPinned)
             .ThenByDescending(thread => thread.UpdatedAt)
+            .Select(ToPresentation)
             .ToList();
     }
 
@@ -31,7 +32,7 @@ public sealed class ThreadStore
             string.Equals(thread.ThreadId, state.ThreadId, StringComparison.Ordinal));
         if (existing is null)
         {
-            settings.ProjectThreads.Add(state);
+            settings.ProjectThreads.Add(ToPersisted(state));
             return state;
         }
 
@@ -49,12 +50,13 @@ public sealed class ThreadStore
         existing.RawEvents = state.RawEvents;
         existing.CreatedAt = state.CreatedAt;
         existing.UpdatedAt = state.UpdatedAt;
-        return existing;
+        return ToPresentation(existing);
     }
 
     public void SetActive(AppSettings settings, string projectPath, string threadId)
     {
-        var threads = GetProjectThreads(settings, projectPath);
+        var normalizedProject = NormalizePath(projectPath);
+        var threads = settings.ProjectThreads.Where(thread => PathsEqual(thread.ProjectPath, normalizedProject));
         foreach (var thread in threads)
         {
             thread.IsActive = string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal);
@@ -63,7 +65,9 @@ public sealed class ThreadStore
 
     public void SetArchived(AppSettings settings, string projectPath, string threadId, bool archived)
     {
-        var thread = GetProjectThreads(settings, projectPath)
+        var normalizedProject = NormalizePath(projectPath);
+        var thread = settings.ProjectThreads
+            .Where(item => PathsEqual(item.ProjectPath, normalizedProject))
             .FirstOrDefault(item => string.Equals(item.ThreadId, threadId, StringComparison.Ordinal))
             ?? throw new InvalidOperationException($"Thread '{threadId}' was not found for this project.");
         thread.IsArchived = archived;
@@ -82,4 +86,46 @@ public sealed class ThreadStore
 
         return string.Equals(NormalizePath(left), NormalizePath(right), StringComparison.OrdinalIgnoreCase);
     }
+
+    private static ProjectThreadState ToPresentation(PersistedProjectThread source) => new()
+    {
+        ProjectPath = source.ProjectPath,
+        ThreadId = source.ThreadId,
+        Title = source.Title,
+        Preview = source.Preview,
+        IsArchived = source.IsArchived,
+        IsPinned = source.IsPinned,
+        IsActive = source.IsActive,
+        IsRunning = source.IsRunning,
+        TurnStatus = source.TurnStatus,
+        Mode = source.Mode,
+        WorkspacePath = source.WorkspacePath,
+        WorktreeBranch = source.WorktreeBranch,
+        CreatedAt = source.CreatedAt,
+        FinalResponse = source.FinalResponse,
+        TimelineItems = [.. source.TimelineItems],
+        RawEvents = [.. source.RawEvents],
+        UpdatedAt = source.UpdatedAt
+    };
+
+    private static PersistedProjectThread ToPersisted(ProjectThreadState source) => new()
+    {
+        ProjectPath = source.ProjectPath,
+        ThreadId = source.ThreadId,
+        Title = source.Title,
+        Preview = source.Preview,
+        IsArchived = source.IsArchived,
+        IsPinned = source.IsPinned,
+        IsActive = source.IsActive,
+        IsRunning = source.IsRunning,
+        TurnStatus = source.TurnStatus,
+        Mode = source.Mode,
+        WorkspacePath = source.WorkspacePath,
+        WorktreeBranch = source.WorktreeBranch,
+        CreatedAt = source.CreatedAt,
+        FinalResponse = source.FinalResponse,
+        TimelineItems = [.. source.TimelineItems],
+        RawEvents = [.. source.RawEvents],
+        UpdatedAt = source.UpdatedAt
+    };
 }

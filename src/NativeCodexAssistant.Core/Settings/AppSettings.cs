@@ -21,7 +21,30 @@ public sealed class AppSettings
 
     public List<RecentProject> RecentProjects { get; set; } = [];
 
-    public List<ProjectThreadState> ProjectThreads { get; set; } = [];
+    public List<PersistedProjectThread> ProjectThreads { get; set; } = [];
+}
+
+// Storage-only DTO. Keep property names stable so Phase 3-5A settings.json files
+// deserialize without a migration or schema rewrite.
+public sealed class PersistedProjectThread
+{
+    public string ProjectPath { get; set; } = string.Empty;
+    public string ThreadId { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Preview { get; set; } = string.Empty;
+    public bool IsArchived { get; set; }
+    public bool IsPinned { get; set; }
+    public bool IsActive { get; set; }
+    public bool IsRunning { get; set; }
+    public string TurnStatus { get; set; } = "Idle";
+    public string Mode { get; set; } = "local";
+    public string? WorkspacePath { get; set; }
+    public string? WorktreeBranch { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public string FinalResponse { get; set; } = string.Empty;
+    public List<CodexTimelineItem> TimelineItems { get; set; } = [];
+    public List<string> RawEvents { get; set; } = [];
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class ProjectThreadState : INotifyPropertyChanged

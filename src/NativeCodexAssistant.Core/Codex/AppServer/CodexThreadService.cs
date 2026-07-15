@@ -6,6 +6,9 @@ namespace NativeCodexAssistant.Core.Codex.AppServer;
 
 public sealed class CodexThreadService
 {
+    public const int MaximumTimelineItems = 500;
+    public const int MaximumRawEvents = 500;
+
     private readonly StringBuilder finalResponseBuilder = new();
 
     public ObservableCollection<CodexTimelineItem> TimelineItems { get; } = [];
@@ -57,7 +60,7 @@ public sealed class CodexThreadService
         {
             foreach (var item in timelineItems)
             {
-                TimelineItems.Add(item);
+                AddBounded(TimelineItems, item, MaximumTimelineItems);
             }
         }
 
@@ -65,14 +68,17 @@ public sealed class CodexThreadService
         {
             foreach (var rawEvent in rawEvents)
             {
-                RawEvents.Add(rawEvent);
+                AddBounded(RawEvents, rawEvent, MaximumRawEvents);
             }
         }
     }
 
     public void ApplyNotification(AppServerNotification notification)
     {
-        RawEvents.Add($"{notification.Method}: {notification.Params.ToJsonString()}");
+        AddBounded(
+            RawEvents,
+            $"{notification.Method}: {notification.Params.ToJsonString()}",
+            MaximumRawEvents);
         CaptureErrorState(notification.Params);
 
         switch (notification.Method)
@@ -266,12 +272,25 @@ public sealed class CodexThreadService
 
     private void Add(CodexTimelineItemKind kind, string title, string? detail, AppServerNotification notification)
     {
-        TimelineItems.Add(new CodexTimelineItem(
-            kind,
-            title,
-            detail ?? string.Empty,
-            notification.Method,
-            DateTimeOffset.Now));
+        AddBounded(
+            TimelineItems,
+            new CodexTimelineItem(
+                kind,
+                title,
+                detail ?? string.Empty,
+                notification.Method,
+                DateTimeOffset.Now),
+            MaximumTimelineItems);
+    }
+
+    private static void AddBounded<T>(ObservableCollection<T> collection, T item, int maximumCount)
+    {
+        while (collection.Count >= maximumCount)
+        {
+            collection.RemoveAt(0);
+        }
+
+        collection.Add(item);
     }
 
     private static string? ReadString(JsonObject obj, string path)

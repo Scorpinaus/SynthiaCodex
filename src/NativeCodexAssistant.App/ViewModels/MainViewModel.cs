@@ -12,37 +12,33 @@ using NativeCodexAssistant.Core.Projects;
 using NativeCodexAssistant.Core.Settings;
 using NativeCodexAssistant.Core.Terminal;
 using NativeCodexAssistant.Core.Worktrees;
-using NativeCodexAssistant.Infrastructure.Codex;
 
 namespace NativeCodexAssistant.App.ViewModels;
 
 public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly ISettingsStore settingsStore;
-    private readonly ICodexDiscoveryService codexDiscoveryService;
-    private readonly ICodexProcessService codexProcessService;
-    private readonly IAuthService authService;
+    private readonly IAppServerSessionCoordinator appServerSessionCoordinator;
     private readonly IGitService gitService;
     private readonly IWorktreeService worktreeService;
     private readonly IRecentProjectService recentProjectService;
     private readonly IFolderPicker folderPicker;
     private readonly IUserInteractionService userInteractionService;
     private readonly IThemeService themeService;
-    private readonly ICodexCliUtilityRunner codexCliUtilityRunner;
     private readonly ThreadStore threadStore;
     private readonly CodexThreadWorkspace threadWorkspace;
-    private readonly ITerminalService terminalService;
     private readonly IAppLogger logger;
-    private readonly SemaphoreSlim appServerLifecycleGate = new(1, 1);
     private readonly CancellationTokenSource appServerWarmUpCancellation = new();
-    private CodexThreadService threadService = new();
+    private CodexThreadService threadService
+    {
+        get => TaskWorkspace.ThreadService;
+        set => TaskWorkspace.UseThreadService(value);
+    }
     private readonly SynchronizationContext? synchronizationContext;
     private readonly AsyncRelayCommand submitPromptCommand;
     private readonly AsyncRelayCommand cancelTurnCommand;
     private readonly AsyncRelayCommand loadModelsCommand;
     private readonly AsyncRelayCommand exitApplicationCommand;
-    private readonly AsyncRelayCommand refreshGitCommand;
-    private readonly AsyncRelayCommand runCodexDoctorCommand;
     private readonly AsyncRelayCommand newThreadCommand;
     private readonly AsyncRelayCommand resumeThreadCommand;
     private readonly AsyncRelayCommand forkThreadCommand;
@@ -50,52 +46,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand unarchiveThreadCommand;
     private readonly AsyncRelayCommand steerTurnCommand;
     private readonly AsyncRelayCommand removeWorktreeCommand;
-    private readonly AsyncRelayCommand showWorkingDiffCommand;
-    private readonly AsyncRelayCommand showStagedDiffCommand;
-    private readonly AsyncRelayCommand stageSelectedFileCommand;
-    private readonly AsyncRelayCommand unstageSelectedFileCommand;
-    private readonly AsyncRelayCommand revertSelectedFileCommand;
-    private readonly AsyncRelayCommand commitCommand;
-    private readonly RelayCommand openInEditorCommand;
-    private readonly RelayCommand revealInExplorerCommand;
-    private readonly AsyncRelayCommand startTerminalCommand;
-    private readonly AsyncRelayCommand sendTerminalInputCommand;
-    private readonly AsyncRelayCommand killTerminalCommand;
-    private readonly RelayCommand clearTerminalCommand;
-    private readonly RelayCommand toggleTerminalCommand;
     private readonly RelayCommand toggleProjectRailCommand;
     private readonly RelayCommand toggleDetailsPaneCommand;
 
     private AppSettings settings = new();
-    private CodexInstallation currentCodex = CodexInstallation.Missing("Detection has not run yet.");
-    private AuthenticationState currentAuth = new(AuthReadiness.Unknown, "Checking sign-in", "Authentication detection has not run yet.", null);
-    private string? selectedProjectPath;
+    private CodexInstallation currentCodex => DiagnosticsViewModel.Installation;
+    private AuthenticationState currentAuth => DiagnosticsViewModel.Authentication;
     private string? activeThreadId;
     private string? activeTurnId;
-    private string promptText = string.Empty;
-    private string modelOverride = string.Empty;
-    private string reasoningEffortOverride = string.Empty;
     private string selectedTheme = "System";
-    private string newThreadWorkspaceMode = "Current checkout";
-    private string steeringText = string.Empty;
-    private string appServerHealth = "Codex idle";
     private string statusMessage = "Starting";
-    private string? gitRepositoryRoot;
-    private string gitBranch = "No repository";
-    private string gitStatusMessage = "Select a project to inspect Git changes";
-    private string selectedDiff = "Select a changed file to inspect its diff.";
-    private string commitMessage = string.Empty;
-    private string terminalInput = string.Empty;
-    private string terminalOutput = string.Empty;
-    private string terminalStatus = "Not started";
-    private string terminalWorkingDirectory = "No terminal session";
-    private GitChangedFile? selectedGitFile;
-    private ProjectThreadState? selectedThread;
-    private bool isBusy;
-    private bool isGitBusy;
-    private bool isShowingStagedDiff;
-    private bool isTurnRunning;
-    private bool isTerminalVisible;
     private bool isProjectRailOpen = true;
     private bool isDetailsPaneOpen;
     private bool isCompactLayout;
@@ -105,17 +65,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool isShuttingDown;
     private Task? shutdownTask;
     private Task? appServerWarmUpTask;
-    private CodexAppServerClient? appServerClient;
-    private CodexCliUtilityResult? lastDoctorResult;
     private readonly HashSet<string> loadedThreadIds = new(StringComparer.Ordinal);
     private readonly HashSet<string> runningThreadIds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> activeTurnIds = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, TerminalState> terminalStates = new(StringComparer.OrdinalIgnoreCase);
 
     public MainViewModel(
         ISettingsStore settingsStore,
         ICodexDiscoveryService codexDiscoveryService,
-        ICodexProcessService codexProcessService,
+        IAppServerSessionCoordinator appServerSessionCoordinator,
         IAuthService authService,
         IGitService gitService,
         IWorktreeService worktreeService,
@@ -130,88 +87,149 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         IAppLogger logger)
     {
         this.settingsStore = settingsStore;
-        this.codexDiscoveryService = codexDiscoveryService;
-        this.codexProcessService = codexProcessService;
-        this.authService = authService;
+        this.appServerSessionCoordinator = appServerSessionCoordinator;
         this.gitService = gitService;
         this.worktreeService = worktreeService;
         this.recentProjectService = recentProjectService;
         this.folderPicker = folderPicker;
         this.userInteractionService = userInteractionService;
         this.themeService = themeService;
-        this.codexCliUtilityRunner = codexCliUtilityRunner;
         this.threadStore = threadStore;
         this.threadWorkspace = threadWorkspace;
-        this.terminalService = terminalService;
         this.logger = logger;
         synchronizationContext = SynchronizationContext.Current;
+        appServerSessionCoordinator.NotificationReceived += OnAppServerNotificationReceived;
+        appServerSessionCoordinator.ConnectionFailed += OnAppServerConnectionFailed;
+        appServerSessionCoordinator.StateChanged += OnAppServerStateChanged;
 
-        BrowseProjectCommand = new AsyncRelayCommand(BrowseProjectAsync);
-        RefreshDiagnosticsCommand = new AsyncRelayCommand(RefreshDiagnosticsAsync);
-        RunCodexDoctorCommand = runCodexDoctorCommand = new AsyncRelayCommand(RunCodexDoctorAsync, CanRunCodexDoctor);
-        NewThreadCommand = newThreadCommand = new AsyncRelayCommand(NewThreadAsync, CanManageThreads);
-        ResumeThreadCommand = resumeThreadCommand = new AsyncRelayCommand(ResumeSelectedThreadAsync, CanUseSelectedThread);
-        ForkThreadCommand = forkThreadCommand = new AsyncRelayCommand(ForkSelectedThreadAsync, CanUseSelectedThread);
-        ArchiveThreadCommand = archiveThreadCommand = new AsyncRelayCommand(ArchiveSelectedThreadAsync, CanArchiveSelectedThread);
-        UnarchiveThreadCommand = unarchiveThreadCommand = new AsyncRelayCommand(UnarchiveSelectedThreadAsync, CanUnarchiveSelectedThread);
-        SteerTurnCommand = steerTurnCommand = new AsyncRelayCommand(SteerTurnAsync, CanSteerTurn);
-        RemoveWorktreeCommand = removeWorktreeCommand = new AsyncRelayCommand(RemoveSelectedWorktreeAsync, CanRemoveSelectedWorktree);
-        OpenRecentProjectCommand = new AsyncRelayCommand(OpenRecentProjectAsync);
-        SignInChatGptCommand = new AsyncRelayCommand(() => StartLoginAsync(LoginMethod.ChatGpt));
-        SignInDeviceCodeCommand = new AsyncRelayCommand(() => StartLoginAsync(LoginMethod.DeviceCode));
-        SignOutCommand = new AsyncRelayCommand(SignOutAsync);
-        SubmitPromptCommand = submitPromptCommand = new AsyncRelayCommand(SubmitPromptAsync);
-        CancelTurnCommand = cancelTurnCommand = new AsyncRelayCommand(CancelTurnAsync, CanCancelTurn);
-        LoadModelsCommand = loadModelsCommand = new AsyncRelayCommand(LoadModelOptionsAsync);
+        DiagnosticsViewModel = new DiagnosticsViewModel(
+            codexDiscoveryService,
+            authService,
+            codexCliUtilityRunner,
+            logger,
+            () => settings.PreferredCodexPath,
+            () => IsShuttingDown,
+            message => StatusMessage = message,
+            settingsStore.SettingsPath);
+        DiagnosticsViewModel.EnvironmentChanged += (_, _) => RaiseComputedProperties();
+        DiagnosticsViewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(DiagnosticsViewModel.IsBusy))
+            {
+                OnPropertyChanged(nameof(IsBusy));
+            }
+        };
+
+        Git = new GitViewModel(
+            gitService,
+            userInteractionService,
+            logger,
+            CreateGitContext,
+            () => IsShuttingDown,
+            message => StatusMessage = message);
+        Git.PropertyChanged += (_, args) => RelayGitPropertyChanged(args.PropertyName);
+
+        TaskWorkspace = new TaskViewModel(
+            SubmitPromptAsync,
+            CancelTurnAsync,
+            LoadModelOptionsAsync,
+            SteerTurnAsync,
+            CanCancelTurn,
+            CanSteerTurn);
+        TaskWorkspace.PropertyChanged += (_, args) => RelayTaskPropertyChanged(args.PropertyName);
+
+        ProjectWorkspace = new ProjectThreadViewModel(
+            BrowseProjectAsync,
+            OpenRecentProjectAsync,
+            NewThreadAsync,
+            ResumeSelectedThreadAsync,
+            ForkSelectedThreadAsync,
+            ArchiveSelectedThreadAsync,
+            UnarchiveSelectedThreadAsync,
+            RemoveSelectedWorktreeAsync,
+            CanManageThreads,
+            CanUseSelectedThread,
+            CanArchiveSelectedThread,
+            CanUnarchiveSelectedThread,
+            CanRemoveSelectedWorktree,
+            HandleSelectedThreadChanged);
+        ProjectWorkspace.PropertyChanged += (_, args) => RelayProjectPropertyChanged(args.PropertyName);
+
+        BrowseProjectCommand = ProjectWorkspace.BrowseProjectCommand;
+        RefreshDiagnosticsCommand = DiagnosticsViewModel.RefreshCommand;
+        RunCodexDoctorCommand = DiagnosticsViewModel.RunDoctorCommand;
+        NewThreadCommand = newThreadCommand = (AsyncRelayCommand)ProjectWorkspace.NewThreadCommand;
+        ResumeThreadCommand = resumeThreadCommand = (AsyncRelayCommand)ProjectWorkspace.ResumeThreadCommand;
+        ForkThreadCommand = forkThreadCommand = (AsyncRelayCommand)ProjectWorkspace.ForkThreadCommand;
+        ArchiveThreadCommand = archiveThreadCommand = (AsyncRelayCommand)ProjectWorkspace.ArchiveThreadCommand;
+        UnarchiveThreadCommand = unarchiveThreadCommand = (AsyncRelayCommand)ProjectWorkspace.UnarchiveThreadCommand;
+        SteerTurnCommand = steerTurnCommand = (AsyncRelayCommand)TaskWorkspace.SteerCommand;
+        RemoveWorktreeCommand = removeWorktreeCommand = (AsyncRelayCommand)ProjectWorkspace.RemoveWorktreeCommand;
+        OpenRecentProjectCommand = ProjectWorkspace.OpenRecentProjectCommand;
+        SignInChatGptCommand = DiagnosticsViewModel.SignInChatGptCommand;
+        SignInDeviceCodeCommand = DiagnosticsViewModel.SignInDeviceCodeCommand;
+        SignOutCommand = DiagnosticsViewModel.SignOutCommand;
+        SubmitPromptCommand = submitPromptCommand = (AsyncRelayCommand)TaskWorkspace.SubmitCommand;
+        CancelTurnCommand = cancelTurnCommand = (AsyncRelayCommand)TaskWorkspace.CancelCommand;
+        LoadModelsCommand = loadModelsCommand = (AsyncRelayCommand)TaskWorkspace.LoadModelsCommand;
         ExitApplicationCommand = exitApplicationCommand = new AsyncRelayCommand(RequestApplicationExitAsync, () => !isShuttingDown);
-        RefreshGitCommand = refreshGitCommand = new AsyncRelayCommand(RefreshGitAsync, CanUseGitProject);
-        ShowWorkingDiffCommand = showWorkingDiffCommand = new AsyncRelayCommand(() => LoadSelectedDiffAsync(staged: false), CanShowWorkingDiff);
-        ShowStagedDiffCommand = showStagedDiffCommand = new AsyncRelayCommand(() => LoadSelectedDiffAsync(staged: true), CanShowStagedDiff);
-        StageSelectedFileCommand = stageSelectedFileCommand = new AsyncRelayCommand(StageSelectedFileAsync, CanStageSelectedFile);
-        UnstageSelectedFileCommand = unstageSelectedFileCommand = new AsyncRelayCommand(UnstageSelectedFileAsync, CanUnstageSelectedFile);
-        RevertSelectedFileCommand = revertSelectedFileCommand = new AsyncRelayCommand(RevertSelectedFileAsync, CanMutateSelectedFile);
-        CommitCommand = commitCommand = new AsyncRelayCommand(CommitAsync, CanCommit);
-        OpenInEditorCommand = openInEditorCommand = new RelayCommand(OpenInEditor, CanOpenProjectTarget);
-        RevealInExplorerCommand = revealInExplorerCommand = new RelayCommand(RevealInExplorer, CanOpenProjectTarget);
-        StartTerminalCommand = startTerminalCommand = new AsyncRelayCommand(StartTerminalAsync, CanStartTerminal);
-        SendTerminalInputCommand = sendTerminalInputCommand = new AsyncRelayCommand(SendTerminalInputAsync, CanSendTerminalInput);
-        KillTerminalCommand = killTerminalCommand = new AsyncRelayCommand(KillTerminalAsync, CanKillTerminal);
-        ClearTerminalCommand = clearTerminalCommand = new RelayCommand(ClearTerminal, CanClearTerminal);
-        ToggleTerminalCommand = toggleTerminalCommand = new RelayCommand(ToggleTerminal, () => !IsShuttingDown);
+        RefreshGitCommand = Git.RefreshCommand;
+        ShowWorkingDiffCommand = Git.ShowWorkingDiffCommand;
+        ShowStagedDiffCommand = Git.ShowStagedDiffCommand;
+        StageSelectedFileCommand = Git.StageCommand;
+        UnstageSelectedFileCommand = Git.UnstageCommand;
+        RevertSelectedFileCommand = Git.DiscardCommand;
+        CommitCommand = Git.CommitCommand;
+        OpenInEditorCommand = Git.OpenEditorCommand;
+        RevealInExplorerCommand = Git.RevealExplorerCommand;
+        Terminal = new TerminalViewModel(
+            terminalService,
+            logger,
+            CreateTerminalContext,
+            () => IsShuttingDown,
+            message => StatusMessage = message,
+            () => SelectedWorkspaceTabIndex = 1);
+        Terminal.PropertyChanged += (_, args) => RelayTerminalPropertyChanged(args.PropertyName);
+        StartTerminalCommand = Terminal.StartCommand;
+        SendTerminalInputCommand = Terminal.SendInputCommand;
+        KillTerminalCommand = Terminal.KillCommand;
+        ClearTerminalCommand = Terminal.ClearCommand;
+        ToggleTerminalCommand = Terminal.ToggleCommand;
         ToggleProjectRailCommand = toggleProjectRailCommand = new RelayCommand(ToggleProjectRail, () => !IsShuttingDown);
         ToggleDetailsPaneCommand = toggleDetailsPaneCommand = new RelayCommand(ToggleDetailsPane, () => !IsShuttingDown);
     }
 
     public event EventHandler? CloseRequested;
 
-    public ObservableCollection<RecentProject> RecentProjects { get; } = [];
+    public ObservableCollection<RecentProject> RecentProjects => ProjectWorkspace.RecentProjects;
 
-    public ObservableCollection<string> Diagnostics { get; } = [];
+    public ObservableCollection<string> Diagnostics => DiagnosticsViewModel.Lines;
 
-    public ObservableCollection<CodexTimelineItem> TimelineItems => threadService.TimelineItems;
+    public ObservableCollection<CodexTimelineItem> TimelineItems => TaskWorkspace.TimelineItems;
 
-    public ObservableCollection<string> RawEvents => threadService.RawEvents;
+    public ObservableCollection<string> RawEvents => TaskWorkspace.RawEvents;
 
-    public ObservableCollection<string> ModelOptions { get; } = [];
+    public ObservableCollection<string> ModelOptions => TaskWorkspace.ModelOptions;
 
-    public ObservableCollection<GitChangedFile> ChangedFiles { get; } = [];
+    public ObservableCollection<GitChangedFile> ChangedFiles => Git.ChangedFiles;
 
-    public ObservableCollection<ProjectThreadState> ProjectThreads { get; } = [];
+    public ObservableCollection<ProjectThreadState> ProjectThreads => ProjectWorkspace.Threads;
 
-    public ObservableCollection<string> ReasoningEffortOptions { get; } =
-    [
-        string.Empty,
-        "none",
-        "minimal",
-        "low",
-        "medium",
-        "high",
-        "xhigh"
-    ];
+    public TerminalViewModel Terminal { get; }
+
+    public DiagnosticsViewModel DiagnosticsViewModel { get; }
+
+    public GitViewModel Git { get; }
+
+    public ProjectThreadViewModel ProjectWorkspace { get; }
+
+    public TaskViewModel TaskWorkspace { get; }
+
+    public ObservableCollection<string> ReasoningEffortOptions => TaskWorkspace.ReasoningEffortOptions;
 
     public IReadOnlyList<string> ThemeOptions { get; } = ["System", "Light", "Dark"];
 
-    public IReadOnlyList<string> WorkspaceModeOptions { get; } = ["Current checkout", "New worktree"];
+    public IReadOnlyList<string> WorkspaceModeOptions => ProjectWorkspace.WorkspaceModeOptions;
 
     public ICommand BrowseProjectCommand { get; }
 
@@ -283,40 +301,31 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public string? SelectedProjectPath
     {
-        get => selectedProjectPath;
+        get => ProjectWorkspace.SelectedProjectPath;
         private set
         {
-            if (SetProperty(ref selectedProjectPath, value))
-            {
-                OnPropertyChanged(nameof(SelectedProjectName));
-                refreshGitCommand.RaiseCanExecuteChanged();
-                openInEditorCommand.RaiseCanExecuteChanged();
-                revealInExplorerCommand.RaiseCanExecuteChanged();
-                RaiseThreadCommandStates();
-                RefreshVisibleTerminal();
-            }
+            ProjectWorkspace.SetSelectedProjectPath(value);
+            Git.RaiseCommandStates();
+            Terminal.RefreshContext();
         }
     }
 
-    public string SelectedProjectName =>
-        string.IsNullOrWhiteSpace(SelectedProjectPath)
-            ? "No project selected"
-            : new DirectoryInfo(SelectedProjectPath).Name;
+    public string SelectedProjectName => ProjectWorkspace.SelectedProjectName;
 
     public string NewThreadWorkspaceMode
     {
-        get => newThreadWorkspaceMode;
-        set => SetProperty(ref newThreadWorkspaceMode, value == "New worktree" ? value : "Current checkout");
+        get => ProjectWorkspace.NewThreadWorkspaceMode;
+        set => ProjectWorkspace.NewThreadWorkspaceMode = value;
     }
 
-    public string ActiveWorkspacePath => SelectedThread?.WorkspacePath ?? SelectedProjectPath ?? "No workspace selected";
+    public string ActiveWorkspacePath => ProjectWorkspace.ActiveWorkspacePath;
 
-    public string ActiveWorkspaceLabel => SelectedThread?.WorkspaceModeLabel ?? "Current checkout";
+    public string ActiveWorkspaceLabel => ProjectWorkspace.ActiveWorkspaceLabel;
 
     public bool IsTerminalVisible
     {
-        get => isTerminalVisible;
-        set => SetProperty(ref isTerminalVisible, value);
+        get => Terminal.IsVisible;
+        set => Terminal.IsVisible = value;
     }
 
     public bool IsProjectRailOpen
@@ -345,35 +354,26 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public string TerminalInput
     {
-        get => terminalInput;
-        set
-        {
-            if (SetProperty(ref terminalInput, value))
-            {
-                sendTerminalInputCommand.RaiseCanExecuteChanged();
-            }
-        }
+        get => Terminal.Input;
+        set => Terminal.Input = value;
     }
 
     public string TerminalOutput
     {
-        get => terminalOutput;
-        private set => SetProperty(ref terminalOutput, value);
+        get => Terminal.Output;
     }
 
     public string TerminalStatus
     {
-        get => terminalStatus;
-        private set => SetProperty(ref terminalStatus, value);
+        get => Terminal.Status;
     }
 
     public string TerminalWorkingDirectory
     {
-        get => terminalWorkingDirectory;
-        private set => SetProperty(ref terminalWorkingDirectory, value);
+        get => Terminal.WorkingDirectory;
     }
 
-    public bool IsTerminalRunning => GetCurrentTerminalState()?.Session.IsRunning == true;
+    public bool IsTerminalRunning => Terminal.IsRunning;
 
     public string CodexSummary => currentCodex.Summary;
 
@@ -391,20 +391,20 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public string PromptText
     {
-        get => promptText;
-        set => SetProperty(ref promptText, value);
+        get => TaskWorkspace.Prompt;
+        set => TaskWorkspace.Prompt = value;
     }
 
     public string ModelOverride
     {
-        get => modelOverride;
-        set => SetProperty(ref modelOverride, value);
+        get => TaskWorkspace.ModelOverride;
+        set => TaskWorkspace.ModelOverride = value;
     }
 
     public string ReasoningEffortOverride
     {
-        get => reasoningEffortOverride;
-        set => SetProperty(ref reasoningEffortOverride, value);
+        get => TaskWorkspace.ReasoningEffortOverride;
+        set => TaskWorkspace.ReasoningEffortOverride = value;
     }
 
     public string SelectedTheme
@@ -426,95 +426,50 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public ProjectThreadState? SelectedThread
     {
-        get => selectedThread;
-        set
-        {
-            if (!SetProperty(ref selectedThread, value))
-            {
-                return;
-            }
-
-            SelectThread(value);
-            OnPropertyChanged(nameof(ActiveWorkspacePath));
-            OnPropertyChanged(nameof(ActiveWorkspaceLabel));
-            removeWorktreeCommand.RaiseCanExecuteChanged();
-            RefreshVisibleTerminal();
-            _ = RefreshGitAsync();
-        }
+        get => ProjectWorkspace.SelectedThread;
+        set => ProjectWorkspace.SelectedThread = value;
     }
 
     public string SteeringText
     {
-        get => steeringText;
-        set
-        {
-            if (SetProperty(ref steeringText, value))
-            {
-                steerTurnCommand.RaiseCanExecuteChanged();
-            }
-        }
+        get => TaskWorkspace.SteeringText;
+        set => TaskWorkspace.SteeringText = value;
     }
 
     public string AppServerHealth
     {
-        get => appServerHealth;
-        private set => SetProperty(ref appServerHealth, value);
+        get => TaskWorkspace.AppServerHealth;
+        private set => TaskWorkspace.AppServerHealth = value;
     }
 
-    public string FinalResponse =>
-        string.IsNullOrWhiteSpace(threadService.FinalResponse)
-            ? "No final response yet"
-            : threadService.FinalResponse;
+    public string FinalResponse => TaskWorkspace.FinalResponse;
 
-    public string GitBranch => gitBranch;
+    public string GitBranch => Git.Branch;
 
     public string GitStatusMessage
     {
-        get => gitStatusMessage;
-        private set => SetProperty(ref gitStatusMessage, value);
+        get => Git.StatusMessage;
     }
 
-    public bool IsGitRepository => !string.IsNullOrWhiteSpace(gitRepositoryRoot);
+    public bool IsGitRepository => Git.IsRepository;
 
     public GitChangedFile? SelectedGitFile
     {
-        get => selectedGitFile;
-        set
-        {
-            if (!SetProperty(ref selectedGitFile, value))
-            {
-                return;
-            }
-
-            RaiseGitCommandStates();
-            if (value is null)
-            {
-                SelectedDiff = "Select a changed file to inspect its diff.";
-                return;
-            }
-
-            _ = LoadSelectedDiffAsync(value.IsStaged && !value.HasWorkingTreeChanges);
-        }
+        get => Git.SelectedFile;
+        set => Git.SelectedFile = value;
     }
 
     public string SelectedDiff
     {
-        get => selectedDiff;
-        private set => SetProperty(ref selectedDiff, value);
+        get => Git.SelectedDiff;
     }
 
-    public string DiffViewLabel => isShowingStagedDiff ? "Staged diff" : "Working tree diff";
+    public string DiffViewLabel => Git.DiffViewLabel;
 
     public string CommitMessage
     {
-        get => commitMessage;
-        set
-        {
-            if (SetProperty(ref commitMessage, value))
-            {
-                commitCommand.RaiseCanExecuteChanged();
-            }
-        }
+        get => Git.CommitMessage;
+        set => Git.CommitMessage = value;
     }
 
     public string StatusMessage
@@ -523,46 +478,20 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         private set => SetProperty(ref statusMessage, value);
     }
 
-    public bool IsBusy
-    {
-        get => isBusy;
-        private set
-        {
-            if (SetProperty(ref isBusy, value))
-            {
-                runCodexDoctorCommand.RaiseCanExecuteChanged();
-            }
-        }
-    }
+    public bool IsBusy => DiagnosticsViewModel.IsBusy;
 
     public bool IsGitBusy
     {
-        get => isGitBusy;
-        private set
-        {
-            if (SetProperty(ref isGitBusy, value))
-            {
-                RaiseGitCommandStates();
-            }
-        }
+        get => Git.IsBusy;
     }
 
     public bool IsTurnRunning
     {
-        get => isTurnRunning;
+        get => TaskWorkspace.IsTurnRunning;
         private set
         {
-            if (SetProperty(ref isTurnRunning, value))
-            {
-                if (!value)
-                {
-                    SteeringText = string.Empty;
-                }
-
-                submitPromptCommand.RaiseCanExecuteChanged();
-                cancelTurnCommand.RaiseCanExecuteChanged();
-                RaiseThreadCommandStates();
-            }
+            TaskWorkspace.IsTurnRunning = value;
+            ProjectWorkspace.RaiseCommandStates();
         }
     }
 
@@ -577,9 +506,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 submitPromptCommand.RaiseCanExecuteChanged();
                 cancelTurnCommand.RaiseCanExecuteChanged();
                 loadModelsCommand.RaiseCanExecuteChanged();
-                RaiseGitCommandStates();
-                RaiseTerminalCommandStates();
-                toggleTerminalCommand.RaiseCanExecuteChanged();
+                ProjectWorkspace.RaiseCommandStates();
+                TaskWorkspace.RaiseCommandStates();
+                Git.RaiseCommandStates();
+                Terminal.RaiseCommandStates();
                 toggleProjectRailCommand.RaiseCanExecuteChanged();
                 toggleDetailsPaneCommand.RaiseCanExecuteChanged();
             }
@@ -598,7 +528,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ModelOverride = settings.LastModelOverride ?? string.Empty;
         ReasoningEffortOverride = settings.LastReasoningEffortOverride ?? string.Empty;
         RefreshRecentProjects();
-        await RefreshDiagnosticsAsync().ConfigureAwait(true);
+        await DiagnosticsViewModel.RefreshAsync().ConfigureAwait(true);
         StatusMessage = "Ready";
         appServerWarmUpTask = WarmUpAppServerAsync(appServerWarmUpCancellation.Token);
     }
@@ -619,7 +549,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await EnsureAppServerClientAsync(cancellationToken).ConfigureAwait(true);
+            await EnsureAppServerSessionAsync(cancellationToken).ConfigureAwait(true);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -674,7 +604,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         recentProjectService.AddRecentProject(settings, SelectedProjectPath);
         RefreshRecentProjects();
         await settingsStore.SaveAsync(settings).ConfigureAwait(true);
-        await RefreshGitAsync().ConfigureAwait(true);
+        await Git.RefreshAsync().ConfigureAwait(true);
         StatusMessage = IsGitRepository
             ? $"Project selected: {SelectedProjectName}"
             : "Project selected, but no Git repository was detected";
@@ -695,8 +625,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
-            var result = await client.StartThreadAsync(CodexThreadStartOptions.Default).ConfigureAwait(true);
+            await EnsureAppServerSessionAsync().ConfigureAwait(true);
+            var result = await appServerSessionCoordinator.StartThreadAsync(CodexThreadStartOptions.Default).ConfigureAwait(true);
             AssistantWorktree? worktree = null;
             if (string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal))
             {
@@ -740,9 +670,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
+            await EnsureAppServerSessionAsync().ConfigureAwait(true);
             var workspacePath = GetActiveWorkspacePath();
-            var result = await client.ResumeThreadAsync(new CodexThreadResumeRequest(
+            var result = await appServerSessionCoordinator.ResumeThreadAsync(new CodexThreadResumeRequest(
                 SelectedThread.ThreadId,
                 workspacePath,
                 CodexSandbox.WorkspaceWrite,
@@ -767,10 +697,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
+            await EnsureAppServerSessionAsync().ConfigureAwait(true);
             var sourceThread = SelectedThread;
             var sourceWorkspace = GetActiveWorkspacePath();
-            var result = await client.ForkThreadAsync(new CodexThreadForkRequest(
+            var result = await appServerSessionCoordinator.ForkThreadAsync(new CodexThreadForkRequest(
                 sourceThread.ThreadId,
                 sourceWorkspace,
                 CodexSandbox.WorkspaceWrite,
@@ -818,9 +748,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
-            await client.ArchiveThreadAsync(SelectedThread.ThreadId).ConfigureAwait(true);
-            await StopAndRemoveTerminalAsync(GetTerminalKey(SelectedThread)).ConfigureAwait(true);
+            await EnsureAppServerSessionAsync().ConfigureAwait(true);
+            await appServerSessionCoordinator.ArchiveThreadAsync(SelectedThread.ThreadId).ConfigureAwait(true);
+            await Terminal.StopAndRemoveAsync(SelectedThread.ThreadId).ConfigureAwait(true);
             threadStore.SetArchived(settings, SelectedProjectPath, SelectedThread.ThreadId, archived: true);
             StatusMessage = "Codex thread archived";
             RefreshProjectThreads(SelectedThread.ThreadId);
@@ -842,8 +772,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
-            await client.UnarchiveThreadAsync(SelectedThread.ThreadId).ConfigureAwait(true);
+            await EnsureAppServerSessionAsync().ConfigureAwait(true);
+            await appServerSessionCoordinator.UnarchiveThreadAsync(SelectedThread.ThreadId).ConfigureAwait(true);
             threadStore.SetArchived(settings, SelectedProjectPath, SelectedThread.ThreadId, archived: false);
             StatusMessage = "Codex thread unarchived";
             RefreshProjectThreads(SelectedThread.ThreadId);
@@ -858,14 +788,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task SteerTurnAsync()
     {
-        if (!CanSteerTurn() || appServerClient is null || activeThreadId is null || activeTurnId is null)
+        if (!CanSteerTurn() || appServerSessionCoordinator.State != AppServerSessionState.Connected || activeThreadId is null || activeTurnId is null)
         {
             return;
         }
 
         try
         {
-            await appServerClient.SteerTurnAsync(new CodexTurnSteerRequest(
+            await appServerSessionCoordinator.SteerTurnAsync(new CodexTurnSteerRequest(
                 activeThreadId,
                 activeTurnId,
                 SteeringText.Trim())).ConfigureAwait(true);
@@ -925,7 +855,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await StopAndRemoveTerminalAsync(GetTerminalKey(thread)).ConfigureAwait(true);
+            await Terminal.StopAndRemoveAsync(thread.ThreadId).ConfigureAwait(true);
             var repository = await gitService.GetRepositoryStateAsync(SelectedProjectPath).ConfigureAwait(true);
             if (!repository.IsRepository || string.IsNullOrWhiteSpace(repository.RootPath))
             {
@@ -940,129 +870,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(nameof(ActiveWorkspaceLabel));
             removeWorktreeCommand.RaiseCanExecuteChanged();
             StatusMessage = "Assistant worktree removed; its Git branch was preserved";
-            await RefreshGitAsync().ConfigureAwait(true);
+            await Git.RefreshAsync().ConfigureAwait(true);
         }
         catch (Exception ex)
         {
             StatusMessage = ex.Message;
             logger.Log(AppLogLevel.Warning, "assistant_worktree_remove_failed", "Could not remove the selected assistant worktree.", exception: ex);
         }
-    }
-
-    private async Task StartTerminalAsync()
-    {
-        if (!CanStartTerminal())
-        {
-            return;
-        }
-
-        var key = GetCurrentTerminalKey();
-        try
-        {
-            if (terminalStates.TryGetValue(key, out var previous))
-            {
-                await previous.Session.DisposeAsync().ConfigureAwait(true);
-                terminalStates.Remove(key);
-            }
-
-            var workingDirectory = GetActiveWorkspacePath();
-            var session = await terminalService.StartSessionAsync(
-                new TerminalStartRequest(workingDirectory, 120, 30)).ConfigureAwait(true);
-            var state = new TerminalState(session);
-            terminalStates[key] = state;
-            session.OutputReceived += (_, args) => HandleTerminalOutput(key, args.Text);
-            session.Exited += (_, args) => HandleTerminalExited(key, args.ExitCode);
-            IsTerminalVisible = true;
-            RefreshVisibleTerminal();
-            StatusMessage = "PowerShell terminal started";
-            logger.Log(
-                AppLogLevel.Information,
-                "integrated_terminal_started",
-                "An integrated terminal session was started.",
-                new Dictionary<string, string?> { ["key"] = key, ["workingDirectory"] = workingDirectory });
-        }
-        catch (Exception ex)
-        {
-            TerminalStatus = "Start failed";
-            StatusMessage = ex.Message;
-            logger.Log(AppLogLevel.Error, "integrated_terminal_start_failed", "Could not start an integrated terminal.", exception: ex);
-        }
-        finally
-        {
-            RaiseTerminalCommandStates();
-        }
-    }
-
-    private async Task SendTerminalInputAsync()
-    {
-        var state = GetCurrentTerminalState();
-        if (state?.Session.IsRunning != true || string.IsNullOrWhiteSpace(TerminalInput))
-        {
-            return;
-        }
-
-        var input = TerminalInput;
-        try
-        {
-            await state.Session.WriteInputAsync(input + "\r\n").ConfigureAwait(true);
-            TerminalInput = string.Empty;
-            StatusMessage = "Terminal input sent";
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = ex.Message;
-            logger.Log(AppLogLevel.Warning, "integrated_terminal_input_failed", "Could not write to the integrated terminal.", exception: ex);
-        }
-    }
-
-    private void ClearTerminal()
-    {
-        var state = GetCurrentTerminalState();
-        if (state is null)
-        {
-            return;
-        }
-
-        state.Output.Clear();
-        TerminalOutput = string.Empty;
-        clearTerminalCommand.RaiseCanExecuteChanged();
-        StatusMessage = "Terminal output cleared";
-    }
-
-    private async Task KillTerminalAsync()
-    {
-        var state = GetCurrentTerminalState();
-        if (state?.Session.IsRunning != true)
-        {
-            return;
-        }
-
-        try
-        {
-            await state.Session.StopAsync().ConfigureAwait(true);
-            TerminalStatus = "Exited";
-            StatusMessage = "Terminal session stopped";
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = ex.Message;
-            logger.Log(AppLogLevel.Warning, "integrated_terminal_stop_failed", "Could not stop the integrated terminal.", exception: ex);
-        }
-        finally
-        {
-            RaiseTerminalCommandStates();
-        }
-    }
-
-    private void ToggleTerminal()
-    {
-        IsTerminalVisible = !IsTerminalVisible;
-        if (IsTerminalVisible)
-        {
-            SelectedWorkspaceTabIndex = 1;
-        }
-
-        StatusMessage = IsTerminalVisible ? "Terminal panel shown" : "Terminal panel hidden";
     }
 
     public void UpdateViewportWidth(double width)
@@ -1120,188 +934,29 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private void HandleTerminalOutput(string key, string text)
-    {
-        void Apply()
-        {
-            if (!terminalStates.TryGetValue(key, out var state))
-            {
-                return;
-            }
-
-            state.Output.Append(text);
-            const int maximumOutputCharacters = 250_000;
-            if (state.Output.Length > maximumOutputCharacters)
-            {
-                state.Output.Remove(0, state.Output.Length - maximumOutputCharacters);
-            }
-
-            if (string.Equals(key, GetCurrentTerminalKeyOrNull(), StringComparison.OrdinalIgnoreCase))
-            {
-                TerminalOutput = state.Output.ToString();
-                clearTerminalCommand.RaiseCanExecuteChanged();
-            }
-        }
-
-        if (synchronizationContext is null)
-        {
-            Apply();
-        }
-        else
-        {
-            synchronizationContext.Post(_ => Apply(), null);
-        }
-    }
-
-    private void HandleTerminalExited(string key, int exitCode)
-    {
-        void Apply()
-        {
-            if (!terminalStates.TryGetValue(key, out var state))
-            {
-                return;
-            }
-
-            state.ExitCode = exitCode;
-            if (string.Equals(key, GetCurrentTerminalKeyOrNull(), StringComparison.OrdinalIgnoreCase))
-            {
-                TerminalStatus = $"Exited ({exitCode})";
-                OnPropertyChanged(nameof(IsTerminalRunning));
-                RaiseTerminalCommandStates();
-            }
-        }
-
-        if (synchronizationContext is null)
-        {
-            Apply();
-        }
-        else
-        {
-            synchronizationContext.Post(_ => Apply(), null);
-        }
-    }
-
-    private void RefreshVisibleTerminal()
-    {
-        var state = GetCurrentTerminalState();
-        TerminalOutput = state?.Output.ToString() ?? string.Empty;
-        TerminalWorkingDirectory = state?.Session.WorkingDirectory
-            ?? (GetActiveWorkspacePathIfAvailable() ?? "No terminal session");
-        TerminalStatus = state is null
-            ? "Not started"
-            : state.Session.IsRunning ? "Running" : $"Exited ({state.ExitCode ?? 0})";
-        OnPropertyChanged(nameof(IsTerminalRunning));
-        RaiseTerminalCommandStates();
-    }
-
     private string? GetActiveWorkspacePathIfAvailable()
     {
         var path = SelectedThread?.WorkspacePath ?? SelectedProjectPath;
         return string.IsNullOrWhiteSpace(path) ? null : Path.GetFullPath(path);
     }
 
-    private string GetCurrentTerminalKey() => GetCurrentTerminalKeyOrNull()
-        ?? throw new InvalidOperationException("Select a project before starting a terminal.");
-
-    private string? GetCurrentTerminalKeyOrNull()
+    private TerminalContext CreateTerminalContext()
     {
+        var workspacePath = GetActiveWorkspacePathIfAvailable();
         if (!string.IsNullOrWhiteSpace(SelectedThread?.ThreadId))
         {
-            return SelectedThread.ThreadId;
+            return new TerminalContext(SelectedThread.ThreadId, workspacePath);
         }
 
-        return string.IsNullOrWhiteSpace(SelectedProjectPath)
+        var key = string.IsNullOrWhiteSpace(SelectedProjectPath)
             ? null
             : $"project:{Path.GetFullPath(SelectedProjectPath)}";
+        return new TerminalContext(key, workspacePath);
     }
 
-    private static string GetTerminalKey(ProjectThreadState thread) => thread.ThreadId;
-
-    private TerminalState? GetCurrentTerminalState()
-    {
-        var key = GetCurrentTerminalKeyOrNull();
-        return key is not null && terminalStates.TryGetValue(key, out var state) ? state : null;
-    }
-
-    private async Task StopAndRemoveTerminalAsync(string key)
-    {
-        if (!terminalStates.Remove(key, out var state))
-        {
-            return;
-        }
-
-        await state.Session.DisposeAsync().ConfigureAwait(true);
-        RefreshVisibleTerminal();
-    }
-
-    private async Task DisposeTerminalSessionsAsync()
-    {
-        var states = terminalStates.Values.ToArray();
-        terminalStates.Clear();
-        foreach (var state in states)
-        {
-            try
-            {
-                await state.Session.DisposeAsync().ConfigureAwait(true);
-            }
-            catch (Exception ex)
-            {
-                logger.Log(AppLogLevel.Warning, "integrated_terminal_dispose_failed", "Could not dispose an integrated terminal session.", exception: ex);
-            }
-        }
-
-        RefreshVisibleTerminal();
-    }
-
-    private async Task RefreshDiagnosticsAsync()
-    {
-        IsBusy = true;
-        StatusMessage = "Refreshing diagnostics";
-
-        try
-        {
-            currentCodex = await codexDiscoveryService.DetectAsync(settings.PreferredCodexPath).ConfigureAwait(true);
-            currentAuth = await authService.GetAuthenticationStateAsync(currentCodex).ConfigureAwait(true);
-            RefreshDiagnosticLines();
-            RaiseComputedProperties();
-            StatusMessage = "Diagnostics refreshed";
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
-
-    private async Task RunCodexDoctorAsync()
-    {
-        if (!CanRunCodexDoctor())
-        {
-            StatusMessage = "Codex doctor is unavailable";
-            return;
-        }
-
-        IsBusy = true;
-        StatusMessage = "Running Codex doctor";
-        try
-        {
-            lastDoctorResult = await codexCliUtilityRunner.RunDoctorAsync(currentCodex).ConfigureAwait(true);
-            RefreshDiagnosticLines();
-            StatusMessage = lastDoctorResult.Succeeded
-                ? "Codex doctor completed"
-                : $"Codex doctor failed with exit code {lastDoctorResult.ExitCode}";
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = ex.Message;
-            logger.Log(AppLogLevel.Error, "codex_doctor_failed", "Could not run codex doctor.", exception: ex);
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
-
-    private bool CanRunCodexDoctor() => !IsShuttingDown && !IsBusy && currentCodex.IsFound;
+    private GitContext CreateGitContext() => new(
+        SelectedProjectPath,
+        GetActiveWorkspacePathIfAvailable());
 
     private async Task SaveThemeSelectionAsync()
     {
@@ -1322,260 +977,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             "light" => "Light",
             _ => "System"
         };
-
-    private async Task RefreshGitAsync()
-    {
-        if (string.IsNullOrWhiteSpace(SelectedProjectPath))
-        {
-            ResetGitState("Select a project to inspect Git changes");
-            return;
-        }
-
-        var previousPath = SelectedGitFile?.Path;
-        IsGitBusy = true;
-        GitStatusMessage = "Refreshing Git status";
-        try
-        {
-            var workspacePath = SelectedThread?.WorkspacePath ?? SelectedProjectPath;
-            if (!Directory.Exists(workspacePath))
-            {
-                ResetGitState($"The active workspace is unavailable: {workspacePath}");
-                return;
-            }
-
-            var state = await gitService.GetRepositoryStateAsync(workspacePath).ConfigureAwait(true);
-            ChangedFiles.Clear();
-            gitRepositoryRoot = state.RootPath;
-            gitBranch = state.Branch ?? "No repository";
-            OnPropertyChanged(nameof(GitBranch));
-            OnPropertyChanged(nameof(IsGitRepository));
-
-            if (!state.IsRepository)
-            {
-                SelectedGitFile = null;
-                GitStatusMessage = state.ErrorMessage ?? "No Git repository detected";
-                return;
-            }
-
-            foreach (var file in state.ChangedFiles)
-            {
-                ChangedFiles.Add(file);
-            }
-
-            SelectedGitFile = ChangedFiles.FirstOrDefault(file =>
-                string.Equals(file.Path, previousPath, StringComparison.OrdinalIgnoreCase));
-            GitStatusMessage = ChangedFiles.Count == 0
-                ? $"{GitBranch}: working tree clean"
-                : $"{GitBranch}: {ChangedFiles.Count} changed file{(ChangedFiles.Count == 1 ? string.Empty : "s")}";
-        }
-        catch (Exception ex)
-        {
-            ResetGitState(ex.Message);
-            logger.Log(AppLogLevel.Warning, "git_status_failed", "Could not refresh Git status.", exception: ex);
-        }
-        finally
-        {
-            IsGitBusy = false;
-            RaiseGitCommandStates();
-        }
-    }
-
-    private async Task LoadSelectedDiffAsync(bool staged)
-    {
-        if (SelectedGitFile is null || string.IsNullOrWhiteSpace(gitRepositoryRoot))
-        {
-            return;
-        }
-
-        IsGitBusy = true;
-        isShowingStagedDiff = staged;
-        OnPropertyChanged(nameof(DiffViewLabel));
-        SelectedDiff = "Loading diff...";
-        try
-        {
-            SelectedDiff = await gitService.GetDiffAsync(
-                gitRepositoryRoot,
-                SelectedGitFile,
-                staged).ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            SelectedDiff = ex.Message;
-            GitStatusMessage = "Could not load the selected diff";
-            logger.Log(AppLogLevel.Warning, "git_diff_failed", "Could not load a Git diff.", exception: ex);
-        }
-        finally
-        {
-            IsGitBusy = false;
-        }
-    }
-
-    private async Task StageSelectedFileAsync()
-    {
-        if (SelectedGitFile is null || string.IsNullOrWhiteSpace(gitRepositoryRoot))
-        {
-            return;
-        }
-
-        var path = SelectedGitFile.Path;
-        await RunGitMutationAsync(
-            () => gitService.StageAsync(gitRepositoryRoot, [path]),
-            $"Staged {path}").ConfigureAwait(true);
-    }
-
-    private async Task UnstageSelectedFileAsync()
-    {
-        if (SelectedGitFile is null || string.IsNullOrWhiteSpace(gitRepositoryRoot))
-        {
-            return;
-        }
-
-        var path = SelectedGitFile.Path;
-        await RunGitMutationAsync(
-            () => gitService.UnstageAsync(gitRepositoryRoot, [path]),
-            $"Unstaged {path}").ConfigureAwait(true);
-    }
-
-    private async Task RevertSelectedFileAsync()
-    {
-        if (SelectedGitFile is null || string.IsNullOrWhiteSpace(gitRepositoryRoot))
-        {
-            return;
-        }
-
-        var file = SelectedGitFile;
-        var action = file.IsUntracked ? "delete the untracked file" : "discard its staged and working-tree changes";
-        var confirmed = userInteractionService.ConfirmDestructiveAction(
-            "Discard Git changes",
-            $"This will {action}:\n\n{file.DisplayPath}\n\nThis cannot be undone. Continue?");
-        if (!confirmed)
-        {
-            GitStatusMessage = "Discard cancelled";
-            return;
-        }
-
-        await RunGitMutationAsync(
-            () => gitService.RevertAsync(gitRepositoryRoot, [file]),
-            $"Discarded changes to {file.Path}").ConfigureAwait(true);
-    }
-
-    private async Task CommitAsync()
-    {
-        if (string.IsNullOrWhiteSpace(gitRepositoryRoot))
-        {
-            return;
-        }
-
-        IsGitBusy = true;
-        try
-        {
-            var result = await gitService.CommitAsync(gitRepositoryRoot, CommitMessage).ConfigureAwait(true);
-            CommitMessage = string.Empty;
-            await RefreshGitAsync().ConfigureAwait(true);
-            GitStatusMessage = $"Committed {result.CommitId}: {result.Summary}";
-            StatusMessage = $"Git commit {result.CommitId} created";
-        }
-        catch (Exception ex)
-        {
-            GitStatusMessage = ex.Message;
-            logger.Log(AppLogLevel.Warning, "git_commit_failed", "Could not create a Git commit.", exception: ex);
-        }
-        finally
-        {
-            IsGitBusy = false;
-        }
-    }
-
-    private async Task RunGitMutationAsync(Func<Task> operation, string successMessage)
-    {
-        IsGitBusy = true;
-        try
-        {
-            await operation().ConfigureAwait(true);
-            await RefreshGitAsync().ConfigureAwait(true);
-            GitStatusMessage = successMessage;
-        }
-        catch (Exception ex)
-        {
-            GitStatusMessage = ex.Message;
-            logger.Log(AppLogLevel.Warning, "git_mutation_failed", "A Git operation failed.", exception: ex);
-        }
-        finally
-        {
-            IsGitBusy = false;
-        }
-    }
-
-    private void OpenInEditor()
-    {
-        try
-        {
-            userInteractionService.OpenInEditor(GetSelectedProjectTargetPath());
-            GitStatusMessage = "Opened in editor";
-        }
-        catch (Exception ex)
-        {
-            GitStatusMessage = ex.Message;
-        }
-    }
-
-    private void RevealInExplorer()
-    {
-        try
-        {
-            userInteractionService.RevealInExplorer(GetSelectedProjectTargetPath());
-            GitStatusMessage = "Opened in Explorer";
-        }
-        catch (Exception ex)
-        {
-            GitStatusMessage = ex.Message;
-        }
-    }
-
-    private string GetSelectedProjectTargetPath()
-    {
-        var root = gitRepositoryRoot ?? SelectedProjectPath
-            ?? throw new InvalidOperationException("Select a project first.");
-        return SelectedGitFile is null
-            ? root
-            : Path.GetFullPath(Path.Combine(root, SelectedGitFile.Path.Replace('/', Path.DirectorySeparatorChar)));
-    }
-
-    private void ResetGitState(string message)
-    {
-        gitRepositoryRoot = null;
-        gitBranch = "No repository";
-        ChangedFiles.Clear();
-        SelectedGitFile = null;
-        GitStatusMessage = message;
-        OnPropertyChanged(nameof(GitBranch));
-        OnPropertyChanged(nameof(IsGitRepository));
-        RaiseGitCommandStates();
-    }
-
-    private async Task StartLoginAsync(LoginMethod method)
-    {
-        if (!currentCodex.IsFound)
-        {
-            StatusMessage = "Install Codex CLI before signing in";
-            return;
-        }
-
-        var started = await authService.StartLoginAsync(currentCodex, method).ConfigureAwait(true);
-        StatusMessage = started ? "Sign-in opened in a terminal window" : "Could not start sign-in";
-    }
-
-    private async Task SignOutAsync()
-    {
-        if (!currentCodex.IsFound)
-        {
-            StatusMessage = "Codex CLI is not available";
-            return;
-        }
-
-        var started = await authService.StartLogoutAsync(currentCodex).ConfigureAwait(true);
-        StatusMessage = started ? "Sign-out opened in a terminal window" : "Could not start sign-out";
-    }
 
     private async Task SubmitPromptAsync()
     {
@@ -1620,8 +1021,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
-            activeThreadId = await EnsureActiveThreadAsync(client).ConfigureAwait(true);
+            await EnsureAppServerSessionAsync().ConfigureAwait(true);
+            activeThreadId = await EnsureActiveThreadAsync().ConfigureAwait(true);
             runningThreadIds.Add(activeThreadId);
             UpdateThreadActivity(activeThreadId, isRunning: true, "Running");
             IsTurnRunning = true;
@@ -1630,7 +1031,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var workspacePath = GetActiveWorkspacePath();
             settings.LastModelOverride = NormalizeOverride(ModelOverride);
             settings.LastReasoningEffortOverride = NormalizeOverride(ReasoningEffortOverride);
-            var turn = await client.StartTurnAsync(new CodexTurnStartRequest(
+            var turn = await appServerSessionCoordinator.StartTurnAsync(new CodexTurnStartRequest(
                 activeThreadId,
                 submittedPrompt,
                 workspacePath,
@@ -1657,7 +1058,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private async Task<string> EnsureActiveThreadAsync(CodexAppServerClient client)
+    private async Task<string> EnsureActiveThreadAsync()
     {
         if (string.IsNullOrWhiteSpace(SelectedProjectPath))
         {
@@ -1666,7 +1067,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         if (string.IsNullOrWhiteSpace(activeThreadId))
         {
-            var thread = await client.StartThreadAsync(CodexThreadStartOptions.Default).ConfigureAwait(true);
+            var thread = await appServerSessionCoordinator.StartThreadAsync(CodexThreadStartOptions.Default).ConfigureAwait(true);
             AssistantWorktree? worktree = null;
             if (string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal))
             {
@@ -1700,7 +1101,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            var resumed = await client.ResumeThreadAsync(new CodexThreadResumeRequest(
+            var resumed = await appServerSessionCoordinator.ResumeThreadAsync(new CodexThreadResumeRequest(
                 activeThreadId,
                 GetActiveWorkspacePath(),
                 CodexSandbox.WorkspaceWrite)).ConfigureAwait(true);
@@ -1718,7 +1119,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 new Dictionary<string, string?> { ["threadId"] = activeThreadId },
                 ex);
 
-            var thread = await client.StartThreadAsync(CodexThreadStartOptions.Default).ConfigureAwait(true);
+            var thread = await appServerSessionCoordinator.StartThreadAsync(CodexThreadStartOptions.Default).ConfigureAwait(true);
             CreateThreadState(thread.ThreadId, $"Thread {ProjectThreads.Count + 1}");
             RefreshProjectThreads(thread.ThreadId);
             loadedThreadIds.Add(thread.ThreadId);
@@ -1736,7 +1137,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        if (!CanCancelTurn() || appServerClient is null || string.IsNullOrWhiteSpace(activeThreadId) || string.IsNullOrWhiteSpace(activeTurnId))
+        if (!CanCancelTurn() || appServerSessionCoordinator.State != AppServerSessionState.Connected || string.IsNullOrWhiteSpace(activeThreadId) || string.IsNullOrWhiteSpace(activeTurnId))
         {
             StatusMessage = "No active turn to cancel";
             return;
@@ -1744,7 +1145,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await appServerClient.CancelTurnAsync(activeThreadId, activeTurnId).ConfigureAwait(true);
+            await appServerSessionCoordinator.CancelTurnAsync(activeThreadId, activeTurnId).ConfigureAwait(true);
             UpdateThreadActivity(activeThreadId, isRunning: true, "Cancelling");
             StatusMessage = "Cancellation requested";
         }
@@ -1774,6 +1175,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        var shutdownTimer = System.Diagnostics.Stopwatch.StartNew();
+        var activeTurnsAtStart = activeTurnIds.Count;
+        var terminalSessionsAtStart = Terminal.SessionCount;
         IsShuttingDown = true;
         StatusMessage = "Closing application";
 
@@ -1790,20 +1194,34 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
 
         await TryCancelRunningTurnForShutdownAsync(cancellationToken).ConfigureAwait(true);
-        await DisposeTerminalSessionsAsync().ConfigureAwait(true);
+        await Terminal.ShutdownAsync().ConfigureAwait(true);
+        appServerSessionCoordinator.FlushNotifications();
+        await appServerSessionCoordinator.DisposeAsync().ConfigureAwait(true);
         await SaveActiveThreadStateAsync().ConfigureAwait(true);
-        await DisposeAppServerClientAsync().ConfigureAwait(true);
 
         IsTurnRunning = false;
         activeTurnId = null;
         activeTurnIds.Clear();
         runningThreadIds.Clear();
         StatusMessage = "Application closed";
+        var notificationMetrics = appServerSessionCoordinator.NotificationMetrics;
+        logger.Log(
+            AppLogLevel.Information,
+            "shutdown_completed",
+            "Application shutdown completed.",
+            new Dictionary<string, string?>
+            {
+                ["elapsedMilliseconds"] = shutdownTimer.ElapsedMilliseconds.ToString(),
+                ["activeTurnsAtStart"] = activeTurnsAtStart.ToString(),
+                ["terminalSessionsAtStart"] = terminalSessionsAtStart.ToString(),
+                ["receivedNotifications"] = notificationMetrics.ReceivedCount.ToString(),
+                ["emittedNotifications"] = notificationMetrics.EmittedCount.ToString()
+            });
     }
 
     private async Task TryCancelRunningTurnForShutdownAsync(CancellationToken cancellationToken)
     {
-        if (appServerClient is null)
+        if (appServerSessionCoordinator.State != AppServerSessionState.Connected)
         {
             return;
         }
@@ -1820,7 +1238,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(TimeSpan.FromSeconds(2));
-                await appServerClient.CancelTurnAsync(turn.Key, turn.Value, timeout.Token).ConfigureAwait(true);
+                await appServerSessionCoordinator.CancelTurnAsync(turn.Key, turn.Value, timeout.Token).ConfigureAwait(true);
                 runningThreadIds.Remove(turn.Key);
                 StatusMessage = "Cancellation requested";
             }
@@ -1862,8 +1280,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            var client = await EnsureAppServerClientAsync().ConfigureAwait(true);
-            var models = await client.ListModelsAsync().ConfigureAwait(true);
+            await EnsureAppServerSessionAsync().ConfigureAwait(true);
+            var models = await appServerSessionCoordinator.ListModelsAsync().ConfigureAwait(true);
             ModelOptions.Clear();
             foreach (var model in models.Select(model => model.Model).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(model => model))
             {
@@ -1904,7 +1322,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         return !IsShuttingDown &&
             IsTurnRunning &&
-            appServerClient is not null &&
+            appServerSessionCoordinator.State == AppServerSessionState.Connected &&
             !string.IsNullOrWhiteSpace(activeThreadId) &&
             !string.IsNullOrWhiteSpace(activeTurnId);
     }
@@ -1932,80 +1350,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool CanSteerTurn() =>
         !IsShuttingDown &&
         IsTurnRunning &&
-        appServerClient is not null &&
+        appServerSessionCoordinator.State == AppServerSessionState.Connected &&
         !string.IsNullOrWhiteSpace(activeThreadId) &&
         !string.IsNullOrWhiteSpace(activeTurnId) &&
         !string.IsNullOrWhiteSpace(SteeringText);
 
-    private bool CanStartTerminal()
-    {
-        if (IsShuttingDown || string.IsNullOrWhiteSpace(SelectedProjectPath))
-        {
-            return false;
-        }
-
-        var workspace = GetActiveWorkspacePathIfAvailable();
-        return !string.IsNullOrWhiteSpace(workspace) &&
-            Directory.Exists(workspace) &&
-            GetCurrentTerminalState()?.Session.IsRunning != true;
-    }
-
-    private bool CanSendTerminalInput() =>
-        !IsShuttingDown &&
-        GetCurrentTerminalState()?.Session.IsRunning == true &&
-        !string.IsNullOrWhiteSpace(TerminalInput);
-
-    private bool CanKillTerminal() =>
-        !IsShuttingDown && GetCurrentTerminalState()?.Session.IsRunning == true;
-
-    private bool CanClearTerminal() => GetCurrentTerminalState()?.Output.Length > 0;
-
-    private void RaiseTerminalCommandStates()
-    {
-        startTerminalCommand.RaiseCanExecuteChanged();
-        sendTerminalInputCommand.RaiseCanExecuteChanged();
-        killTerminalCommand.RaiseCanExecuteChanged();
-        clearTerminalCommand.RaiseCanExecuteChanged();
-    }
-
     private void RaiseThreadCommandStates()
     {
-        newThreadCommand.RaiseCanExecuteChanged();
-        resumeThreadCommand.RaiseCanExecuteChanged();
-        forkThreadCommand.RaiseCanExecuteChanged();
-        archiveThreadCommand.RaiseCanExecuteChanged();
-        unarchiveThreadCommand.RaiseCanExecuteChanged();
-        steerTurnCommand.RaiseCanExecuteChanged();
-        removeWorktreeCommand.RaiseCanExecuteChanged();
+        ProjectWorkspace.RaiseCommandStates();
+        TaskWorkspace.RaiseCommandStates();
     }
-
-    private bool CanUseGitProject() =>
-        !IsShuttingDown && !IsGitBusy && !string.IsNullOrWhiteSpace(SelectedProjectPath);
-
-    private bool CanShowWorkingDiff() =>
-        CanMutateSelectedFile() && SelectedGitFile?.HasWorkingTreeChanges == true;
-
-    private bool CanShowStagedDiff() =>
-        CanMutateSelectedFile() && SelectedGitFile?.IsStaged == true;
-
-    private bool CanStageSelectedFile() =>
-        CanMutateSelectedFile() && SelectedGitFile?.HasWorkingTreeChanges == true;
-
-    private bool CanUnstageSelectedFile() =>
-        CanMutateSelectedFile() && SelectedGitFile?.IsStaged == true;
-
-    private bool CanMutateSelectedFile() =>
-        !IsShuttingDown && !IsGitBusy && IsGitRepository && SelectedGitFile is not null;
-
-    private bool CanCommit() =>
-        !IsShuttingDown &&
-        !IsGitBusy &&
-        IsGitRepository &&
-        !string.IsNullOrWhiteSpace(CommitMessage) &&
-        ChangedFiles.Any(file => file.IsStaged);
-
-    private bool CanOpenProjectTarget() =>
-        !IsShuttingDown && !string.IsNullOrWhiteSpace(SelectedProjectPath);
 
     private string GetActiveWorkspacePath()
     {
@@ -2020,75 +1374,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         return path;
     }
 
-    private void RaiseGitCommandStates()
+    private async Task EnsureAppServerSessionAsync(CancellationToken cancellationToken = default)
     {
-        refreshGitCommand.RaiseCanExecuteChanged();
-        showWorkingDiffCommand.RaiseCanExecuteChanged();
-        showStagedDiffCommand.RaiseCanExecuteChanged();
-        stageSelectedFileCommand.RaiseCanExecuteChanged();
-        unstageSelectedFileCommand.RaiseCanExecuteChanged();
-        revertSelectedFileCommand.RaiseCanExecuteChanged();
-        commitCommand.RaiseCanExecuteChanged();
-        openInEditorCommand.RaiseCanExecuteChanged();
-        revealInExplorerCommand.RaiseCanExecuteChanged();
-    }
-
-    private async Task<CodexAppServerClient> EnsureAppServerClientAsync(CancellationToken cancellationToken = default)
-    {
-        if (appServerClient?.IsHealthy == true)
-        {
-            return appServerClient;
-        }
-
-        await appServerLifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(true);
-        try
-        {
-            if (appServerClient?.IsHealthy == true)
-            {
-                return appServerClient;
-            }
-
-            var isRecovery = appServerClient is not null || string.Equals(AppServerHealth, "Codex reconnecting", StringComparison.Ordinal);
-            if (appServerClient is not null)
-            {
-                await DisposeAppServerClientAsync().ConfigureAwait(true);
-            }
-
-            AppServerHealth = isRecovery ? "Codex reconnecting" : "Codex connecting";
-
-            CodexAppServerClient? client = null;
-            try
-            {
-                var transport = await codexProcessService
-                    .StartAppServerTransportAsync(currentCodex, cancellationToken)
-                    .ConfigureAwait(true);
-                client = new CodexAppServerClient(
-                    transport,
-                    new CodexAppServerClientMetadata("native_codex_assistant", "Native Codex Assistant", Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.1.0"));
-                client.NotificationReceived += OnAppServerNotificationReceived;
-                client.ConnectionFailed += OnAppServerConnectionFailed;
-                await client.InitializeAsync(CodexInitializeOptions.Default, cancellationToken).ConfigureAwait(true);
-                appServerClient = client;
-                AppServerHealth = "Codex connected";
-                return appServerClient;
-            }
-            catch
-            {
-                if (client is not null)
-                {
-                    client.NotificationReceived -= OnAppServerNotificationReceived;
-                    client.ConnectionFailed -= OnAppServerConnectionFailed;
-                    await client.DisposeAsync().ConfigureAwait(true);
-                }
-
-                AppServerHealth = "Codex unavailable";
-                throw;
-            }
-        }
-        finally
-        {
-            appServerLifecycleGate.Release();
-        }
+        await appServerSessionCoordinator.EnsureConnectedAsync(currentCodex, cancellationToken).ConfigureAwait(true);
     }
 
     private void OnAppServerConnectionFailed(object? sender, AppServerConnectionFailedEventArgs args)
@@ -2122,7 +1410,34 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void OnAppServerNotificationReceived(object? sender, AppServerNotification notification)
     {
-        if (synchronizationContext is null)
+        DispatchAppServerNotification(notification);
+    }
+
+    private void OnAppServerStateChanged(object? sender, AppServerSessionStateChangedEventArgs args)
+    {
+        void ApplyState() => AppServerHealth = args.State switch
+        {
+            AppServerSessionState.Connecting => "Codex connecting",
+            AppServerSessionState.Connected => "Codex connected",
+            AppServerSessionState.Reconnecting => "Codex reconnecting",
+            AppServerSessionState.Unavailable => "Codex unavailable",
+            AppServerSessionState.Disposed => "Codex stopped",
+            _ => "Codex idle"
+        };
+
+        if (synchronizationContext is null || ReferenceEquals(SynchronizationContext.Current, synchronizationContext))
+        {
+            ApplyState();
+        }
+        else
+        {
+            synchronizationContext.Post(_ => ApplyState(), null);
+        }
+    }
+
+    private void DispatchAppServerNotification(AppServerNotification notification)
+    {
+        if (synchronizationContext is null || ReferenceEquals(SynchronizationContext.Current, synchronizationContext))
         {
             ApplyNotification(notification);
             return;
@@ -2194,7 +1509,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 _ = SaveThreadStateAsync(routedThreadId, routedService);
             }
-            _ = RefreshGitAsync();
+            _ = Git.RefreshAsync();
         }
 
         if (!string.IsNullOrWhiteSpace(routedThreadId) &&
@@ -2225,6 +1540,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         state.IsRunning = isRunning;
         state.TurnStatus = status;
         state.UpdatedAt = DateTimeOffset.UtcNow;
+
+        var presentation = ProjectThreads.FirstOrDefault(thread =>
+            string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
+        if (presentation is not null)
+        {
+            presentation.IsRunning = isRunning;
+            presentation.TurnStatus = status;
+            presentation.UpdatedAt = state.UpdatedAt;
+        }
     }
 
     private async Task SaveThreadStateAsync(string threadId, CodexThreadService service)
@@ -2305,6 +1629,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         SelectedThread = ProjectThreads.FirstOrDefault(thread =>
             string.Equals(thread.ThreadId, selectedThreadId, StringComparison.Ordinal));
+    }
+
+    private void HandleSelectedThreadChanged(ProjectThreadState? state)
+    {
+        SelectThread(state);
+        OnPropertyChanged(nameof(SelectedThread));
+        OnPropertyChanged(nameof(ActiveWorkspacePath));
+        OnPropertyChanged(nameof(ActiveWorkspaceLabel));
+        Terminal.RefreshContext();
+        _ = Git.RefreshAsync();
     }
 
     private void SelectThread(ProjectThreadState? state)
@@ -2401,36 +1735,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private void RefreshDiagnosticLines()
-    {
-        Diagnostics.Clear();
-        Diagnostics.Add($"App: {Assembly.GetExecutingAssembly().GetName().Version}");
-        Diagnostics.Add($"Windows: {Environment.OSVersion.VersionString}");
-        Diagnostics.Add($".NET: {Environment.Version}");
-        Diagnostics.Add($"Codex: {CodexSummary}");
-        Diagnostics.Add($"Codex path: {CodexExecutablePath}");
-        Diagnostics.Add($"Codex version: {CodexVersion}");
-        Diagnostics.Add($"Sign-in: {AuthSummary}");
-        Diagnostics.Add($"Codex home: {CodexHome}");
-        Diagnostics.Add($"Settings: {SettingsPath}");
-        if (lastDoctorResult is not null)
-        {
-            Diagnostics.Add($"Codex doctor exit code: {lastDoctorResult.ExitCode}");
-            foreach (var line in SplitDiagnosticLines(lastDoctorResult.StandardOutput))
-            {
-                Diagnostics.Add($"Doctor: {line}");
-            }
-
-            foreach (var line in SplitDiagnosticLines(lastDoctorResult.StandardError))
-            {
-                Diagnostics.Add($"Doctor stderr: {line}");
-            }
-        }
-    }
-
-    private static IEnumerable<string> SplitDiagnosticLines(string text) =>
-        text.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
     private void RaiseComputedProperties()
     {
         OnPropertyChanged(nameof(CodexSummary));
@@ -2440,7 +1744,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(AuthDetail));
         OnPropertyChanged(nameof(CodexHome));
         OnPropertyChanged(nameof(SettingsPath));
-        runCodexDoctorCommand.RaiseCanExecuteChanged();
+        DiagnosticsViewModel.RaiseCommandStates();
         RaiseThreadCommandStates();
     }
 
@@ -2449,25 +1753,80 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         await ShutdownAsync().ConfigureAwait(false);
     }
 
-    private async Task DisposeAppServerClientAsync()
+    private void RelayTerminalPropertyChanged(string? propertyName)
     {
-        if (appServerClient is null)
+        var mainProperty = propertyName switch
         {
-            return;
+            nameof(TerminalViewModel.Input) => nameof(TerminalInput),
+            nameof(TerminalViewModel.Output) => nameof(TerminalOutput),
+            nameof(TerminalViewModel.Status) => nameof(TerminalStatus),
+            nameof(TerminalViewModel.WorkingDirectory) => nameof(TerminalWorkingDirectory),
+            nameof(TerminalViewModel.IsRunning) => nameof(IsTerminalRunning),
+            nameof(TerminalViewModel.IsVisible) => nameof(IsTerminalVisible),
+            _ => null
+        };
+        if (mainProperty is not null)
+        {
+            OnPropertyChanged(mainProperty);
         }
-
-        appServerClient.NotificationReceived -= OnAppServerNotificationReceived;
-        appServerClient.ConnectionFailed -= OnAppServerConnectionFailed;
-        await appServerClient.DisposeAsync().ConfigureAwait(false);
-        appServerClient = null;
     }
 
-    private sealed class TerminalState(ITerminalSession session)
+    private void RelayGitPropertyChanged(string? propertyName)
     {
-        public ITerminalSession Session { get; } = session;
+        var mainProperty = propertyName switch
+        {
+            nameof(GitViewModel.Branch) => nameof(GitBranch),
+            nameof(GitViewModel.StatusMessage) => nameof(GitStatusMessage),
+            nameof(GitViewModel.IsRepository) => nameof(IsGitRepository),
+            nameof(GitViewModel.SelectedFile) => nameof(SelectedGitFile),
+            nameof(GitViewModel.SelectedDiff) => nameof(SelectedDiff),
+            nameof(GitViewModel.DiffViewLabel) => nameof(DiffViewLabel),
+            nameof(GitViewModel.CommitMessage) => nameof(CommitMessage),
+            nameof(GitViewModel.IsBusy) => nameof(IsGitBusy),
+            _ => null
+        };
+        if (mainProperty is not null)
+        {
+            OnPropertyChanged(mainProperty);
+        }
+    }
 
-        public System.Text.StringBuilder Output { get; } = new();
+    private void RelayProjectPropertyChanged(string? propertyName)
+    {
+        var mainProperty = propertyName switch
+        {
+            nameof(ProjectThreadViewModel.SelectedProjectPath) => nameof(SelectedProjectPath),
+            nameof(ProjectThreadViewModel.SelectedProjectName) => nameof(SelectedProjectName),
+            nameof(ProjectThreadViewModel.NewThreadWorkspaceMode) => nameof(NewThreadWorkspaceMode),
+            nameof(ProjectThreadViewModel.SelectedThread) => nameof(SelectedThread),
+            nameof(ProjectThreadViewModel.ActiveWorkspacePath) => nameof(ActiveWorkspacePath),
+            nameof(ProjectThreadViewModel.ActiveWorkspaceLabel) => nameof(ActiveWorkspaceLabel),
+            _ => null
+        };
+        if (mainProperty is not null)
+        {
+            OnPropertyChanged(mainProperty);
+        }
+    }
 
-        public int? ExitCode { get; set; }
+    private void RelayTaskPropertyChanged(string? propertyName)
+    {
+        var mainProperty = propertyName switch
+        {
+            nameof(TaskViewModel.Prompt) => nameof(PromptText),
+            nameof(TaskViewModel.ModelOverride) => nameof(ModelOverride),
+            nameof(TaskViewModel.ReasoningEffortOverride) => nameof(ReasoningEffortOverride),
+            nameof(TaskViewModel.SteeringText) => nameof(SteeringText),
+            nameof(TaskViewModel.AppServerHealth) => nameof(AppServerHealth),
+            nameof(TaskViewModel.FinalResponse) => nameof(FinalResponse),
+            nameof(TaskViewModel.TimelineItems) => nameof(TimelineItems),
+            nameof(TaskViewModel.RawEvents) => nameof(RawEvents),
+            nameof(TaskViewModel.IsTurnRunning) => nameof(IsTurnRunning),
+            _ => null
+        };
+        if (mainProperty is not null)
+        {
+            OnPropertyChanged(mainProperty);
+        }
     }
 }

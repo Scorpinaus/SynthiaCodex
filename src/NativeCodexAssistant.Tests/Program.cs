@@ -25,6 +25,8 @@ var tests = new List<(string Name, Func<Task> Run)>
 {
     ("recent projects are deduped and capped", TestRecentProjectsAsync),
     ("settings round trip to json", TestSettingsRoundTripAsync),
+    ("settings saves are snapshotted and coalesced", TestSettingsSavesAreSnapshottedAndCoalescedAsync),
+    ("settings recover interrupted atomic writes", TestSettingsRecoverInterruptedAtomicWritesAsync),
     ("view model applies and persists selected theme", TestViewModelAppliesAndPersistsThemeAsync),
     ("view model persists responsive shell state", TestViewModelPersistsResponsiveShellStateAsync),
     ("view model terminal toggle selects terminal workspace", TestViewModelTerminalToggleSelectsTerminalWorkspaceAsync),
@@ -45,6 +47,9 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("app-server client reports connection failure", TestAppServerConnectionFailureAsync),
     ("app-server client lists models", TestAppServerListsModelsAsync),
     ("app-server notifications update thread state", TestAppServerNotificationsUpdateThreadStateAsync),
+    ("notification batcher preserves long stream output and order", TestNotificationBatcherPreservesLongStreamOutputAndOrderAsync),
+    ("notification batcher flushes idle deltas", TestNotificationBatcherFlushesIdleDeltasAsync),
+    ("thread service bounds live streamed history", TestThreadServiceBoundsLiveStreamedHistoryAsync),
     ("app-server v2 notifications update thread state", TestAppServerV2NotificationsUpdateThreadStateAsync),
     ("app-server error notifications show detail", TestAppServerErrorNotificationsShowDetailAsync),
     ("thread store keeps multiple project threads", TestThreadStoreKeepsMultipleProjectThreadsAsync),
@@ -70,12 +75,15 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("worktree service removes owned clean worktree", TestWorktreeServiceRemovesOwnedCleanWorktreeAsync),
     ("view model starts worktree task in isolated cwd", TestViewModelStartsWorktreeTaskInIsolatedCwdAsync),
     ("conpty terminal starts powershell in requested cwd", TestConPtyTerminalStartsInRequestedCwdAsync),
+    ("bounded text buffer retains newest terminal output", TestBoundedTextBufferRetainsNewestOutputAsync),
     ("view model starts terminal in active worktree", TestViewModelStartsTerminalInActiveWorktreeAsync),
     ("view model keeps terminal output isolated by thread", TestViewModelKeepsTerminalOutputIsolatedByThreadAsync),
+    ("view model batches terminal presentation updates", TestViewModelBatchesTerminalPresentationUpdatesAsync),
     ("view model terminal actions and shutdown own sessions", TestViewModelTerminalActionsAndShutdownOwnSessionsAsync),
     ("app-server cancellation sends turn interrupt", TestAppServerCancellationSendsInterruptAsync),
     ("live codex app-server initializes when enabled", TestLiveCodexAppServerInitializesWhenEnabledAsync)
 };
+tests.AddRange(Phase5BBoundaryTests.All);
 
 var failures = 0;
 var testFilter = Environment.GetEnvironmentVariable("NCA_TEST_FILTER");
@@ -131,7 +139,7 @@ static Task TestRecentProjectsAsync()
 static async Task TestSettingsRoundTripAsync()
 {
     using var temp = TempWorkspace.Create();
-    var logger = new FileAppLogger(temp.Root);
+    var logger = new TestLogger();
     var store = new JsonSettingsStore(temp.Root, logger);
     var settings = new AppSettings
     {
@@ -143,7 +151,7 @@ static async Task TestSettingsRoundTripAsync()
         IsDetailsPaneOpen = true
     };
     settings.RecentProjects.Add(new(temp.CreateDirectory("Repo"), "Repo", DateTimeOffset.UtcNow));
-    settings.ProjectThreads.Add(new ProjectThreadState
+    settings.ProjectThreads.Add(new PersistedProjectThread
     {
         ProjectPath = temp.CreateDirectory("ThreadRepo"),
         ThreadId = "thr_saved",
@@ -179,6 +187,58 @@ static async Task TestSettingsRoundTripAsync()
     AssertEqual(settings.ProjectThreads[0].WorkspacePath, loaded.ProjectThreads[0].WorkspacePath, "project thread workspace path");
     AssertEqual("Saved final response", loaded.ProjectThreads[0].FinalResponse, "project thread final response");
     AssertTrue(File.Exists(store.SettingsPath), "settings file exists");
+    var saveMetric = logger.Entries.Single(entry => entry.EventName == "settings_saved");
+    AssertTrue(long.Parse(saveMetric.Properties?["serializedBytes"] ?? "0") > 0, "settings save byte metric");
+    AssertTrue(long.Parse(saveMetric.Properties?["elapsedMilliseconds"] ?? "-1") >= 0, "settings save duration metric");
+}
+
+static async Task TestSettingsSavesAreSnapshottedAndCoalescedAsync()
+{
+    var inner = new RecordingSettingsStore();
+    var logger = new TestLogger();
+    var store = new CoalescingSettingsStore(inner, logger, TimeSpan.FromMilliseconds(25));
+    var settings = new AppSettings();
+    var saves = new List<Task>();
+
+    for (var index = 0; index < 20; index++)
+    {
+        settings.Theme = $"Theme {index}";
+        saves.Add(store.SaveAsync(settings));
+    }
+
+    settings.Theme = "Mutation after queueing";
+    await Task.WhenAll(saves);
+
+    AssertEqual(1, inner.SaveCount, "coalesced physical settings writes");
+    AssertEqual("Theme 19", inner.SavedSettings.Theme, "latest queued snapshot is persisted");
+    var batchMetric = logger.Entries.Single(entry => entry.EventName == "settings_save_batch_completed");
+    AssertEqual("20", batchMetric.Properties?["requestCount"], "settings batch request metric");
+    AssertEqual("19", batchMetric.Properties?["coalescedCount"], "settings batch coalesced metric");
+    Console.WriteLine("METRIC settings persistence: 20 logical requests -> 1 physical write");
+}
+
+static async Task TestSettingsRecoverInterruptedAtomicWritesAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var logger = new TestLogger();
+    var store = new JsonSettingsStore(temp.Root, logger);
+    var interrupted = new AppSettings { Theme = "Interrupted" };
+    await store.SaveAsync(interrupted);
+
+    var tempPath = store.SettingsPath + ".tmp";
+    File.Move(store.SettingsPath, tempPath, overwrite: true);
+    var recoveredMissingPrimary = await store.LoadAsync();
+    AssertEqual("Interrupted", recoveredMissingPrimary.Theme, "missing primary recovers temporary settings");
+    AssertTrue(File.Exists(store.SettingsPath), "recovered temporary settings promoted to primary");
+
+    var recoverable = new AppSettings { Theme = "Recoverable" };
+    await store.SaveAsync(recoverable);
+    File.Copy(store.SettingsPath, tempPath, overwrite: true);
+    await File.WriteAllTextAsync(store.SettingsPath, "{ invalid settings json");
+    File.SetLastWriteTimeUtc(tempPath, DateTime.UtcNow.AddSeconds(1));
+    var recoveredCorruptPrimary = await store.LoadAsync();
+    AssertEqual("Recoverable", recoveredCorruptPrimary.Theme, "corrupt primary recovers valid temporary settings");
+    AssertEqual(2, logger.Entries.Count(entry => entry.EventName == "settings_recovered_from_temporary_file"), "settings recovery metric count");
 }
 
 static async Task TestViewModelAppliesAndPersistsThemeAsync()
@@ -605,11 +665,13 @@ static async Task TestViewModelRestartsAppServerAfterCrashAsync()
     await using var firstTransport = new FakeAppServerTransport();
     await using var secondTransport = new FakeAppServerTransport();
     var processService = new SequenceCodexProcessService(firstTransport, secondTransport);
+    var logger = new TestLogger();
     var viewModel = CreateMainViewModel(
         firstTransport,
         temp.Root,
         AuthReadiness.LikelySignedIn,
-        processService: processService);
+        processService: processService,
+        logger: logger);
     await viewModel.InitializeAsync();
     viewModel.BrowseProjectCommand.Execute(null);
     await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "recovery project selected");
@@ -631,6 +693,9 @@ static async Task TestViewModelRestartsAppServerAfterCrashAsync()
     secondTransport.ServerSend("""{"id":1,"result":{"data":[]}}""");
     await WaitUntilAsync(() => viewModel.AppServerHealth == "Codex connected", "app-server recovered");
     AssertEqual(2, processService.StartCount, "app-server restart count");
+    var recoveryMetric = logger.Entries.Single(entry => entry.EventName == "app_server_recovered");
+    AssertTrue(long.Parse(recoveryMetric.Properties?["elapsedMilliseconds"] ?? "-1") >= 0, "app-server recovery duration metric");
+    Console.WriteLine($"METRIC app-server recovery: {recoveryMetric.Properties?["elapsedMilliseconds"]} ms");
     await viewModel.DisposeAsync();
 }
 
@@ -657,7 +722,9 @@ static async Task TestViewModelRunsParallelProjectThreadsAsync()
     viewModel.NewThreadCommand.Execute(null);
     await transport.WaitForClientMessageCountAsync(5);
     transport.ServerSend("""{"id":3,"result":{"thread":{"id":"thr_parallel_b"}}}""");
-    await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "thr_parallel_b", "second parallel thread selected");
+    await WaitUntilAsync(
+        () => viewModel.SelectedThread?.ThreadId == "thr_parallel_b" && !viewModel.IsTurnRunning,
+        "second parallel thread selected and idle");
     AssertTrue(!viewModel.IsTurnRunning, "second thread composer remains available");
     AssertTrue(string.IsNullOrWhiteSpace(viewModel.SteeringText), "thread switch clears guidance draft");
 
@@ -1008,6 +1075,114 @@ static Task TestAppServerNotificationsUpdateThreadStateAsync()
     return Task.CompletedTask;
 }
 
+static Task TestNotificationBatcherPreservesLongStreamOutputAndOrderAsync()
+{
+    const int deltaCount = 25_000;
+    var emitted = new List<AppServerNotification>();
+    using var batcher = new AppServerNotificationBatcher(emitted.Add, TimeSpan.FromSeconds(30));
+    var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+    var timer = Stopwatch.StartNew();
+
+    for (var index = 0; index < deltaCount; index++)
+    {
+        batcher.Enqueue(new AppServerNotification(
+            "item/agentMessage/delta",
+            new JsonObject
+            {
+                ["threadId"] = "thread_long",
+                ["turnId"] = "turn_long",
+                ["itemId"] = "item_long",
+                ["delta"] = "x"
+            }));
+    }
+
+    batcher.Enqueue(new AppServerNotification(
+        "turn/completed",
+        new JsonObject
+        {
+            ["threadId"] = "thread_long",
+            ["turn"] = new JsonObject { ["id"] = "turn_long", ["status"] = "completed" }
+        }));
+
+    timer.Stop();
+    var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+    var metrics = batcher.Metrics;
+    AssertEqual(deltaCount + 1L, metrics.ReceivedCount, "long stream received count");
+    AssertEqual(2L, metrics.EmittedCount, "long stream emitted batch count");
+    AssertEqual("item/agentMessage/delta", emitted[0].Method, "long stream delta emitted before completion");
+    AssertEqual("turn/completed", emitted[1].Method, "long stream completion order");
+
+    var service = new CodexThreadService();
+    foreach (var notification in emitted)
+    {
+        service.ApplyNotification(notification);
+    }
+
+    AssertEqual(deltaCount, service.FinalResponse.Length, "long stream final response length");
+    AssertEqual(CodexTurnStatus.Completed, service.ActiveTurnStatus, "long stream completion state");
+    Console.WriteLine(
+        $"METRIC Codex stream: {metrics.ReceivedCount} notifications -> {metrics.EmittedCount} UI batches, " +
+        $"{allocatedBytes / (1024d * 1024d):F2} MiB allocated in {timer.Elapsed.TotalMilliseconds:F2} ms");
+
+    return Task.CompletedTask;
+}
+
+static async Task TestNotificationBatcherFlushesIdleDeltasAsync()
+{
+    var completion = new TaskCompletionSource<AppServerNotification>(TaskCreationOptions.RunContinuationsAsynchronously);
+    using var batcher = new AppServerNotificationBatcher(
+        notification => completion.TrySetResult(notification),
+        TimeSpan.FromMilliseconds(20));
+    batcher.Enqueue(new AppServerNotification(
+        "item/agentMessage/delta",
+        new JsonObject { ["delta"] = "visible" }));
+
+    var emitted = await completion.Task.WaitAsync(TimeSpan.FromSeconds(1));
+    AssertEqual("visible", emitted.Params["delta"]?.GetValue<string>(), "idle delta text");
+}
+
+static Task TestThreadServiceBoundsLiveStreamedHistoryAsync()
+{
+    var service = new CodexThreadService();
+    var overflow = 25;
+    var totalNotifications = CodexThreadService.MaximumRawEvents + overflow;
+
+    for (var index = 0; index < totalNotifications; index++)
+    {
+        service.ApplyNotification(Notification(
+            "test/progress",
+            $$"""
+            {"message":"event {{index}}"}
+            """));
+    }
+
+    AssertEqual(CodexThreadService.MaximumRawEvents, service.RawEvents.Count, "raw event live bound");
+    AssertEqual(CodexThreadService.MaximumTimelineItems, service.TimelineItems.Count, "timeline live bound");
+    AssertTrue(service.RawEvents[0].Contains($"event {overflow}", StringComparison.Ordinal), "old raw events are evicted");
+    AssertEqual($"event {overflow}", service.TimelineItems[0].Detail, "old timeline items are evicted");
+    AssertTrue(service.RawEvents[^1].Contains($"event {totalNotifications - 1}", StringComparison.Ordinal), "latest raw event is retained");
+    AssertEqual($"event {totalNotifications - 1}", service.TimelineItems[^1].Detail, "latest timeline item is retained");
+
+    var restored = new CodexThreadService();
+    restored.Restore(
+        "thread_restored",
+        string.Empty,
+        Enumerable.Range(0, totalNotifications).Select(index => new CodexTimelineItem(
+            CodexTimelineItemKind.Raw,
+            "Restored",
+            $"restored {index}",
+            "test/restore",
+            DateTimeOffset.UnixEpoch.AddSeconds(index))),
+        Enumerable.Range(0, totalNotifications).Select(index => $"restored raw {index}"));
+
+    AssertEqual(CodexThreadService.MaximumTimelineItems, restored.TimelineItems.Count, "restored timeline bound");
+    AssertEqual(CodexThreadService.MaximumRawEvents, restored.RawEvents.Count, "restored raw event bound");
+    AssertEqual($"restored {overflow}", restored.TimelineItems[0].Detail, "restore evicts oldest timeline items");
+    AssertEqual($"restored raw {overflow}", restored.RawEvents[0], "restore evicts oldest raw events");
+
+    return Task.CompletedTask;
+}
+
 static Task TestAppServerV2NotificationsUpdateThreadStateAsync()
 {
     var service = new CodexThreadService();
@@ -1182,7 +1357,7 @@ static async Task TestViewModelRestoresPersistedThreadAndResumesItAsync()
     await using var transport = new FakeAppServerTransport();
     var projectPath = temp.CreateDirectory("Repo");
     var settings = new AppSettings();
-    settings.ProjectThreads.Add(new ProjectThreadState
+    settings.ProjectThreads.Add(new PersistedProjectThread
     {
         ProjectPath = projectPath,
         ThreadId = "thr_existing",
@@ -1353,11 +1528,21 @@ static async Task TestViewModelShutdownCancelsRunningTurnAndDisposesTransportAsy
     await using var transport = new FakeAppServerTransport();
     var projectPath = temp.CreateDirectory("Repo");
     var settingsStore = new FakeSettingsStore();
-    var viewModel = CreateMainViewModel(transport, projectPath, AuthReadiness.LikelySignedIn, settingsStore);
+    var terminals = new FakeTerminalService();
+    var logger = new TestLogger();
+    var viewModel = CreateMainViewModel(
+        transport,
+        projectPath,
+        AuthReadiness.LikelySignedIn,
+        settingsStore,
+        terminalService: terminals,
+        logger: logger);
 
     await viewModel.InitializeAsync();
     viewModel.BrowseProjectCommand.Execute(null);
     await WaitUntilAsync(() => string.Equals(viewModel.SelectedProjectPath, projectPath, StringComparison.OrdinalIgnoreCase), "project selection");
+    viewModel.StartTerminalCommand.Execute(null);
+    await WaitUntilAsync(() => terminals.Sessions.Count == 1, "shutdown terminal started");
 
     viewModel.PromptText = "Run until shutdown.";
     viewModel.SubmitPromptCommand.Execute(null);
@@ -1399,7 +1584,16 @@ static async Task TestViewModelShutdownCancelsRunningTurnAndDisposesTransportAsy
 
     AssertTrue(!viewModel.IsTurnRunning, "shutdown clears running flag");
     AssertTrue(transport.IsDisposed, "shutdown disposes transport");
+    AssertTrue(terminals.Sessions[0].IsDisposed, "shutdown disposes active terminal");
     AssertEqual("thr_123", settingsStore.SavedSettings.ProjectThreads.Single().ThreadId, "shutdown saves thread id");
+    var shutdownMetric = logger.Entries.Single(entry => entry.EventName == "shutdown_completed");
+    AssertEqual("1", shutdownMetric.Properties?["activeTurnsAtStart"], "shutdown active turn metric");
+    AssertEqual("1", shutdownMetric.Properties?["terminalSessionsAtStart"], "shutdown terminal session metric");
+    AssertTrue(long.Parse(shutdownMetric.Properties?["elapsedMilliseconds"] ?? "-1") >= 0, "shutdown duration metric");
+    Console.WriteLine(
+        $"METRIC shutdown: {shutdownMetric.Properties?["elapsedMilliseconds"]} ms with " +
+        $"{shutdownMetric.Properties?["activeTurnsAtStart"]} active turn and " +
+        $"{shutdownMetric.Properties?["terminalSessionsAtStart"]} terminal session");
 }
 
 static async Task TestGitServiceReadsStatusAndDiffsAsync()
@@ -1653,7 +1847,7 @@ static async Task TestViewModelStartsTerminalInActiveWorktreeAsync()
     {
         ProjectThreads =
         [
-            new ProjectThreadState
+            new PersistedProjectThread
             {
                 ProjectPath = project,
                 ThreadId = "thr_terminal",
@@ -1691,8 +1885,8 @@ static async Task TestViewModelKeepsTerminalOutputIsolatedByThreadAsync()
     {
         ProjectThreads =
         [
-            new ProjectThreadState { ProjectPath = project, ThreadId = "thr_one", Title = "One", IsActive = true, WorkspacePath = project },
-            new ProjectThreadState { ProjectPath = project, ThreadId = "thr_two", Title = "Two", WorkspacePath = project }
+            new PersistedProjectThread { ProjectPath = project, ThreadId = "thr_one", Title = "One", IsActive = true, WorkspacePath = project },
+            new PersistedProjectThread { ProjectPath = project, ThreadId = "thr_two", Title = "Two", WorkspacePath = project }
         ]
     };
     var terminals = new FakeTerminalService();
@@ -1720,6 +1914,81 @@ static async Task TestViewModelKeepsTerminalOutputIsolatedByThreadAsync()
     viewModel.SelectedThread = viewModel.ProjectThreads.Single(thread => thread.ThreadId == "thr_one");
     AssertTrue(viewModel.TerminalOutput.Contains("ONE_OUTPUT", StringComparison.Ordinal), "first output restored");
     AssertTrue(!viewModel.TerminalOutput.Contains("TWO_OUTPUT", StringComparison.Ordinal), "second output isolated");
+    await viewModel.DisposeAsync();
+}
+
+static Task TestBoundedTextBufferRetainsNewestOutputAsync()
+{
+    var buffer = new BoundedTextBuffer(10);
+    buffer.Append("012345");
+    buffer.Append("6789ABCDE");
+
+    AssertEqual(10, buffer.Length, "bounded terminal length");
+    AssertEqual("56789ABCDE", buffer.Snapshot(), "bounded terminal newest output");
+    buffer.Clear();
+    AssertEqual(0, buffer.Length, "bounded terminal clear length");
+    AssertEqual(string.Empty, buffer.Snapshot(), "bounded terminal clear snapshot");
+
+    var stressBuffer = new BoundedTextBuffer(250_000);
+    stressBuffer.Append(new string('a', 200_000));
+    stressBuffer.Append(new string('b', 100_000));
+    var stressSnapshot = stressBuffer.Snapshot();
+    AssertEqual(250_000, stressSnapshot.Length, "representative terminal stress bound");
+    AssertTrue(stressSnapshot.StartsWith(new string('a', 150_000), StringComparison.Ordinal), "terminal stress retains newest tail of first chunk");
+    AssertTrue(stressSnapshot.EndsWith(new string('b', 100_000), StringComparison.Ordinal), "terminal stress retains latest chunk");
+
+    var throughputBuffer = new BoundedTextBuffer(250_000);
+    var throughputChunk = new string('x', 4096);
+    const int throughputChunkCount = 10_000;
+    var throughputTimer = Stopwatch.StartNew();
+    for (var index = 0; index < throughputChunkCount; index++)
+    {
+        throughputBuffer.Append(throughputChunk);
+    }
+
+    _ = throughputBuffer.Snapshot();
+    throughputTimer.Stop();
+    var appendedMegabytes = throughputChunk.Length * throughputChunkCount / (1024d * 1024d);
+    Console.WriteLine(
+        $"METRIC terminal buffer: {appendedMegabytes:F2} MiB in {throughputTimer.Elapsed.TotalMilliseconds:F2} ms " +
+        $"({appendedMegabytes / throughputTimer.Elapsed.TotalSeconds:F2} MiB/s), retained {throughputBuffer.Length} chars");
+
+    return Task.CompletedTask;
+}
+
+static async Task TestViewModelBatchesTerminalPresentationUpdatesAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var terminals = new FakeTerminalService();
+    var logger = new TestLogger();
+    var viewModel = CreateMainViewModel(
+        new FakeAppServerTransport(),
+        temp.Root,
+        AuthReadiness.LikelySignedIn,
+        terminalService: terminals,
+        logger: logger);
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "batched terminal project selected");
+    viewModel.StartTerminalCommand.Execute(null);
+    await WaitUntilAsync(() => terminals.Sessions.Count == 1, "batched terminal started");
+
+    for (var index = 0; index < 100; index++)
+    {
+        terminals.Sessions[0].EmitOutput("x");
+    }
+
+    await WaitUntilAsync(() => viewModel.TerminalOutput.Length == 100, "batched terminal output presented");
+    viewModel.KillTerminalCommand.Execute(null);
+    await WaitUntilAsync(() => logger.Entries.Any(entry => entry.EventName == "terminal_output_metrics"), "terminal metrics recorded");
+
+    var metrics = logger.Entries.Single(entry => entry.EventName == "terminal_output_metrics");
+    AssertEqual("100", metrics.Properties?["receivedChunks"], "terminal received chunk metric");
+    AssertEqual("100", metrics.Properties?["receivedCharacters"], "terminal received character metric");
+    AssertTrue(int.Parse(metrics.Properties?["presentationUpdates"] ?? "0") <= 2, "terminal burst is presented in at most two updates");
+    Console.WriteLine(
+        $"METRIC terminal presentation: {metrics.Properties?["receivedChunks"]} chunks -> " +
+        $"{metrics.Properties?["presentationUpdates"]} UI updates");
     await viewModel.DisposeAsync();
 }
 
@@ -1911,13 +2180,20 @@ static MainViewModel CreateMainViewModel(
     ICodexCliUtilityRunner? cliUtilityRunner = null,
     ICodexProcessService? processService = null,
     IWorktreeService? worktreeService = null,
-    ITerminalService? terminalService = null)
+    ITerminalService? terminalService = null,
+    IAppLogger? logger = null)
 {
     var installation = new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation");
+    var effectiveLogger = logger ?? new TestLogger();
+    var effectiveProcessService = processService ?? new FakeCodexProcessService(transport);
+    var appServerSessionCoordinator = new AppServerSessionCoordinator(
+        effectiveProcessService,
+        effectiveLogger,
+        new CodexAppServerClientMetadata("native_codex_assistant_tests", "Native Codex Assistant Tests", "1.0.0"));
     return new MainViewModel(
         settingsStore ?? new FakeSettingsStore(),
         new FakeCodexDiscoveryService(installation),
-        processService ?? new FakeCodexProcessService(transport),
+        appServerSessionCoordinator,
         new FakeAuthService(new AuthenticationState(readiness, readiness.ToString(), "Test auth state.", @"C:\Users\Test\.codex")),
         new FakeGitService(projectPath),
         worktreeService ?? new FakeWorktreeService(projectPath, Path.Combine(projectPath, ".test-worktree")),
@@ -1929,7 +2205,7 @@ static MainViewModel CreateMainViewModel(
         new ThreadStore(),
         new CodexThreadWorkspace(),
         terminalService ?? new FakeTerminalService(),
-        new TestLogger());
+        effectiveLogger);
 }
 
 static async Task WaitUntilAsync(Func<bool> condition, string label)
@@ -2033,6 +2309,10 @@ internal sealed class TempWorkspace : IDisposable
 
 internal sealed class TestLogger : IAppLogger
 {
+    private readonly object syncRoot = new();
+
+    public List<TestLogEntry> Entries { get; } = [];
+
     public void Log(
         AppLogLevel level,
         string eventName,
@@ -2040,8 +2320,19 @@ internal sealed class TestLogger : IAppLogger
         IReadOnlyDictionary<string, string?>? properties = null,
         Exception? exception = null)
     {
+        lock (syncRoot)
+        {
+            Entries.Add(new TestLogEntry(level, eventName, message, properties, exception));
+        }
     }
 }
+
+internal sealed record TestLogEntry(
+    AppLogLevel Level,
+    string EventName,
+    string Message,
+    IReadOnlyDictionary<string, string?>? Properties,
+    Exception? Exception);
 
 internal sealed class FakeSettingsStore : ISettingsStore
 {
@@ -2064,6 +2355,38 @@ internal sealed class FakeSettingsStore : ISettingsStore
     {
         cancellationToken.ThrowIfCancellationRequested();
         SavedSettings = settings;
+        return Task.CompletedTask;
+    }
+}
+
+internal sealed class RecordingSettingsStore : ISettingsStore
+{
+    private readonly object syncRoot = new();
+
+    public string SettingsPath => Path.Combine(Path.GetTempPath(), "NativeCodexAssistant.Tests", "recorded-settings.json");
+
+    public int SaveCount { get; private set; }
+
+    public AppSettings SavedSettings { get; private set; } = new();
+
+    public Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (syncRoot)
+        {
+            return Task.FromResult(AppSettingsSnapshot.Create(SavedSettings));
+        }
+    }
+
+    public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (syncRoot)
+        {
+            SaveCount++;
+            SavedSettings = AppSettingsSnapshot.Create(settings);
+        }
+
         return Task.CompletedTask;
     }
 }

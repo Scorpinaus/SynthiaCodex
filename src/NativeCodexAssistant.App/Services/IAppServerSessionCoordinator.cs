@@ -1,0 +1,59 @@
+using NativeCodexAssistant.Core.Codex;
+using NativeCodexAssistant.Core.Codex.AppServer;
+using NativeCodexAssistant.Infrastructure.Codex;
+
+namespace NativeCodexAssistant.App.Services;
+
+public enum AppServerSessionState
+{
+    Idle,
+    Connecting,
+    Connected,
+    Reconnecting,
+    Unavailable,
+    Disposed
+}
+
+public sealed class AppServerSessionStateChangedEventArgs(
+    AppServerSessionState state,
+    AppServerSessionState previousState) : EventArgs
+{
+    public AppServerSessionState State { get; } = state;
+
+    public AppServerSessionState PreviousState { get; } = previousState;
+}
+
+public interface IAppServerSessionCoordinator : IAsyncDisposable
+{
+    event EventHandler<AppServerNotification>? NotificationReceived;
+
+    event EventHandler<AppServerConnectionFailedEventArgs>? ConnectionFailed;
+
+    event EventHandler<AppServerSessionStateChangedEventArgs>? StateChanged;
+
+    AppServerSessionState State { get; }
+
+    AppServerNotificationBatchMetrics NotificationMetrics { get; }
+
+    Task EnsureConnectedAsync(CodexInstallation installation, CancellationToken cancellationToken = default);
+
+    Task<CodexThreadStartResult> StartThreadAsync(CodexThreadStartOptions options, CancellationToken cancellationToken = default);
+
+    Task<CodexThreadResumeResult> ResumeThreadAsync(CodexThreadResumeRequest request, CancellationToken cancellationToken = default);
+
+    Task<CodexThreadForkResult> ForkThreadAsync(CodexThreadForkRequest request, CancellationToken cancellationToken = default);
+
+    Task ArchiveThreadAsync(string threadId, CancellationToken cancellationToken = default);
+
+    Task UnarchiveThreadAsync(string threadId, CancellationToken cancellationToken = default);
+
+    Task<CodexTurnSteerResult> SteerTurnAsync(CodexTurnSteerRequest request, CancellationToken cancellationToken = default);
+
+    Task<CodexTurnStartResult> StartTurnAsync(CodexTurnStartRequest request, CancellationToken cancellationToken = default);
+
+    Task CancelTurnAsync(string threadId, string turnId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<CodexModelOption>> ListModelsAsync(CancellationToken cancellationToken = default);
+
+    void FlushNotifications();
+}

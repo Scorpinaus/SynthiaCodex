@@ -310,7 +310,20 @@ public sealed class WorktreeService(IAppLogger logger) : IWorktreeService
 
         var output = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var error = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+
+            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
         return new GitResult(process.ExitCode, await output.ConfigureAwait(false), await error.ConfigureAwait(false));
     }
 

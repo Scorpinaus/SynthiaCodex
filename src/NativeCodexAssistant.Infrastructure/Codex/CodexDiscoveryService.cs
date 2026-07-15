@@ -132,6 +132,8 @@ public sealed class CodexDiscoveryService(IAppLogger logger) : ICodexDiscoverySe
             if (!ReferenceEquals(completed, waitTask) && !process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
                 return null;
             }
 

@@ -33,6 +33,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly CodexThreadWorkspace threadWorkspace;
     private readonly ITerminalService terminalService;
     private readonly IAppLogger logger;
+    private readonly SemaphoreSlim appServerLifecycleGate = new(1, 1);
+    private readonly CancellationTokenSource appServerWarmUpCancellation = new();
     private CodexThreadService threadService = new();
     private readonly SynchronizationContext? synchronizationContext;
     private readonly AsyncRelayCommand submitPromptCommand;
@@ -61,6 +63,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand killTerminalCommand;
     private readonly RelayCommand clearTerminalCommand;
     private readonly RelayCommand toggleTerminalCommand;
+    private readonly RelayCommand toggleProjectRailCommand;
+    private readonly RelayCommand toggleDetailsPaneCommand;
 
     private AppSettings settings = new();
     private CodexInstallation currentCodex = CodexInstallation.Missing("Detection has not run yet.");
@@ -74,7 +78,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string selectedTheme = "System";
     private string newThreadWorkspaceMode = "Current checkout";
     private string steeringText = string.Empty;
-    private string appServerHealth = "Stopped";
+    private string appServerHealth = "Codex idle";
     private string statusMessage = "Starting";
     private string? gitRepositoryRoot;
     private string gitBranch = "No repository";
@@ -92,9 +96,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool isShowingStagedDiff;
     private bool isTurnRunning;
     private bool isTerminalVisible;
+    private bool isProjectRailOpen = true;
+    private bool isDetailsPaneOpen;
+    private bool isCompactLayout;
+    private double viewportWidth = 1240;
+    private int selectedWorkspaceTabIndex;
     private bool activeThreadLoaded;
     private bool isShuttingDown;
     private Task? shutdownTask;
+    private Task? appServerWarmUpTask;
     private CodexAppServerClient? appServerClient;
     private CodexCliUtilityResult? lastDoctorResult;
     private readonly HashSet<string> loadedThreadIds = new(StringComparer.Ordinal);
@@ -168,6 +178,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         KillTerminalCommand = killTerminalCommand = new AsyncRelayCommand(KillTerminalAsync, CanKillTerminal);
         ClearTerminalCommand = clearTerminalCommand = new RelayCommand(ClearTerminal, CanClearTerminal);
         ToggleTerminalCommand = toggleTerminalCommand = new RelayCommand(ToggleTerminal, () => !IsShuttingDown);
+        ToggleProjectRailCommand = toggleProjectRailCommand = new RelayCommand(ToggleProjectRail, () => !IsShuttingDown);
+        ToggleDetailsPaneCommand = toggleDetailsPaneCommand = new RelayCommand(ToggleDetailsPane, () => !IsShuttingDown);
     }
 
     public event EventHandler? CloseRequested;
@@ -265,6 +277,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public ICommand ToggleTerminalCommand { get; }
 
+    public ICommand ToggleProjectRailCommand { get; }
+
+    public ICommand ToggleDetailsPaneCommand { get; }
+
     public string? SelectedProjectPath
     {
         get => selectedProjectPath;
@@ -301,6 +317,30 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         get => isTerminalVisible;
         set => SetProperty(ref isTerminalVisible, value);
+    }
+
+    public bool IsProjectRailOpen
+    {
+        get => isProjectRailOpen;
+        private set => SetProperty(ref isProjectRailOpen, value);
+    }
+
+    public bool IsDetailsPaneOpen
+    {
+        get => isDetailsPaneOpen;
+        private set => SetProperty(ref isDetailsPaneOpen, value);
+    }
+
+    public bool IsCompactLayout
+    {
+        get => isCompactLayout;
+        private set => SetProperty(ref isCompactLayout, value);
+    }
+
+    public int SelectedWorkspaceTabIndex
+    {
+        get => selectedWorkspaceTabIndex;
+        set => SetProperty(ref selectedWorkspaceTabIndex, Math.Clamp(value, 0, 2));
     }
 
     public string TerminalInput
@@ -514,6 +554,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             if (SetProperty(ref isTurnRunning, value))
             {
+                if (!value)
+                {
+                    SteeringText = string.Empty;
+                }
+
                 submitPromptCommand.RaiseCanExecuteChanged();
                 cancelTurnCommand.RaiseCanExecuteChanged();
                 RaiseThreadCommandStates();
@@ -535,6 +580,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 RaiseGitCommandStates();
                 RaiseTerminalCommandStates();
                 toggleTerminalCommand.RaiseCanExecuteChanged();
+                toggleProjectRailCommand.RaiseCanExecuteChanged();
+                toggleDetailsPaneCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -543,6 +590,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         logger.Log(AppLogLevel.Information, "view_model_initialize", "Main view model initialization started.");
         settings = await settingsStore.LoadAsync().ConfigureAwait(true);
+        IsProjectRailOpen = settings.IsProjectRailOpen;
+        IsDetailsPaneOpen = settings.IsDetailsPaneOpen;
         selectedTheme = NormalizeTheme(settings.Theme);
         OnPropertyChanged(nameof(SelectedTheme));
         themeService.ApplyTheme(selectedTheme);
@@ -551,6 +600,40 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         RefreshRecentProjects();
         await RefreshDiagnosticsAsync().ConfigureAwait(true);
         StatusMessage = "Ready";
+        appServerWarmUpTask = WarmUpAppServerAsync(appServerWarmUpCancellation.Token);
+    }
+
+    private async Task WarmUpAppServerAsync(CancellationToken cancellationToken)
+    {
+        if (!currentCodex.IsFound)
+        {
+            AppServerHealth = "Codex unavailable";
+            return;
+        }
+
+        if (currentAuth.Readiness is AuthReadiness.Unavailable or AuthReadiness.NotSignedIn)
+        {
+            AppServerHealth = "Sign-in needed";
+            return;
+        }
+
+        try
+        {
+            await EnsureAppServerClientAsync(cancellationToken).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            AppServerHealth = "Codex unavailable";
+            StatusMessage = "Ready";
+            logger.Log(
+                AppLogLevel.Warning,
+                "app_server_warm_up_failed",
+                "Codex app-server warm-up failed; the next Codex action will retry.",
+                exception: ex);
+        }
     }
 
     private async Task BrowseProjectAsync()
@@ -974,7 +1057,67 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void ToggleTerminal()
     {
         IsTerminalVisible = !IsTerminalVisible;
+        if (IsTerminalVisible)
+        {
+            SelectedWorkspaceTabIndex = 1;
+        }
+
         StatusMessage = IsTerminalVisible ? "Terminal panel shown" : "Terminal panel hidden";
+    }
+
+    public void UpdateViewportWidth(double width)
+    {
+        if (double.IsNaN(width) || double.IsInfinity(width) || width <= 0)
+        {
+            return;
+        }
+
+        viewportWidth = width;
+        IsCompactLayout = width < 1000;
+        if (IsCompactLayout && IsProjectRailOpen && IsDetailsPaneOpen)
+        {
+            IsDetailsPaneOpen = false;
+            settings.IsDetailsPaneOpen = false;
+            _ = SaveLayoutSelectionAsync();
+        }
+    }
+
+    private void ToggleProjectRail()
+    {
+        IsProjectRailOpen = !IsProjectRailOpen;
+        if (IsProjectRailOpen && viewportWidth < 1000)
+        {
+            IsDetailsPaneOpen = false;
+        }
+
+        settings.IsProjectRailOpen = IsProjectRailOpen;
+        settings.IsDetailsPaneOpen = IsDetailsPaneOpen;
+        _ = SaveLayoutSelectionAsync();
+    }
+
+    private void ToggleDetailsPane()
+    {
+        IsDetailsPaneOpen = !IsDetailsPaneOpen;
+        if (IsDetailsPaneOpen && viewportWidth < 1000)
+        {
+            IsProjectRailOpen = false;
+        }
+
+        settings.IsProjectRailOpen = IsProjectRailOpen;
+        settings.IsDetailsPaneOpen = IsDetailsPaneOpen;
+        _ = SaveLayoutSelectionAsync();
+    }
+
+    private async Task SaveLayoutSelectionAsync()
+    {
+        try
+        {
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            logger.Log(AppLogLevel.Warning, "layout_save_failed", "Could not save the selected layout.", exception: ex);
+        }
     }
 
     private void HandleTerminalOutput(string key, string text)
@@ -1634,6 +1777,18 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         IsShuttingDown = true;
         StatusMessage = "Closing application";
 
+        appServerWarmUpCancellation.Cancel();
+        if (appServerWarmUpTask is not null)
+        {
+            try
+            {
+                await appServerWarmUpTask.ConfigureAwait(true);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
         await TryCancelRunningTurnForShutdownAsync(cancellationToken).ConfigureAwait(true);
         await DisposeTerminalSessionsAsync().ConfigureAwait(true);
         await SaveActiveThreadStateAsync().ConfigureAwait(true);
@@ -1878,41 +2033,61 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         revealInExplorerCommand.RaiseCanExecuteChanged();
     }
 
-    private async Task<CodexAppServerClient> EnsureAppServerClientAsync()
+    private async Task<CodexAppServerClient> EnsureAppServerClientAsync(CancellationToken cancellationToken = default)
     {
         if (appServerClient?.IsHealthy == true)
         {
             return appServerClient;
         }
 
-        var isRecovery = appServerClient is not null || string.Equals(AppServerHealth, "Recovering", StringComparison.Ordinal);
-        if (appServerClient is not null)
-        {
-            await DisposeAppServerClientAsync().ConfigureAwait(true);
-        }
-
-        AppServerHealth = isRecovery ? "Recovering" : "Starting";
-
-        var transport = await codexProcessService.StartAppServerTransportAsync(currentCodex).ConfigureAwait(true);
-        var client = new CodexAppServerClient(
-            transport,
-            new CodexAppServerClientMetadata("native_codex_assistant", "Native Codex Assistant", Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.1.0"));
+        await appServerLifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(true);
         try
         {
-            client.NotificationReceived += OnAppServerNotificationReceived;
-            client.ConnectionFailed += OnAppServerConnectionFailed;
-            await client.InitializeAsync(CodexInitializeOptions.Default).ConfigureAwait(true);
-            appServerClient = client;
-            AppServerHealth = "Healthy";
-            return appServerClient;
+            if (appServerClient?.IsHealthy == true)
+            {
+                return appServerClient;
+            }
+
+            var isRecovery = appServerClient is not null || string.Equals(AppServerHealth, "Codex reconnecting", StringComparison.Ordinal);
+            if (appServerClient is not null)
+            {
+                await DisposeAppServerClientAsync().ConfigureAwait(true);
+            }
+
+            AppServerHealth = isRecovery ? "Codex reconnecting" : "Codex connecting";
+
+            CodexAppServerClient? client = null;
+            try
+            {
+                var transport = await codexProcessService
+                    .StartAppServerTransportAsync(currentCodex, cancellationToken)
+                    .ConfigureAwait(true);
+                client = new CodexAppServerClient(
+                    transport,
+                    new CodexAppServerClientMetadata("native_codex_assistant", "Native Codex Assistant", Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.1.0"));
+                client.NotificationReceived += OnAppServerNotificationReceived;
+                client.ConnectionFailed += OnAppServerConnectionFailed;
+                await client.InitializeAsync(CodexInitializeOptions.Default, cancellationToken).ConfigureAwait(true);
+                appServerClient = client;
+                AppServerHealth = "Codex connected";
+                return appServerClient;
+            }
+            catch
+            {
+                if (client is not null)
+                {
+                    client.NotificationReceived -= OnAppServerNotificationReceived;
+                    client.ConnectionFailed -= OnAppServerConnectionFailed;
+                    await client.DisposeAsync().ConfigureAwait(true);
+                }
+
+                AppServerHealth = "Codex unavailable";
+                throw;
+            }
         }
-        catch
+        finally
         {
-            client.NotificationReceived -= OnAppServerNotificationReceived;
-            client.ConnectionFailed -= OnAppServerConnectionFailed;
-            await client.DisposeAsync().ConfigureAwait(true);
-            AppServerHealth = "Unavailable";
-            throw;
+            appServerLifecycleGate.Release();
         }
     }
 
@@ -1931,7 +2106,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             activeThreadLoaded = false;
             activeTurnId = null;
             IsTurnRunning = false;
-            AppServerHealth = "Recovering";
+            AppServerHealth = "Codex reconnecting";
             StatusMessage = $"Codex app-server stopped: {args.Exception.Message}. The next action will restart it.";
         }
 
@@ -2134,7 +2309,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void SelectThread(ProjectThreadState? state)
     {
+        var previousActiveThreadId = activeThreadId;
         activeThreadId = state?.ThreadId;
+        if (!string.Equals(previousActiveThreadId, activeThreadId, StringComparison.Ordinal))
+        {
+            SteeringText = string.Empty;
+        }
+
         activeThreadLoaded = state is not null && loadedThreadIds.Contains(state.ThreadId);
         activeTurnId = state is not null && activeTurnIds.TryGetValue(state.ThreadId, out var turnId) ? turnId : null;
         IsTurnRunning = state is not null && runningThreadIds.Contains(state.ThreadId);

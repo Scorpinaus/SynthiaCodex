@@ -26,8 +26,12 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("recent projects are deduped and capped", TestRecentProjectsAsync),
     ("settings round trip to json", TestSettingsRoundTripAsync),
     ("view model applies and persists selected theme", TestViewModelAppliesAndPersistsThemeAsync),
+    ("view model persists responsive shell state", TestViewModelPersistsResponsiveShellStateAsync),
+    ("view model terminal toggle selects terminal workspace", TestViewModelTerminalToggleSelectsTerminalWorkspaceAsync),
     ("codex utility runner executes doctor", TestCodexUtilityRunnerExecutesDoctorAsync),
     ("view model surfaces codex doctor diagnostics", TestViewModelSurfacesCodexDoctorDiagnosticsAsync),
+    ("view model warms app-server after diagnostics", TestViewModelWarmsAppServerAfterDiagnosticsAsync),
+    ("view model skips warm-up when sign-in is needed", TestViewModelSkipsWarmUpWhenSignInIsNeededAsync),
     ("auth detection reports file cache without reading token", TestAuthDetectionAsync),
     ("codex discovery skips unusable path candidates", TestCodexDiscoverySkipsUnusablePathCandidatesAsync),
     ("codex discovery checks OpenAI local app bin", TestCodexDiscoveryChecksOpenAiLocalAppBinAsync),
@@ -134,7 +138,9 @@ static async Task TestSettingsRoundTripAsync()
         Theme = "Dark",
         PreferredCodexPath = @"C:\Tools\codex.exe",
         LastModelOverride = "gpt-test",
-        LastReasoningEffortOverride = "high"
+        LastReasoningEffortOverride = "high",
+        IsProjectRailOpen = false,
+        IsDetailsPaneOpen = true
     };
     settings.RecentProjects.Add(new(temp.CreateDirectory("Repo"), "Repo", DateTimeOffset.UtcNow));
     settings.ProjectThreads.Add(new ProjectThreadState
@@ -164,6 +170,8 @@ static async Task TestSettingsRoundTripAsync()
     AssertEqual(settings.PreferredCodexPath, loaded.PreferredCodexPath, "preferred codex path");
     AssertEqual(settings.LastModelOverride, loaded.LastModelOverride, "last model override");
     AssertEqual(settings.LastReasoningEffortOverride, loaded.LastReasoningEffortOverride, "last reasoning override");
+    AssertEqual(settings.IsProjectRailOpen, loaded.IsProjectRailOpen, "project rail preference");
+    AssertEqual(settings.IsDetailsPaneOpen, loaded.IsDetailsPaneOpen, "details pane preference");
     AssertEqual(1, loaded.RecentProjects.Count, "recent project count");
     AssertEqual(1, loaded.ProjectThreads.Count, "project thread count");
     AssertEqual("thr_saved", loaded.ProjectThreads[0].ThreadId, "project thread id");
@@ -194,6 +202,60 @@ static async Task TestViewModelAppliesAndPersistsThemeAsync()
     await WaitUntilAsync(() => settingsStore.SavedSettings.Theme == "Light", "theme setting saved");
 
     AssertEqual("Light", themeService.AppliedTheme, "changed theme applied");
+}
+
+static async Task TestViewModelPersistsResponsiveShellStateAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var settingsStore = new FakeSettingsStore(new AppSettings
+    {
+        IsProjectRailOpen = true,
+        IsDetailsPaneOpen = true
+    });
+    var viewModel = CreateMainViewModel(
+        new FakeAppServerTransport(),
+        temp.Root,
+        AuthReadiness.LikelySignedIn,
+        settingsStore);
+
+    await viewModel.InitializeAsync();
+    AssertTrue(viewModel.IsProjectRailOpen, "persisted project rail restored");
+    AssertTrue(viewModel.IsDetailsPaneOpen, "persisted details pane restored");
+
+    viewModel.UpdateViewportWidth(900);
+    AssertTrue(viewModel.IsCompactLayout, "compact layout detected");
+    AssertTrue(viewModel.IsProjectRailOpen, "project rail retained in compact conflict");
+    AssertTrue(!viewModel.IsDetailsPaneOpen, "details pane closes in compact conflict");
+
+    viewModel.ToggleDetailsPaneCommand.Execute(null);
+    AssertTrue(viewModel.IsDetailsPaneOpen, "details pane opens in compact layout");
+    AssertTrue(!viewModel.IsProjectRailOpen, "details pane replaces project rail in compact layout");
+    AssertTrue(settingsStore.SavedSettings.IsDetailsPaneOpen, "details pane preference saved");
+    AssertTrue(!settingsStore.SavedSettings.IsProjectRailOpen, "project rail compact preference saved");
+
+    viewModel.ToggleProjectRailCommand.Execute(null);
+    AssertTrue(viewModel.IsProjectRailOpen, "project rail reopens in compact layout");
+    AssertTrue(!viewModel.IsDetailsPaneOpen, "project rail replaces details pane in compact layout");
+
+    viewModel.UpdateViewportWidth(1200);
+    AssertTrue(!viewModel.IsCompactLayout, "wide layout detected");
+}
+
+static async Task TestViewModelTerminalToggleSelectsTerminalWorkspaceAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var viewModel = CreateMainViewModel(
+        new FakeAppServerTransport(),
+        temp.Root,
+        AuthReadiness.LikelySignedIn);
+
+    await viewModel.InitializeAsync();
+    AssertEqual(0, viewModel.SelectedWorkspaceTabIndex, "task workspace selected initially");
+
+    viewModel.ToggleTerminalCommand.Execute(null);
+
+    AssertTrue(viewModel.IsTerminalVisible, "terminal made visible");
+    AssertEqual(1, viewModel.SelectedWorkspaceTabIndex, "terminal workspace selected");
 }
 
 static async Task TestCodexUtilityRunnerExecutesDoctorAsync()
@@ -390,6 +452,48 @@ static async Task TestViewModelSurfacesCodexDoctorDiagnosticsAsync()
     AssertEqual(1, utilityRunner.RunCount, "doctor invocation count");
 }
 
+static async Task TestViewModelWarmsAppServerAfterDiagnosticsAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var processService = new SequenceCodexProcessService(transport);
+    var viewModel = CreateMainViewModel(
+        transport,
+        temp.Root,
+        AuthReadiness.LikelySignedIn,
+        processService: processService);
+
+    await viewModel.InitializeAsync();
+    await transport.WaitForClientMessageCountAsync(2);
+
+    AssertEqual(1, processService.StartCount, "background app-server start count");
+    AssertEqual("Codex connecting", viewModel.AppServerHealth, "background connecting state");
+
+    transport.ServerSend("""{"id":0,"result":{"userAgent":"codex-test"}}""");
+    await WaitUntilAsync(() => viewModel.AppServerHealth == "Codex connected", "background app-server connected");
+
+    AssertEqual("Ready", viewModel.StatusMessage, "warm-up does not replace ready status");
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelSkipsWarmUpWhenSignInIsNeededAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var processService = new SequenceCodexProcessService(transport);
+    var viewModel = CreateMainViewModel(
+        transport,
+        temp.Root,
+        AuthReadiness.NotSignedIn,
+        processService: processService);
+
+    await viewModel.InitializeAsync();
+
+    AssertEqual("Sign-in needed", viewModel.AppServerHealth, "sign-in connection state");
+    AssertEqual(0, processService.StartCount, "app-server not started without sign-in");
+    await viewModel.DisposeAsync();
+}
+
 static async Task TestViewModelManagesMultipleThreadsAsync()
 {
     using var temp = TempWorkspace.Create();
@@ -488,8 +592,10 @@ static async Task TestViewModelSteersActiveTurnAsync()
     transport.ServerSend("""{"id":3,"result":{"turnId":"turn_steer"}}""");
     await WaitUntilAsync(() => string.IsNullOrWhiteSpace(viewModel.SteeringText), "steering composer cleared");
 
+    viewModel.SteeringText = "Unsent follow-up guidance.";
     transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thr_steer","turn":{"id":"turn_steer","status":"completed"}}}""");
     await WaitUntilAsync(() => !viewModel.IsTurnRunning, "steered turn completed");
+    AssertTrue(string.IsNullOrWhiteSpace(viewModel.SteeringText), "completed turn clears guidance draft");
     await viewModel.DisposeAsync();
 }
 
@@ -513,17 +619,17 @@ static async Task TestViewModelRestartsAppServerAfterCrashAsync()
     firstTransport.ServerSend("""{"id":0,"result":{}}""");
     await firstTransport.WaitForClientMessageCountAsync(3);
     firstTransport.ServerSend("""{"id":1,"result":{"thread":{"id":"thr_recover"}}}""");
-    await WaitUntilAsync(() => viewModel.AppServerHealth == "Healthy", "initial app-server healthy");
+    await WaitUntilAsync(() => viewModel.AppServerHealth == "Codex connected", "initial app-server connected");
 
     firstTransport.ServerFail(new IOException("simulated crash"));
-    await WaitUntilAsync(() => viewModel.AppServerHealth == "Recovering", "app-server recovering");
+    await WaitUntilAsync(() => viewModel.AppServerHealth == "Codex reconnecting", "app-server recovering");
 
     viewModel.LoadModelsCommand.Execute(null);
     await secondTransport.WaitForClientMessageCountAsync(2);
     secondTransport.ServerSend("""{"id":0,"result":{}}""");
     await secondTransport.WaitForClientMessageCountAsync(3);
     secondTransport.ServerSend("""{"id":1,"result":{"data":[]}}""");
-    await WaitUntilAsync(() => viewModel.AppServerHealth == "Healthy", "app-server recovered");
+    await WaitUntilAsync(() => viewModel.AppServerHealth == "Codex connected", "app-server recovered");
     AssertEqual(2, processService.StartCount, "app-server restart count");
     await viewModel.DisposeAsync();
 }
@@ -547,11 +653,13 @@ static async Task TestViewModelRunsParallelProjectThreadsAsync()
     transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn_parallel_a"}}}""");
     await WaitUntilAsync(() => viewModel.IsTurnRunning, "first parallel turn running");
 
+    viewModel.SteeringText = "Guidance for the first thread.";
     viewModel.NewThreadCommand.Execute(null);
     await transport.WaitForClientMessageCountAsync(5);
     transport.ServerSend("""{"id":3,"result":{"thread":{"id":"thr_parallel_b"}}}""");
     await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "thr_parallel_b", "second parallel thread selected");
     AssertTrue(!viewModel.IsTurnRunning, "second thread composer remains available");
+    AssertTrue(string.IsNullOrWhiteSpace(viewModel.SteeringText), "thread switch clears guidance draft");
 
     viewModel.PromptText = "Second parallel task";
     viewModel.SubmitPromptCommand.Execute(null);

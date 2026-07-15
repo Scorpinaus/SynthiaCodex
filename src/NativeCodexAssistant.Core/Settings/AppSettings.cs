@@ -15,6 +15,10 @@ public sealed class AppSettings
 
     public string? LastReasoningEffortOverride { get; set; }
 
+    public bool IsProjectRailOpen { get; set; } = true;
+
+    public bool IsDetailsPaneOpen { get; set; }
+
     public List<RecentProject> RecentProjects { get; set; } = [];
 
     public List<ProjectThreadState> ProjectThreads { get; set; } = [];

@@ -541,6 +541,99 @@ Implementation direction:
 - Terminal output is readable and scrollable.
 - Closing a thread does not orphan hidden terminal processes.
 
+## 12A. Phase 5A: UI/UX Modernization
+
+**Status:** Complete — 15 July 2026. The completed acceptance checklist and verification record are maintained in `phase_5a_ui_ux.md`.
+
+### Goals
+
+Improve the application's usability, information hierarchy, responsiveness, accessibility, and visual polish before adding new Phase 6 capabilities.
+
+This phase changes how existing Phase 0-5 capabilities are presented, but does not add skills, plugins, MCP, automations, or other power features.
+
+### Product experience
+
+- Make the active project, thread, workspace, and task state immediately understandable.
+- Prioritize the task conversation and prompt composer over diagnostics and protocol details.
+- Replace the permanently visible diagnostics column with an optional details surface.
+- Simplify thread actions so common actions are prominent and secondary lifecycle actions remain discoverable.
+- Provide deliberate empty, loading, authentication, failure, cancellation, and recovery states.
+- Improve the readability of assistant responses, commands, file changes, Git diffs, and terminal output.
+
+### Responsive shell
+
+- Support wide, medium, and narrow desktop layouts.
+- Make the project/thread rail collapsible.
+- Make diagnostics and raw events a drawer, panel, or dedicated view instead of permanent workspace chrome.
+- Preserve useful workspace space below the current 1100-pixel minimum width where practical.
+- Persist user-facing layout preferences that materially improve continuity.
+
+### Accessibility and interaction
+
+- Define a predictable keyboard focus order and shortcuts for primary actions.
+- Add accessible names and automation properties where visible labels are insufficient.
+- Verify light, dark, and system themes with sufficient contrast.
+- Verify high-DPI layouts, text scaling, keyboard-only use, and basic screen-reader behavior.
+- Keep destructive Git and worktree actions explicitly confirmed.
+
+### Important boundary
+
+Phase 5A should avoid a broad application-layer rewrite. Small extractions needed to make a view testable are allowed, but service decomposition, persistence redesign, protocol restructuring, and performance-focused refactoring belong to Phase 5B.
+
+### Acceptance criteria
+
+- The primary task workflow is visually dominant and diagnostics are available on demand.
+- Existing project, thread, worktree, Git, authentication, and terminal workflows remain available.
+- The shell remains usable at the agreed narrow-window target and at high DPI.
+- Primary workflows are operable with the keyboard.
+- Empty, busy, failed, cancelled, and recovered states are clear and actionable.
+- All existing behavioral tests continue to pass and focused UI-state tests cover the redesigned shell.
+
+## 12B. Phase 5B: Architecture and Performance Optimization
+
+### Goals
+
+Reduce application-layer concentration, improve streaming and rendering efficiency, and establish maintainable feature boundaries before Phase 6 expands the product surface.
+
+### Application architecture
+
+- Reduce `MainViewModel` to a shell-level coordinator.
+- Extract focused project/thread, task, Git, terminal, and diagnostics view models.
+- Split `MainWindow.xaml` into feature-oriented WPF views or user controls.
+- Keep app-neutral contracts and state in Core, Windows/process implementations in Infrastructure, and presentation behavior in App.
+- Separate persisted thread records from WPF notification and presentation concerns.
+- Preserve the existing dependency direction from App and Infrastructure toward Core.
+
+### Runtime optimization
+
+- Establish baselines for startup time, long-stream memory use, dispatcher activity, terminal rendering, and settings writes.
+- Virtualize long timeline, diagnostics, raw-event, thread, and changed-file collections where appropriate.
+- Batch or throttle high-frequency streamed deltas before dispatching UI updates.
+- Avoid recreating the complete terminal text value for every small output chunk.
+- Bound in-memory diagnostic and streamed-event buffers as well as persisted history.
+- Review settings persistence frequency and serialize atomically without blocking interactive work.
+- Keep app-server, terminal, and Git process lifecycles deterministic during recovery and shutdown.
+
+### Protocol and testability
+
+- Keep `CodexAppServerClient` isolated behind an app-facing session/coordinator boundary.
+- Retain version-aware protocol parsing and raw-event diagnostics.
+- Split the test runner into feature-oriented test files or projects while preserving the lightweight local workflow.
+- Add regression tests for extracted coordinators, batched streaming, bounded buffers, and persistence behavior.
+
+### Important boundary
+
+Phase 5B optimizes and reorganizes existing behavior. It must not introduce Phase 6 configuration surfaces or silently change Codex, Git, worktree, terminal, sandbox, approval, or authentication semantics.
+
+### Acceptance criteria
+
+- No single presentation view model owns all application workflows.
+- Major WPF surfaces can be developed and tested independently.
+- Long timelines, raw events, and terminal sessions remain responsive within the agreed stress-test bounds.
+- Settings and thread state remain backward compatible or include an explicit migration path.
+- App-server recovery and application shutdown do not leak processes or lose visible thread state.
+- The full behavioral suite, new performance regressions, build, and portable publish gates pass.
+
 ## 13. Phase 6: Skills, Plugins, MCP, and Settings
 
 ### Goals
@@ -1025,7 +1118,36 @@ Exit criteria:
 
 - user can run parallel isolated tasks
 
-### Milestone 6: Power features
+### Milestone 6: UI/UX modernization
+
+Estimated scope:
+
+- responsive and collapsible application shell
+- task-first information hierarchy
+- simplified thread and workspace actions
+- improved task, Git, terminal, and diagnostics presentation
+- keyboard, accessibility, theme, DPI, and UI-state verification
+
+Exit criteria:
+
+- existing Phase 0-5 workflows are clear, responsive, accessible, and visually cohesive
+
+### Milestone 7: Architecture and performance optimization
+
+Estimated scope:
+
+- feature-oriented view models and WPF views
+- smaller shell coordinator
+- separated persistence and presentation models
+- virtualized and batched streaming surfaces
+- startup, memory, terminal, persistence, recovery, and shutdown baselines
+- feature-oriented regression tests
+
+Exit criteria:
+
+- the application is maintainable and remains responsive under representative long-running workloads
+
+### Milestone 8: Power features
 
 Estimated scope:
 

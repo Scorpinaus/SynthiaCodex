@@ -3,320 +3,503 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:services="clr-namespace:NativeCodexAssistant.App.Services"
         mc:Ignorable="d"
         Title="Native Codex Assistant"
         Closing="OnClosing"
-        MinHeight="680"
-        MinWidth="1100"
-        Height="760"
-        Width="1240">
+        SizeChanged="OnSizeChanged"
+        MinHeight="640"
+        MinWidth="800"
+        Height="800"
+        Width="1320">
+    <Window.InputBindings>
+        <KeyBinding Key="O" Modifiers="Control" Command="{Binding BrowseProjectCommand}" />
+        <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding SubmitPromptCommand}" />
+        <KeyBinding Key="B" Modifiers="Control" Command="{Binding ToggleProjectRailCommand}" />
+        <KeyBinding Key="D" Modifiers="Control+Shift" Command="{Binding ToggleDetailsPaneCommand}" />
+        <KeyBinding Key="T" Modifiers="Control+Shift" Command="{Binding ToggleTerminalCommand}" />
+        <KeyBinding Key="F5" Command="{Binding RefreshDiagnosticsCommand}" />
+    </Window.InputBindings>
+
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <services:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibilityConverter" />
+        <services:BooleanToGridLengthConverter x:Key="BooleanToGridLengthConverter" />
+
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="16" />
+        </Style>
+
+        <Style x:Key="HeaderButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="MinWidth" Value="40" />
+            <Setter Property="Padding" Value="10,5" />
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+
+        <Style x:Key="CompactButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="9,3" />
+        </Style>
+
+        <Style x:Key="StatePill" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource SubtleBrush}" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="8,3" />
+        </Style>
     </Window.Resources>
+
     <Grid Background="{DynamicResource CanvasBrush}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="64" />
+            <RowDefinition Height="Auto" MinHeight="64" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="32" />
+            <RowDefinition Height="Auto" MinHeight="30" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1">
-            <Grid Margin="22,0">
+        <Border Grid.Row="0"
+                Background="{DynamicResource PanelBrush}"
+                BorderBrush="{DynamicResource LineBrush}"
+                BorderThickness="0,0,0,1">
+            <Grid Margin="14,0">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="Native Codex Assistant" FontSize="18" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding SelectedProjectPath, TargetNullValue=Select a project to begin}" Foreground="{DynamicResource MutedInkBrush}" FontSize="12" />
+                <Button Command="{Binding ToggleProjectRailCommand}"
+                        Style="{StaticResource HeaderButton}"
+                        Content="☰"
+                        ToolTip="Toggle projects and threads (Ctrl+B)"
+                        AutomationProperties.Name="Toggle projects and threads" />
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0">
+                    <TextBlock Text="Native Codex Assistant" FontSize="17" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding SelectedProjectPath, TargetNullValue=Choose a project to start working}"
+                               Foreground="{DynamicResource MutedInkBrush}"
+                               FontSize="11"
+                               TextTrimming="CharacterEllipsis" />
                 </StackPanel>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Style="{StaticResource StatePill}"
+                            Margin="0,0,8,0"
+                            ToolTip="Codex app-server connection status">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="7" Height="7" Margin="0,0,6,0">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="{DynamicResource MutedInkBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding AppServerHealth}" Value="Codex connected">
+                                                <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding AppServerHealth}" Value="Codex connecting">
+                                                <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding AppServerHealth}" Value="Codex reconnecting">
+                                                <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding AppServerHealth}" Value="Codex unavailable">
+                                                <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding AppServerHealth}" Value="Sign-in needed">
+                                                <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding AppServerHealth}" FontSize="11" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+                    <Button Content="Terminal"
+                            Command="{Binding ToggleTerminalCommand}"
+                            Style="{StaticResource HeaderButton}"
+                            ToolTip="Open or hide Terminal (Ctrl+Shift+T)"
+                            AutomationProperties.Name="Toggle integrated terminal" />
+                    <Button Content="Details"
+                            Command="{Binding ToggleDetailsPaneCommand}"
+                            Style="{StaticResource HeaderButton}"
+                            ToolTip="Open diagnostics and account details (Ctrl+Shift+D)"
+                            AutomationProperties.Name="Toggle details panel" />
                     <ComboBox ItemsSource="{Binding ThemeOptions}"
                               SelectedItem="{Binding SelectedTheme, UpdateSourceTrigger=PropertyChanged}"
-                              Width="92"
-                              Margin="0,0,8,0"
-                              ToolTip="Application theme" />
-                    <Button Content="Refresh" Command="{Binding RefreshDiagnosticsCommand}" Margin="0,0,8,0" />
-                    <Button Content="Terminal" Command="{Binding ToggleTerminalCommand}" Margin="0,0,8,0" ToolTip="Show or hide the integrated terminal tab" />
-                    <Button Content="Sign in" Command="{Binding SignInChatGptCommand}" Style="{StaticResource PrimaryButton}" />
-                    <Button Content="Exit" Command="{Binding ExitApplicationCommand}" Margin="8,0,0,0" />
+                              Width="88"
+                              Margin="6,0"
+                              ToolTip="Application theme"
+                              AutomationProperties.Name="Application theme" />
+                    <Button Content="Exit" Command="{Binding ExitApplicationCommand}" Style="{StaticResource HeaderButton}" />
                 </StackPanel>
             </Grid>
         </Border>
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="280" />
+                <ColumnDefinition Width="{Binding IsProjectRailOpen, Converter={StaticResource BooleanToGridLengthConverter}, ConverterParameter=268}" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="340" />
+                <ColumnDefinition Width="{Binding IsDetailsPaneOpen, Converter={StaticResource BooleanToGridLengthConverter}, ConverterParameter=340}" />
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" Background="{DynamicResource RailBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,1,0">
-                <Grid Margin="18">
+            <!-- Projects and threads -->
+            <Border Grid.Column="0"
+                    Visibility="{Binding IsProjectRailOpen, Converter={StaticResource BooleanToVisibilityConverter}}"
+                    Background="{DynamicResource RailBrush}"
+                    BorderBrush="{DynamicResource LineBrush}"
+                    BorderThickness="0,0,1,0">
+                <Grid Margin="14">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="150" />
+                        <RowDefinition Height="120" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <TextBlock Text="Projects" Style="{StaticResource SectionLabel}" />
-                    <Button Grid.Row="1" Content="Add project" Command="{Binding BrowseProjectCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,0,16" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Projects" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" />
+                        <Button Grid.Column="1"
+                                Content="Add"
+                                Command="{Binding BrowseProjectCommand}"
+                                Style="{StaticResource CompactButton}"
+                                ToolTip="Add project (Ctrl+O)" />
+                    </Grid>
+
+                    <TextBlock Grid.Row="1"
+                               Text="Recent projects"
+                               Foreground="{DynamicResource MutedInkBrush}"
+                               FontSize="11"
+                               Margin="0,2,0,6" />
 
                     <ListBox Grid.Row="2"
                              ItemsSource="{Binding RecentProjects}"
                              Background="Transparent"
                              BorderThickness="0"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                             VirtualizingStackPanel.IsVirtualizing="True"
+                             ScrollViewer.CanContentScroll="True"
+                             AutomationProperties.Name="Recent projects">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Button Command="{Binding DataContext.OpenRecentProjectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                         CommandParameter="{Binding Path}"
                                         HorizontalContentAlignment="Stretch"
                                         Background="Transparent"
-                                        BorderBrush="{DynamicResource LineBrush}"
-                                        Margin="0,0,0,8"
-                                        Padding="10">
+                                        BorderThickness="0"
+                                        Padding="8"
+                                        Margin="0,0,0,3">
                                     <StackPanel>
                                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Text="{Binding Path}" Foreground="{DynamicResource MutedInkBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Path}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10" TextTrimming="CharacterEllipsis" />
                                     </StackPanel>
                                 </Button>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
 
-                    <TextBlock Grid.Row="3" Text="Threads" Style="{StaticResource SectionLabel}" Margin="0,14,0,8" />
+                    <Grid Grid.Row="3" Margin="0,14,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Threads" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="{Binding ProjectThreads.Count}" Foreground="{DynamicResource MutedInkBrush}" />
+                    </Grid>
+
                     <ListBox Grid.Row="4"
                              ItemsSource="{Binding ProjectThreads}"
                              SelectedItem="{Binding SelectedThread}"
-                             BorderBrush="{DynamicResource LineBrush}">
+                             BorderThickness="0"
+                             VirtualizingStackPanel.IsVirtualizing="True"
+                             ScrollViewer.CanContentScroll="True"
+                             AutomationProperties.Name="Project threads">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <StackPanel Margin="6">
-                                    <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{Binding ThreadId}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{Binding WorkspaceModeLabel}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10" />
-                                    <TextBlock Text="{Binding ActivityLabel}" Foreground="{DynamicResource CopperBrush}" FontSize="10" />
-                                </StackPanel>
+                                <Grid Margin="7">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding WorkspaceModeLabel}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10" />
+                                    </StackPanel>
+                                    <Border Grid.Column="1" Style="{StaticResource StatePill}" VerticalAlignment="Center" Margin="6,0,0,0">
+                                        <TextBlock Text="{Binding ActivityLabel}" FontSize="10" />
+                                    </Border>
+                                </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
-                    <StackPanel Grid.Row="5" Margin="0,10,0,0">
-                        <TextBlock Text="New thread workspace" Style="{StaticResource SectionLabel}" />
-                        <ComboBox ItemsSource="{Binding WorkspaceModeOptions}"
-                                  SelectedItem="{Binding NewThreadWorkspaceMode}"
-                                  Margin="0,0,0,8" />
-                        <WrapPanel>
-                            <Button Content="New" Command="{Binding NewThreadCommand}" Margin="0,0,6,6" />
-                            <Button Content="Resume" Command="{Binding ResumeThreadCommand}" Margin="0,0,6,6" />
-                            <Button Content="Fork" Command="{Binding ForkThreadCommand}" Margin="0,0,6,6" />
-                            <Button Content="Archive" Command="{Binding ArchiveThreadCommand}" Margin="0,0,6,6" />
-                            <Button Content="Unarchive" Command="{Binding UnarchiveThreadCommand}" Margin="0,0,6,6" />
-                            <Button Content="Remove worktree" Command="{Binding RemoveWorktreeCommand}" Margin="0,0,0,6" />
-                        </WrapPanel>
-                    </StackPanel>
+
+                    <Border Grid.Row="5" Style="{StaticResource Card}" Padding="10" Margin="0,10,0,0">
+                        <StackPanel>
+                            <TextBlock Text="New thread workspace" Style="{StaticResource SectionLabel}" />
+                            <ComboBox ItemsSource="{Binding WorkspaceModeOptions}"
+                                      SelectedItem="{Binding NewThreadWorkspaceMode}"
+                                      Margin="0,0,0,8"
+                                      AutomationProperties.Name="New thread workspace mode" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Button Content="New thread"
+                                        Command="{Binding NewThreadCommand}"
+                                        Style="{StaticResource CreateThreadButton}"
+                                        AutomationProperties.Name="Create new thread" />
+                                <Menu Grid.Column="1" Margin="6,0,0,0" Background="Transparent">
+                                    <MenuItem Header="More" ToolTip="Actions for the selected thread">
+                                        <MenuItem Header="Resume" Command="{Binding ResumeThreadCommand}" />
+                                        <MenuItem Header="Fork" Command="{Binding ForkThreadCommand}" />
+                                        <Separator />
+                                        <MenuItem Header="Archive" Command="{Binding ArchiveThreadCommand}" />
+                                        <MenuItem Header="Unarchive" Command="{Binding UnarchiveThreadCommand}" />
+                                        <Separator />
+                                        <MenuItem Header="Remove worktree" Command="{Binding RemoveWorktreeCommand}" />
+                                    </MenuItem>
+                                </Menu>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
                 </Grid>
             </Border>
 
-            <Grid Grid.Column="1" Margin="22">
+            <!-- Primary workspace -->
+            <Grid Grid.Column="1" Margin="16">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="18">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="6" />
-                            <ColumnDefinition Width="16" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
+                <Grid Margin="2,0,2,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="{Binding SelectedProjectName}" FontSize="21" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding ActiveWorkspacePath}" Foreground="{DynamicResource MutedInkBrush}" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <Border Grid.Column="1" Style="{StaticResource StatePill}" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding ActiveWorkspaceLabel}" FontSize="11" />
+                    </Border>
+                </Grid>
 
-                        <Border Background="{DynamicResource CopperBrush}" CornerRadius="3" />
-                        <StackPanel Grid.Column="2">
-                            <TextBlock Text="{Binding SelectedProjectName}" FontSize="22" FontWeight="SemiBold" />
-                            <TextBlock Text="{Binding StatusMessage}" Foreground="{DynamicResource MutedInkBrush}" Margin="0,4,0,0" />
-                        </StackPanel>
-                    </Grid>
-                </Border>
-
-                <TabControl Grid.Row="1" Margin="0,18">
+                <TabControl Grid.Row="1"
+                            SelectedIndex="{Binding SelectedWorkspaceTabIndex}"
+                            AutomationProperties.Name="Workspace views">
                     <TabItem Header="Task">
-                <Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" Padding="22">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
+                        <Grid Margin="0,10,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
 
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
+                            <Border Style="{StaticResource Card}">
+                                <TabControl Background="Transparent" BorderThickness="0" AutomationProperties.Name="Task output">
+                                    <TabItem Header="Response">
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4,12,4,4">
+                                            <StackPanel>
+                                                <TextBlock Text="Assistant response" Style="{StaticResource SectionLabel}" />
+                                                <TextBlock Text="{Binding FinalResponse}"
+                                                           TextWrapping="Wrap"
+                                                           FontSize="14"
+                                                           LineHeight="22"
+                                                           AutomationProperties.LiveSetting="Polite" />
+                                            </StackPanel>
+                                        </ScrollViewer>
+                                    </TabItem>
 
-                            <StackPanel>
-                                <TextBlock Text="Thread surface" Style="{StaticResource SectionLabel}" />
-                                <TextBlock Text="{Binding SelectedProjectName}" FontSize="20" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding ActiveWorkspaceLabel, StringFormat=Workspace: {0}}" Foreground="{DynamicResource CopperBrush}" Margin="0,6,0,0" />
-                                <TextBlock Text="{Binding ActiveWorkspacePath}" Foreground="{DynamicResource MutedInkBrush}" Margin="0,4,0,0" TextWrapping="Wrap" />
-                            </StackPanel>
-
-                            <StackPanel Grid.Column="1" HorizontalAlignment="Right">
-                                <TextBlock Text="{Binding AuthSummary}" Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Right" />
-                                <TextBlock Text="{Binding AppServerHealth, StringFormat=App-server: {0}}" Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Right" Margin="0,4,0,0" />
-                            </StackPanel>
-                        </Grid>
-
-                        <Grid Grid.Row="1" Margin="0,22,0,18">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="1.35*" />
-                                <ColumnDefinition Width="18" />
-                                <ColumnDefinition Width="1*" />
-                            </Grid.ColumnDefinitions>
-
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
-                                </Grid.RowDefinitions>
-                                <TextBlock Text="Timeline" Style="{StaticResource SectionLabel}" />
-                                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                                    <ItemsControl ItemsSource="{Binding TimelineItems}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1" Padding="0,10">
-                                                    <StackPanel>
+                                    <TabItem Header="Activity">
+                                        <ListBox ItemsSource="{Binding TimelineItems}"
+                                                 BorderThickness="0"
+                                                 Background="Transparent"
+                                                 VirtualizingStackPanel.IsVirtualizing="True"
+                                                 VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                 ScrollViewer.CanContentScroll="True"
+                                                 AutomationProperties.Name="Task activity">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1" Padding="4,10">
                                                         <Grid>
                                                             <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="8" />
+                                                                <ColumnDefinition Width="12" />
                                                                 <ColumnDefinition Width="*" />
                                                                 <ColumnDefinition Width="Auto" />
                                                             </Grid.ColumnDefinitions>
-                                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
-                                                            <TextBlock Grid.Column="1" Text="{Binding Kind}" Foreground="{DynamicResource MutedInkBrush}" FontSize="11" />
+                                                            <Ellipse Width="8" Height="8" Fill="{DynamicResource SignalBrush}" VerticalAlignment="Top" Margin="0,5,0,0" />
+                                                            <StackPanel Grid.Column="2">
+                                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                                                <TextBlock Text="{Binding Detail}" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                                                            </StackPanel>
+                                                            <TextBlock Grid.Column="3" Text="{Binding Kind}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10" Margin="8,2,0,0" />
                                                         </Grid>
-                                                        <TextBlock Text="{Binding Detail}" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" Margin="0,4,0,0" />
-                                                        <TextBlock Text="{Binding Method}" FontFamily="{StaticResource MonoFont}" FontSize="11" Foreground="{DynamicResource MutedInkBrush}" Margin="0,4,0,0" />
-                                                    </StackPanel>
-                                                </Border>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </ScrollViewer>
-                            </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </TabItem>
+                                </TabControl>
+                            </Border>
 
-                            <Grid Grid.Column="2">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
-                                </Grid.RowDefinitions>
-                                <TextBlock Text="Final response" Style="{StaticResource SectionLabel}" />
-                                <Border Grid.Row="1" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="12">
-                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                        <TextBlock Text="{Binding FinalResponse}" TextWrapping="Wrap" />
-                                    </ScrollViewer>
-                                </Border>
-                            </Grid>
+                            <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,12,0,0" Padding="12">
+                                <StackPanel>
+                                    <Expander Header="Run settings" IsExpanded="False" Margin="0,0,0,8">
+                                        <Grid Margin="0,8,0,4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="12" />
+                                                <ColumnDefinition Width="180" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="Model" Style="{StaticResource SectionLabel}" />
+                                                <DockPanel>
+                                                    <Button DockPanel.Dock="Right" Content="Load models" Command="{Binding LoadModelsCommand}" Margin="8,0,0,0" Style="{StaticResource CompactButton}" />
+                                                    <ComboBox ItemsSource="{Binding ModelOptions}"
+                                                              Text="{Binding ModelOverride, UpdateSourceTrigger=PropertyChanged}"
+                                                              IsEditable="True"
+                                                              AutomationProperties.Name="Model override" />
+                                                </DockPanel>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2">
+                                                <TextBlock Text="Reasoning" Style="{StaticResource SectionLabel}" />
+                                                <ComboBox ItemsSource="{Binding ReasoningEffortOptions}"
+                                                          SelectedItem="{Binding ReasoningEffortOverride, UpdateSourceTrigger=PropertyChanged}"
+                                                          AutomationProperties.Name="Reasoning effort" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Expander>
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid>
+                                            <Grid Visibility="{Binding IsTurnRunning, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                                <TextBox x:Name="PromptBox"
+                                                         Text="{Binding PromptText, UpdateSourceTrigger=PropertyChanged}"
+                                                         AcceptsReturn="True"
+                                                         MinHeight="82"
+                                                         MaxHeight="150"
+                                                         TextWrapping="Wrap"
+                                                         VerticalScrollBarVisibility="Auto"
+                                                         Padding="10"
+                                                         ToolTip="Describe a task. Press Ctrl+Enter to run."
+                                                         AutomationProperties.Name="Task prompt" />
+                                                <TextBlock Text="Describe a task..."
+                                                           Margin="11,10"
+                                                           VerticalAlignment="Top"
+                                                           Foreground="{DynamicResource MutedInkBrush}"
+                                                           IsHitTestVisible="False">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="{x:Type TextBlock}">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding PromptText.Length}" Value="0">
+                                                                    <Setter Property="Visibility" Value="Visible" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </Grid>
+
+                                            <Grid Visibility="{Binding IsTurnRunning, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <TextBox x:Name="GuidanceBox"
+                                                         Text="{Binding SteeringText, UpdateSourceTrigger=PropertyChanged}"
+                                                         AcceptsReturn="True"
+                                                         MinHeight="82"
+                                                         MaxHeight="150"
+                                                         TextWrapping="Wrap"
+                                                         VerticalScrollBarVisibility="Auto"
+                                                         Padding="10"
+                                                         ToolTip="Add instructions while this task is running. Press Ctrl+Enter to send."
+                                                         AutomationProperties.Name="Guidance for active task">
+                                                    <TextBox.InputBindings>
+                                                        <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding SteerTurnCommand}" />
+                                                    </TextBox.InputBindings>
+                                                </TextBox>
+                                                <TextBlock Text="Add instructions while this task is running..."
+                                                           Margin="11,10"
+                                                           VerticalAlignment="Top"
+                                                           Foreground="{DynamicResource MutedInkBrush}"
+                                                           IsHitTestVisible="False">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="{x:Type TextBlock}">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding SteeringText.Length}" Value="0">
+                                                                    <Setter Property="Visibility" Value="Visible" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </Grid>
+                                        </Grid>
+                                        <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                            <Button Content="Run task"
+                                                    Command="{Binding SubmitPromptCommand}"
+                                                    Style="{StaticResource RunTaskButton}"
+                                                    MinWidth="104"
+                                                    Visibility="{Binding IsTurnRunning, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                                                    ToolTip="Run task (Ctrl+Enter)" />
+                                            <Button Content="Guide task"
+                                                    Command="{Binding SteerTurnCommand}"
+                                                    Style="{StaticResource RunTaskButton}"
+                                                    MinWidth="104"
+                                                    Visibility="{Binding IsTurnRunning, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                    ToolTip="Send guidance to the running task (Ctrl+Enter)"
+                                                    AutomationProperties.Name="Guide active task" />
+                                            <Button Content="Cancel"
+                                                    Command="{Binding CancelTurnCommand}"
+                                                    MinWidth="104"
+                                                    Margin="0,7,0,0"
+                                                    Visibility="{Binding IsTurnRunning, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
                         </Grid>
-
-                        <Grid Grid.Row="2" Margin="0,0,0,10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="12" />
-                                <ColumnDefinition Width="190" />
-                            </Grid.ColumnDefinitions>
-
-                            <StackPanel>
-                                <TextBlock Text="Model" Style="{StaticResource SectionLabel}" />
-                                <DockPanel>
-                                    <Button DockPanel.Dock="Right" Content="Load" Command="{Binding LoadModelsCommand}" Margin="8,0,0,0" MinWidth="64" />
-                                    <ComboBox ItemsSource="{Binding ModelOptions}"
-                                              Text="{Binding ModelOverride, UpdateSourceTrigger=PropertyChanged}"
-                                              IsEditable="True"
-                                              MinHeight="30" />
-                                </DockPanel>
-                            </StackPanel>
-
-                            <StackPanel Grid.Column="2">
-                                <TextBlock Text="Reasoning" Style="{StaticResource SectionLabel}" />
-                                <ComboBox ItemsSource="{Binding ReasoningEffortOptions}"
-                                          SelectedItem="{Binding ReasoningEffortOverride, UpdateSourceTrigger=PropertyChanged}"
-                                          MinHeight="30" />
-                            </StackPanel>
-                        </Grid>
-
-                        <Grid Grid.Row="3">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBox Text="{Binding PromptText, UpdateSourceTrigger=PropertyChanged}"
-                                     AcceptsReturn="True"
-                                     MinHeight="86"
-                                     MaxHeight="150"
-                                     TextWrapping="Wrap"
-                                     VerticalScrollBarVisibility="Auto"
-                                     Padding="10" />
-                            <StackPanel Grid.Column="1" Margin="12,0,0,0">
-                                <Button Content="Run" Command="{Binding SubmitPromptCommand}" Style="{StaticResource PrimaryButton}" MinWidth="96" Margin="0,0,0,8" />
-                                <Button Content="Cancel" Command="{Binding CancelTurnCommand}" MinWidth="96" />
-                            </StackPanel>
-                        </Grid>
-
-                        <Grid Grid.Row="4" Margin="0,10,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBox Text="{Binding SteeringText, UpdateSourceTrigger=PropertyChanged}"
-                                     MinHeight="34"
-                                     Padding="8"
-                                     ToolTip="Send additional guidance to the active turn" />
-                            <Button Grid.Column="1"
-                                    Content="Steer active turn"
-                                    Command="{Binding SteerTurnCommand}"
-                                    Margin="10,0,0,0" />
-                        </Grid>
-                    </Grid>
-                </Border>
                     </TabItem>
 
                     <TabItem Header="Terminal"
                              Visibility="{Binding IsTerminalVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" Padding="18">
+                        <Border Style="{StaticResource Card}" Margin="0,10,0,0">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="*" />
                                     <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
-
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
-                                        <TextBlock Text="PowerShell terminal" Style="{StaticResource SectionLabel}" />
-                                        <TextBlock Text="{Binding TerminalWorkingDirectory}" FontFamily="{StaticResource MonoFont}" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Text="{Binding TerminalStatus, StringFormat=Status: {0}}" Foreground="{DynamicResource MutedInkBrush}" Margin="0,4,0,0" />
+                                        <TextBlock Text="PowerShell" FontSize="17" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding TerminalWorkingDirectory}" Foreground="{DynamicResource MutedInkBrush}" TextTrimming="CharacterEllipsis" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                        <Button Content="Start PowerShell" Command="{Binding StartTerminalCommand}" Margin="0,0,8,0" />
-                                        <Button Content="Clear" Command="{Binding ClearTerminalCommand}" Margin="0,0,8,0" />
-                                        <Button Content="Kill" Command="{Binding KillTerminalCommand}" />
+                                        <Border Style="{StaticResource StatePill}" Margin="0,0,8,0">
+                                            <TextBlock Text="{Binding TerminalStatus}" FontSize="11" />
+                                        </Border>
+                                        <Button Content="Start" Command="{Binding StartTerminalCommand}" Style="{StaticResource CompactButton}" Margin="0,0,6,0" />
+                                        <Button Content="Clear" Command="{Binding ClearTerminalCommand}" Style="{StaticResource CompactButton}" Margin="0,0,6,0" />
+                                        <Button Content="Kill" Command="{Binding KillTerminalCommand}" Style="{StaticResource CompactButton}" />
                                     </StackPanel>
                                 </Grid>
-
                                 <TextBox Grid.Row="1"
                                          Text="{Binding TerminalOutput, Mode=OneWay}"
                                          IsReadOnly="True"
@@ -327,9 +510,8 @@
                                          HorizontalScrollBarVisibility="Auto"
                                          VerticalScrollBarVisibility="Auto"
                                          Padding="10"
-                                         Margin="0,14,0,12"
-                                         ToolTip="Select text and press Ctrl+C to copy" />
-
+                                         Margin="0,12"
+                                         AutomationProperties.Name="Terminal output" />
                                 <Grid Grid.Row="2">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -338,54 +520,44 @@
                                     <TextBox Text="{Binding TerminalInput, UpdateSourceTrigger=PropertyChanged}"
                                              FontFamily="{StaticResource MonoFont}"
                                              Padding="9"
-                                             ToolTip="Paste or type a PowerShell command" />
-                                    <Button Grid.Column="1"
-                                            Content="Send"
-                                            Command="{Binding SendTerminalInputCommand}"
-                                            Style="{StaticResource PrimaryButton}"
-                                            MinWidth="88"
-                                            Margin="10,0,0,0" />
+                                             ToolTip="Type or paste PowerShell input"
+                                             AutomationProperties.Name="Terminal input" />
+                                    <Button Grid.Column="1" Content="Send" Command="{Binding SendTerminalInputCommand}" Style="{StaticResource PrimaryButton}" MinWidth="86" Margin="8,0,0,0" />
                                 </Grid>
                             </Grid>
                         </Border>
                     </TabItem>
 
                     <TabItem Header="Changes">
-                        <Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" Padding="18">
+                        <Border Style="{StaticResource Card}" Margin="0,10,0,0">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="*" />
                                     <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
-
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
-                                        <TextBlock Text="Git workspace" Style="{StaticResource SectionLabel}" />
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="{Binding GitBranch}" FontSize="18" FontWeight="SemiBold" />
-                                            <TextBlock Text="  /  " Foreground="{DynamicResource MutedInkBrush}" />
-                                            <TextBlock Text="{Binding GitStatusMessage}" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" />
-                                        </StackPanel>
+                                        <TextBlock Text="{Binding GitBranch}" FontSize="17" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding GitStatusMessage}" Foreground="{DynamicResource MutedInkBrush}" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                        <Button Content="Open editor" Command="{Binding OpenInEditorCommand}" Margin="0,0,8,0" ToolTip="Open the selected file or project in the configured editor" />
-                                        <Button Content="Explorer" Command="{Binding RevealInExplorerCommand}" Margin="0,0,8,0" ToolTip="Reveal the selected file in Explorer" />
-                                        <Button Content="Refresh" Command="{Binding RefreshGitCommand}" ToolTip="Refresh repository status" />
+                                        <Button Content="Editor" Command="{Binding OpenInEditorCommand}" Style="{StaticResource CompactButton}" Margin="0,0,6,0" />
+                                        <Button Content="Explorer" Command="{Binding RevealInExplorerCommand}" Style="{StaticResource CompactButton}" Margin="0,0,6,0" />
+                                        <Button Content="Refresh" Command="{Binding RefreshGitCommand}" Style="{StaticResource CompactButton}" />
                                     </StackPanel>
                                 </Grid>
 
-                                <Grid Grid.Row="1" Margin="0,16">
+                                <Grid Grid.Row="1" Margin="0,14">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="280" />
-                                        <ColumnDefinition Width="16" />
+                                        <ColumnDefinition Width="250" />
+                                        <ColumnDefinition Width="12" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-
                                     <Grid>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
@@ -396,8 +568,9 @@
                                         <ListBox Grid.Row="1"
                                                  ItemsSource="{Binding ChangedFiles}"
                                                  SelectedItem="{Binding SelectedGitFile}"
-                                                 BorderBrush="{DynamicResource LineBrush}"
-                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                                 VirtualizingStackPanel.IsVirtualizing="True"
+                                                 VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                 AutomationProperties.Name="Changed files">
                                             <ListBox.ItemTemplate>
                                                 <DataTemplate>
                                                     <Grid Margin="6">
@@ -407,18 +580,20 @@
                                                         </Grid.ColumnDefinitions>
                                                         <StackPanel>
                                                             <TextBlock Text="{Binding DisplayPath}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                                            <TextBlock Text="{Binding StatusSummary}" Foreground="{DynamicResource MutedInkBrush}" FontSize="11" />
+                                                            <TextBlock Text="{Binding StatusSummary}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10" />
                                                         </StackPanel>
-                                                        <TextBlock Grid.Column="1" Text="{Binding StatusCode}" FontFamily="{StaticResource MonoFont}" Foreground="{DynamicResource CopperBrush}" Margin="8,0,0,0" />
+                                                        <Border Grid.Column="1" Style="{StaticResource StatePill}" Margin="6,0,0,0" VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding StatusCode}" FontFamily="{StaticResource MonoFont}" FontSize="10" />
+                                                        </Border>
                                                     </Grid>
                                                 </DataTemplate>
                                             </ListBox.ItemTemplate>
                                         </ListBox>
-                                        <WrapPanel Grid.Row="2" Margin="0,10,0,0">
-                                            <Button Content="Stage" Command="{Binding StageSelectedFileCommand}" Margin="0,0,8,8" />
-                                            <Button Content="Unstage" Command="{Binding UnstageSelectedFileCommand}" Margin="0,0,8,8" />
-                                            <Button Content="Discard" Command="{Binding RevertSelectedFileCommand}" Margin="0,0,0,8" ToolTip="Discard changes after confirmation" />
-                                        </WrapPanel>
+                                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
+                                            <Button Content="Stage" Command="{Binding StageSelectedFileCommand}" Style="{StaticResource CompactButton}" Margin="0,0,6,0" />
+                                            <Button Content="Unstage" Command="{Binding UnstageSelectedFileCommand}" Style="{StaticResource CompactButton}" Margin="0,0,6,0" />
+                                            <Button Content="Discard" Command="{Binding RevertSelectedFileCommand}" Style="{StaticResource CompactButton}" />
+                                        </StackPanel>
                                     </Grid>
 
                                     <Grid Grid.Column="2">
@@ -433,8 +608,8 @@
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="{Binding DiffViewLabel}" Style="{StaticResource SectionLabel}" />
                                             <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                                <Button Content="Working" Command="{Binding ShowWorkingDiffCommand}" Margin="0,0,8,6" MinHeight="26" Padding="9,2" />
-                                                <Button Content="Staged" Command="{Binding ShowStagedDiffCommand}" Margin="0,0,0,6" MinHeight="26" Padding="9,2" />
+                                                <Button Content="Working" Command="{Binding ShowWorkingDiffCommand}" Style="{StaticResource CompactButton}" Margin="0,0,6,0" />
+                                                <Button Content="Staged" Command="{Binding ShowStagedDiffCommand}" Style="{StaticResource CompactButton}" />
                                             </StackPanel>
                                         </Grid>
                                         <TextBox Grid.Row="1"
@@ -447,7 +622,9 @@
                                                  TextWrapping="NoWrap"
                                                  HorizontalScrollBarVisibility="Auto"
                                                  VerticalScrollBarVisibility="Auto"
-                                                 Padding="10" />
+                                                 Padding="10"
+                                                 Margin="0,8,0,0"
+                                                 AutomationProperties.Name="Selected file diff" />
                                     </Grid>
                                 </Grid>
 
@@ -457,95 +634,171 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
-                                        <TextBlock Text="Commit message" Style="{StaticResource SectionLabel}" />
+                                        <TextBlock Text="Commit staged changes" Style="{StaticResource SectionLabel}" />
                                         <TextBox Text="{Binding CommitMessage, UpdateSourceTrigger=PropertyChanged}"
-                                                 MinHeight="58"
-                                                 MaxHeight="96"
+                                                 MinHeight="52"
+                                                 MaxHeight="90"
                                                  AcceptsReturn="True"
                                                  TextWrapping="Wrap"
                                                  VerticalScrollBarVisibility="Auto"
-                                                 Padding="9" />
+                                                 Padding="9"
+                                                 AutomationProperties.Name="Commit message" />
                                     </StackPanel>
-                                    <Button Grid.Column="1"
-                                            Content="Commit staged"
-                                            Command="{Binding CommitCommand}"
-                                            Style="{StaticResource PrimaryButton}"
-                                            MinWidth="118"
-                                            Margin="12,25,0,0"
-                                            VerticalAlignment="Top" />
+                                    <Button Grid.Column="1" Content="Commit" Command="{Binding CommitCommand}" Style="{StaticResource PrimaryButton}" MinWidth="104" Margin="10,25,0,0" VerticalAlignment="Top" />
                                 </Grid>
+
+                                <Border Grid.RowSpan="3"
+                                        Panel.ZIndex="10"
+                                        Visibility="{Binding IsGitRepository, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                                        Background="{DynamicResource PanelBrush}">
+                                    <StackPanel HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                MaxWidth="460"
+                                                TextBlock.TextAlignment="Center">
+                                        <Border Width="56"
+                                                Height="56"
+                                                CornerRadius="28"
+                                                Background="{DynamicResource SubtleBrush}"
+                                                Margin="0,0,0,16">
+                                            <TextBlock Text="Git"
+                                                       FontWeight="Bold"
+                                                       FontSize="16"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center" />
+                                        </Border>
+                                        <TextBlock Text="This folder is not a Git repository"
+                                                   FontSize="21"
+                                                   FontWeight="SemiBold" />
+                                        <TextBlock Text="Choose a Git project to review changes, or continue using Task and Terminal with the current folder."
+                                                   Foreground="{DynamicResource MutedInkBrush}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,8,0,18" />
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                            <Button Content="Choose another project"
+                                                    Command="{Binding BrowseProjectCommand}"
+                                                    Style="{StaticResource PrimaryButton}"
+                                                    Margin="0,0,8,0" />
+                                            <Button Content="Open folder"
+                                                    Command="{Binding RevealInExplorerCommand}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
                             </Grid>
                         </Border>
                     </TabItem>
                 </TabControl>
             </Grid>
 
-            <Border Grid.Column="2" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1,0,0,0">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel Margin="18">
-                        <TextBlock Text="Diagnostics" Style="{StaticResource SectionLabel}" />
-                        <Button Content="Run Codex doctor"
-                                Command="{Binding RunCodexDoctorCommand}"
-                                Margin="0,0,0,14" />
+            <!-- On-demand details -->
+            <Border Grid.Column="2"
+                    Visibility="{Binding IsDetailsPaneOpen, Converter={StaticResource BooleanToVisibilityConverter}}"
+                    Background="{DynamicResource PanelBrush}"
+                    BorderBrush="{DynamicResource LineBrush}"
+                    BorderThickness="1,0,0,0">
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Details" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock Text="Account, runtime, and diagnostics" Foreground="{DynamicResource MutedInkBrush}" FontSize="11" />
+                        </StackPanel>
+                        <Button Grid.Column="1" Content="Close" Command="{Binding ToggleDetailsPaneCommand}" Style="{StaticResource CompactButton}" />
+                    </Grid>
 
-                        <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,14">
-                            <StackPanel>
-                                <TextBlock Text="Codex" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding CodexSummary}" Foreground="{DynamicResource MutedInkBrush}" Margin="0,4,0,10" />
-                                <TextBlock Text="{Binding CodexExecutablePath}" Style="{StaticResource ValueText}" />
-                            </StackPanel>
-                        </Border>
-
-                        <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,14">
-                            <StackPanel>
-                                <TextBlock Text="Sign-in" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding AuthSummary}" Foreground="{DynamicResource MutedInkBrush}" Margin="0,4,0,8" />
-                                <TextBlock Text="{Binding AuthDetail}" TextWrapping="Wrap" />
-                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                                    <Button Content="ChatGPT" Command="{Binding SignInChatGptCommand}" Margin="0,0,8,0" />
-                                    <Button Content="Device code" Command="{Binding SignInDeviceCodeCommand}" Margin="0,0,8,0" />
-                                    <Button Content="Sign out" Command="{Binding SignOutCommand}" />
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,10">
+                                <StackPanel>
+                                    <TextBlock Text="Codex" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding CodexSummary}" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" Margin="0,4,0,8" />
+                                    <TextBlock Text="{Binding CodexExecutablePath}" Style="{StaticResource ValueText}" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                        <Button Content="Refresh" Command="{Binding RefreshDiagnosticsCommand}" Style="{StaticResource CompactButton}" Margin="0,0,6,0" ToolTip="Refresh diagnostics (F5)" />
+                                        <Button Content="Run doctor" Command="{Binding RunCodexDoctorCommand}" Style="{StaticResource CompactButton}" />
+                                    </StackPanel>
                                 </StackPanel>
-                            </StackPanel>
-                        </Border>
+                            </Border>
 
-                        <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,14">
-                            <StackPanel>
-                                <TextBlock Text="Codex home" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding CodexHome}" Style="{StaticResource ValueText}" Margin="0,6,0,0" />
-                            </StackPanel>
-                        </Border>
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,10">
+                                <StackPanel>
+                                    <TextBlock Text="Account" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding AuthSummary}" Foreground="{DynamicResource MutedInkBrush}" Margin="0,4,0,4" />
+                                    <TextBlock Text="{Binding AuthDetail}" TextWrapping="Wrap" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                        <Button Content="ChatGPT" Command="{Binding SignInChatGptCommand}" Style="{StaticResource CompactButton}" Margin="0,0,6,0" />
+                                        <Button Content="Device code" Command="{Binding SignInDeviceCodeCommand}" Style="{StaticResource CompactButton}" Margin="0,0,6,0" />
+                                        <Button Content="Sign out" Command="{Binding SignOutCommand}" Style="{StaticResource CompactButton}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
 
-                        <TextBlock Text="Runtime" Style="{StaticResource SectionLabel}" Margin="0,4,0,8" />
-                        <ItemsControl ItemsSource="{Binding Diagnostics}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding}" Style="{StaticResource ValueText}" Margin="0,0,0,8" />
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                            <Expander Header="Runtime information" IsExpanded="True" Margin="0,0,0,8">
+                                <StackPanel Margin="0,8,0,0">
+                                    <TextBlock Text="{Binding CodexHome, StringFormat=Codex home: {0}}" Style="{StaticResource ValueText}" Margin="0,0,0,8" />
+                                    <ItemsControl ItemsSource="{Binding Diagnostics}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding}" Style="{StaticResource ValueText}" Margin="0,0,0,7" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Expander>
 
-                        <TextBlock Text="Raw events" Style="{StaticResource SectionLabel}" Margin="0,14,0,8" />
-                        <ItemsControl ItemsSource="{Binding RawEvents}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding}" Style="{StaticResource ValueText}" Margin="0,0,0,8" />
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-                </ScrollViewer>
+                            <Expander Header="Raw protocol events" IsExpanded="False">
+                                <ListBox ItemsSource="{Binding RawEvents}"
+                                         MaxHeight="360"
+                                         Margin="0,8,0,0"
+                                         VirtualizingStackPanel.IsVirtualizing="True"
+                                         VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                         AutomationProperties.Name="Raw protocol events">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" Style="{StaticResource ValueText}" Margin="4,5" />
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Expander>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
             </Border>
         </Grid>
 
         <Border Grid.Row="2" Background="{DynamicResource StatusBarBrush}">
-            <Grid Margin="14,0">
+            <Grid Margin="12,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="{Binding StatusMessage}" Foreground="White" VerticalAlignment="Center" FontSize="12" />
-                <TextBlock Grid.Column="1" Text="{Binding SettingsPath}" Foreground="#C9D4CE" VerticalAlignment="Center" FontFamily="{StaticResource MonoFont}" FontSize="11" />
+                <TextBlock Text="{Binding StatusMessage}"
+                           Foreground="White"
+                           VerticalAlignment="Center"
+                           FontSize="11"
+                           AutomationProperties.LiveSetting="Polite" />
+                <TextBlock Grid.Column="1"
+                           Text="Ctrl+O project  ·  Ctrl+Enter run  ·  Ctrl+B navigation  ·  Ctrl+Shift+D details"
+                           Foreground="#C9D4CE"
+                           VerticalAlignment="Center"
+                           FontSize="10">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsCompactLayout}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
             </Grid>
         </Border>
     </Grid>

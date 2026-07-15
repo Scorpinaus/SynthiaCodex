@@ -9,5 +9,23 @@
     <SolidColorBrush x:Key="CopperBrush" Color="#B76135" />
     <SolidColorBrush x:Key="LineBrush" Color="#D9E0DB" />
     <SolidColorBrush x:Key="FieldBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ComboInkBrush" Color="#16201D" />
+    <SolidColorBrush x:Key="ButtonBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#EDF3FF" />
+    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#DCE8FF" />
+    <SolidColorBrush x:Key="ButtonBorderBrush" Color="#C7D0CB" />
+    <SolidColorBrush x:Key="DisabledButtonBrush" Color="#EEF1EE" />
+    <SolidColorBrush x:Key="DisabledButtonBorderBrush" Color="#E0E5E1" />
+    <SolidColorBrush x:Key="DisabledInkBrush" Color="#98A39D" />
+    <SolidColorBrush x:Key="PrimaryHoverBrush" Color="#245FC8" />
+    <SolidColorBrush x:Key="PrimaryPressedBrush" Color="#1D4FA9" />
+    <SolidColorBrush x:Key="CreateActionBrush" Color="#137A66" />
+    <SolidColorBrush x:Key="CreateActionInkBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="RunActionBrush" Color="#2459C4" />
+    <SolidColorBrush x:Key="RunActionInkBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="SubtleBrush" Color="#E7EEF9" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="#2D8A57" />
+    <SolidColorBrush x:Key="WarningBrush" Color="#B7791F" />
+    <SolidColorBrush x:Key="DangerBrush" Color="#C43D3D" />
     <SolidColorBrush x:Key="StatusBarBrush" Color="#16201D" />
 </ResourceDictionary>

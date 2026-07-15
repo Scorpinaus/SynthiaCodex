@@ -12,6 +12,7 @@ public sealed class TaskViewModel : ObservableObject
     private readonly AsyncRelayCommand steerCommand;
     private CodexThreadService threadService = new();
     private string prompt = string.Empty;
+    private string submittedPrompt = string.Empty;
     private string modelOverride = string.Empty;
     private string reasoningEffortOverride = string.Empty;
     private string steeringText = string.Empty;
@@ -61,6 +62,22 @@ public sealed class TaskViewModel : ObservableObject
         get => prompt;
         set => SetProperty(ref prompt, value);
     }
+
+    public string SubmittedPrompt
+    {
+        get => submittedPrompt;
+        set
+        {
+            if (SetProperty(ref submittedPrompt, value))
+            {
+                OnPropertyChanged(nameof(SubmittedPromptDisplay));
+            }
+        }
+    }
+
+    public string SubmittedPromptDisplay => string.IsNullOrWhiteSpace(SubmittedPrompt)
+        ? "No prompt submitted yet"
+        : SubmittedPrompt;
 
     public string ModelOverride
     {

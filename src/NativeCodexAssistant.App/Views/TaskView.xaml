@@ -3,17 +3,28 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid Margin="0,10,0,0">
         <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-        <Border Style="{StaticResource Card}">
-            <TabControl Background="Transparent" BorderThickness="0" AutomationProperties.Name="Task output">
-                <TabItem Header="Response"><ScrollViewer VerticalScrollBarVisibility="Auto" Padding="4,12,4,4">
-                    <StackPanel><TextBlock Text="Assistant response" Style="{StaticResource SectionLabel}"/><TextBlock Text="{Binding TaskWorkspace.FinalResponse}" TextWrapping="Wrap" FontSize="14" LineHeight="22" AutomationProperties.LiveSetting="Polite"/></StackPanel>
-                </ScrollViewer></TabItem>
-                <TabItem Header="Activity"><ListBox ItemsSource="{Binding TaskWorkspace.TimelineItems}" BorderThickness="0" Background="Transparent" VirtualizingStackPanel.IsVirtualizing="True" VirtualizingStackPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True">
-                    <ListBox.ItemTemplate><DataTemplate><Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1" Padding="4,10"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="8"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                        <Ellipse Width="8" Height="8" Fill="{DynamicResource SignalBrush}" VerticalAlignment="Top" Margin="0,5,0,0"/><StackPanel Grid.Column="2"><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Detail}" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel><TextBlock Grid.Column="3" Text="{Binding Kind}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10" Margin="8,2,0,0"/>
-                    </Grid></Border></DataTemplate></ListBox.ItemTemplate>
-                </ListBox></TabItem>
-            </TabControl>
+        <Border Style="{StaticResource Card}" AutomationProperties.Name="Task transcript">
+            <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <StackPanel Margin="4,2,4,12">
+                    <TextBlock Text="You" Style="{StaticResource SectionLabel}" Foreground="{DynamicResource SignalBrush}"/>
+                    <TextBlock Text="{Binding TaskWorkspace.SubmittedPromptDisplay}" TextWrapping="Wrap" FontSize="14" LineHeight="21" Margin="0,5,0,0"/>
+                </StackPanel>
+                <Border Grid.Row="1" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1"/>
+                <Grid Grid.Row="2" Margin="0,10"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <TextBlock Text="Activity" Style="{StaticResource SectionLabel}" Margin="4,0,4,5"/>
+                    <ListBox Grid.Row="1" ItemsSource="{Binding TaskWorkspace.TimelineItems}" BorderThickness="0" Background="Transparent" VirtualizingStackPanel.IsVirtualizing="True" VirtualizingStackPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True" AutomationProperties.Name="Task activity">
+                        <ListBox.ItemTemplate><DataTemplate><Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1" Padding="4,9"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="8"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <Ellipse Width="8" Height="8" Fill="{DynamicResource SignalBrush}" VerticalAlignment="Top" Margin="0,5,0,0"/><StackPanel Grid.Column="2"><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Detail}" Foreground="{DynamicResource MutedInkBrush}" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel><TextBlock Grid.Column="3" Text="{Binding Kind}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10" Margin="8,2,0,0"/>
+                        </Grid></Border></DataTemplate></ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+                <Border Grid.Row="3" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0"/>
+                <StackPanel Grid.Row="4" Margin="4,12,4,2">
+                    <TextBlock Text="Assistant" Style="{StaticResource SectionLabel}" Foreground="{DynamicResource CreateActionBrush}"/>
+                    <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto" Margin="0,5,0,0"><TextBlock Text="{Binding TaskWorkspace.FinalResponse}" TextWrapping="Wrap" FontSize="14" LineHeight="22" AutomationProperties.LiveSetting="Polite"/></ScrollViewer>
+                </StackPanel>
+            </Grid>
         </Border>
         <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,12,0,0" Padding="12"><StackPanel>
             <Expander Header="Run settings" IsExpanded="False" Margin="0,0,0,8"><Grid Margin="0,8,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>

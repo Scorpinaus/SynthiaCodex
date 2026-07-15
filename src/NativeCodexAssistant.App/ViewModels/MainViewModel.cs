@@ -1021,13 +1021,26 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
+            var submittedPrompt = PromptText.Trim();
+            TaskWorkspace.SubmittedPrompt = submittedPrompt;
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
             activeThreadId = await EnsureActiveThreadAsync().ConfigureAwait(true);
+            if (SelectedThread is not null)
+            {
+                SelectedThread.Preview = submittedPrompt;
+            }
+
+            var persistedThread = settings.ProjectThreads.FirstOrDefault(thread =>
+                string.Equals(thread.ThreadId, activeThreadId, StringComparison.Ordinal));
+            if (persistedThread is not null)
+            {
+                persistedThread.Preview = submittedPrompt;
+            }
+
             runningThreadIds.Add(activeThreadId);
             UpdateThreadActivity(activeThreadId, isRunning: true, "Running");
             IsTurnRunning = true;
 
-            var submittedPrompt = PromptText.Trim();
             var workspacePath = GetActiveWorkspacePath();
             settings.LastModelOverride = NormalizeOverride(ModelOverride);
             settings.LastReasoningEffortOverride = NormalizeOverride(ReasoningEffortOverride);
@@ -1524,6 +1537,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 archived: notification.Method == "thread/archived");
         }
 
+        TaskWorkspace.NotifyResponseChanged();
         OnPropertyChanged(nameof(FinalResponse));
         RaiseThreadCommandStates();
     }
@@ -1652,6 +1666,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         activeThreadLoaded = state is not null && loadedThreadIds.Contains(state.ThreadId);
         activeTurnId = state is not null && activeTurnIds.TryGetValue(state.ThreadId, out var turnId) ? turnId : null;
+        TaskWorkspace.SubmittedPrompt = state?.Preview ?? string.Empty;
         IsTurnRunning = state is not null && runningThreadIds.Contains(state.ThreadId);
 
         if (state is null)

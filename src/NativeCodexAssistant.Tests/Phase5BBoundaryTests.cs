@@ -158,12 +158,14 @@ internal static class Phase5BBoundaryTests
         service.Restore("thread-one", "Persisted response", [], []);
         viewModel.UseThreadService(service);
         viewModel.Prompt = "Run this";
+        viewModel.SubmittedPrompt = viewModel.Prompt;
         viewModel.IsTurnRunning = true;
         viewModel.SteeringText = "Adjust it";
         viewModel.IsTurnRunning = false;
 
         Assert(viewModel.FinalResponse == "Persisted response", "task presentation owns response state");
         Assert(viewModel.Prompt == "Run this", "task presentation owns the composer");
+        Assert(viewModel.SubmittedPromptDisplay == "Run this", "task transcript retains the submitted prompt");
         Assert(viewModel.SteeringText.Length == 0, "completed turn clears transient guidance");
         return Task.CompletedTask;
     }

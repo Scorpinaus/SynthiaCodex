@@ -1,3 +1,5 @@
+using NativeCodexAssistant.Core.Codex.AppServer;
+
 namespace NativeCodexAssistant.Core.Settings;
 
 public static class AppSettingsSnapshot
@@ -37,6 +39,18 @@ public static class AppSettingsSnapshot
         FinalResponse = source.FinalResponse,
         TimelineItems = [.. source.TimelineItems],
         RawEvents = [.. source.RawEvents],
+        ConversationTurns = [.. source.ConversationTurns.Select(CloneTurn)],
         UpdatedAt = source.UpdatedAt
+    };
+
+    private static CodexConversationTurnSnapshot CloneTurn(CodexConversationTurnSnapshot source) => new()
+    {
+        TurnId = source.TurnId,
+        UserPrompt = source.UserPrompt,
+        AssistantResponse = source.AssistantResponse,
+        Status = source.Status,
+        StartedAt = source.StartedAt,
+        CompletedAt = source.CompletedAt,
+        Activity = [.. source.Activity]
     };
 }

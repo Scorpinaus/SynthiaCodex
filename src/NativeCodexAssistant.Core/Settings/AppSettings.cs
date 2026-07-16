@@ -44,6 +44,7 @@ public sealed class PersistedProjectThread
     public string FinalResponse { get; set; } = string.Empty;
     public List<CodexTimelineItem> TimelineItems { get; set; } = [];
     public List<string> RawEvents { get; set; } = [];
+    public List<CodexConversationTurnSnapshot> ConversationTurns { get; set; } = [];
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -157,6 +158,8 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
     public List<CodexTimelineItem> TimelineItems { get; set; } = [];
 
     public List<string> RawEvents { get; set; } = [];
+
+    public List<CodexConversationTurnSnapshot> ConversationTurns { get; set; } = [];
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 

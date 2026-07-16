@@ -1,8 +1,8 @@
-# Native Codex Assistant: Current Architecture and Phase 5B Baseline
+# Native Codex Assistant: Current Architecture through Phase 5C
 
 **Recorded:** 15 July 2026  
-**Phase:** 5B — Architecture and Performance Optimization  
-**Purpose:** Describe the post-Phase-5B architecture and compare it with the recorded baseline.
+**Phase:** 5C - Multi-turn Conversations
+**Purpose:** Describe the current post-Phase-5C architecture while retaining the Phase 5B performance baseline.
 
 ## System shape
 
@@ -80,6 +80,16 @@ Protocol request construction, response correlation, parsing, and transport fail
 
 High-frequency agent-message deltas are grouped by thread, turn, and item before UI dispatch. Any non-delta event first flushes pending text, which preserves ordering for completion, error, tool, and lifecycle notifications. Idle deltas flush on the batching timer so streaming remains visibly progressive.
 
+### Multi-turn conversation state
+
+`CodexThreadWorkspace` owns one `CodexThreadService` per app-server thread and a turn-to-thread routing index. Each service exposes a bounded chronological collection of `CodexConversationTurn` objects. A turn owns its user prompt, assistant response, activity collection, status, and start/completion timestamps; the older singular final-response and timeline properties remain compatibility projections.
+
+Submitting a follow-up calls `turn/start` with the existing thread ID. A pending local turn is created immediately, then bound to the returned app-server turn ID. Binding and notification reduction share a state gate and reconcile an already-observed turn, so notifications that arrive before the request response do not create duplicate turns or lose the response.
+
+Thread selection and resume use typed `thread/read`/resume results with `includeTurns: true`. Canonical app-server user and assistant messages are reconciled with local turn snapshots, while richer local activity remains attached to its matching turn. If the server cannot provide history, the local snapshot remains usable. Legacy records containing only a preview and final response synthesize one visible completed turn.
+
+`TaskView` presents the collection as a recycling-virtualized chronological transcript. It follows live output while the viewport is near the bottom, exposes a Jump to latest action after manual scrolling, collapses historical activity, and keeps the composer fixed. The first action is labelled Run task; subsequent submissions are labelled Send follow-up. During an active turn, the same composer becomes the guidance input.
+
 ### Terminal
 
 ```text
@@ -105,7 +115,7 @@ The composition root exposes a `CoalescingSettingsStore` around `JsonSettingsSto
 
 Persisted and presented thread state are separate. `AppSettings.ProjectThreads` contains storage-only `PersistedProjectThread` DTOs. `ThreadStore` maps those records to observable `ProjectThreadState` objects for presentation and maps changes back on upsert. JSON property names were preserved, and a literal legacy-settings regression verifies backward-compatible loading without migration.
 
-Thread snapshots already persist only the latest 100 timeline items and 100 raw events. At baseline, the local `settings.json` was 144,872 bytes. Every physical save emits `settings_saved` duration/size telemetry, while each coordinator batch emits logical request and coalesced-request counts. The synthetic burst baseline is 20 logical requests to one physical write.
+Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 conversation turns. Each persisted turn retains at most 100 activity items. At baseline, the local `settings.json` was 144,872 bytes. Every physical save emits `settings_saved` duration/size telemetry, while each coordinator batch emits logical request and coalesced-request counts. The synthetic burst baseline is 20 logical requests to one physical write.
 
 ## Baseline measurements and constraints
 
@@ -134,7 +144,7 @@ Thread snapshots already persist only the latest 100 timeline items and 100 raw 
 | --- | --- | --- |
 | `MainViewModel.cs` | 1,589 physical lines | 36% smaller |
 | `MainWindow.xaml` | 44 physical lines plus five feature controls | 95% smaller shell; feature layout independently owned |
-| Behavioral suite | 67 passing tests | 8 coordinator/view-model/lifecycle compatibility regressions added after the 59-test baseline |
+| Behavioral suite | 72 passing tests | 13 coordinator, lifecycle, history, persistence, and multi-turn regressions added after the 59-test baseline |
 | Startup shell/readiness | 541 ms / 759 ms | unchanged |
 | Codex long stream | 25,001 notifications, 2 UI batches, 20.71 MiB, 40.25 ms | same batching/allocation bound; synthetic CPU time varies locally |
 | Terminal storage/presentation | 39.06 MiB in 2.24 ms; 250,000 retained; 100 chunks to 1 UI update | faster storage run; same presentation bound |
@@ -142,7 +152,7 @@ Thread snapshots already persist only the latest 100 timeline items and 100 raw 
 | Recovery | 27 ms | 5 ms slower locally, still well below interactive latency |
 | Active-resource shutdown | 2 ms | 10 ms faster locally |
 
-The final Release solution build completed with zero warnings and errors and all 67 tests passed. The canonical self-contained `win-x64` portable folder was refreshed and launch-verified. `NativeCodexAssistant.App.exe` SHA-256: `17612E765DC721437EBE964D4EC1DACFAC94F2556A1B801DA0C5B7D146756783`.
+The Phase 5C Release solution build completed with zero warnings and errors and all 72 tests passed. The canonical self-contained `win-x64` portable folder was refreshed and launch-verified. SHA-256: executable `D67FC1D3E95E8E870BC5AA8646099D2D712B6E2753DA747F3ADB724EB0A6EC9B`; application DLL `8370BF25CDCCBDBAC1F03A8D565B6DF1C41C0BBC8779AB62B3A4A92589013269`.
 
 A no-build behavioral-runner invocation took approximately 12 seconds during the initial audit; this is a coarse runner-duration observation, not a product performance metric.
 
@@ -157,4 +167,4 @@ A no-build behavioral-runner invocation took approximately 12 seconds during the
 
 ## Phase boundary
 
-Phase 5B preserves the completed Phase 5A experience. Skills, plugins, MCP, automations, and other Phase 6 work remain out of scope.
+Phase 5C extends the completed Phase 5A/5B experience with durable multi-turn conversations. Skills, plugins, MCP, automations, and other Phase 6 work remain out of scope.

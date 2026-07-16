@@ -35,6 +35,8 @@ public sealed class TaskViewModel : ObservableObject
 
     public ObservableCollection<CodexTimelineItem> TimelineItems => threadService.TimelineItems;
 
+    public ObservableCollection<CodexConversationTurn> ConversationTurns => threadService.ConversationTurns;
+
     public ObservableCollection<string> RawEvents => threadService.RawEvents;
 
     public ObservableCollection<string> ModelOptions { get; } = [];
@@ -114,6 +116,10 @@ public sealed class TaskViewModel : ObservableObject
             ? "No final response yet"
             : threadService.FinalResponse;
 
+    public string ComposerActionLabel => ConversationTurns.Count == 0 ? "Run task" : "Send follow-up";
+
+    public bool HasConversation => ConversationTurns.Count > 0;
+
     public bool IsTurnRunning
     {
         get => isTurnRunning;
@@ -135,11 +141,19 @@ public sealed class TaskViewModel : ObservableObject
     {
         threadService = service;
         OnPropertyChanged(nameof(TimelineItems));
+        OnPropertyChanged(nameof(ConversationTurns));
         OnPropertyChanged(nameof(RawEvents));
         OnPropertyChanged(nameof(FinalResponse));
+        OnPropertyChanged(nameof(ComposerActionLabel));
+        OnPropertyChanged(nameof(HasConversation));
     }
 
-    public void NotifyResponseChanged() => OnPropertyChanged(nameof(FinalResponse));
+    public void NotifyResponseChanged()
+    {
+        OnPropertyChanged(nameof(FinalResponse));
+        OnPropertyChanged(nameof(ComposerActionLabel));
+        OnPropertyChanged(nameof(HasConversation));
+    }
 
     public void RaiseCommandStates()
     {

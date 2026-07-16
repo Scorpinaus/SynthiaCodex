@@ -127,7 +127,39 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             throw new CodexAppServerProtocolException("thread/resume response did not include result.thread.id.");
         }
 
-        return new CodexThreadResumeResult(threadId);
+        return new CodexThreadResumeResult(
+            threadId,
+            ParseConversationTurns(result?["thread"]?["turns"] as JsonArray));
+    }
+
+    public async Task<CodexThreadReadResult> ReadThreadAsync(
+        CodexThreadReadRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.ThreadId))
+        {
+            throw new ArgumentException("Thread ID is required.", nameof(request));
+        }
+
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var result = await SendRequestAsync(
+            "thread/read",
+            new JsonObject
+            {
+                ["threadId"] = request.ThreadId,
+                ["includeTurns"] = request.IncludeTurns
+            },
+            cancellationToken).ConfigureAwait(false) as JsonObject;
+
+        var threadId = ReadString(result, "thread.id");
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            throw new CodexAppServerProtocolException("thread/read response did not include result.thread.id.");
+        }
+
+        var turns = result?["thread"]?["turns"] as JsonArray;
+        return new CodexThreadReadResult(threadId, ParseConversationTurns(turns));
     }
 
     public async Task<IReadOnlyList<CodexModelOption>> ListModelsAsync(CancellationToken cancellationToken = default)
@@ -680,6 +712,71 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
         return values;
     }
+
+    private static IReadOnlyList<CodexConversationTurnSnapshot> ParseConversationTurns(JsonArray? turns)
+    {
+        if (turns is null)
+        {
+            return [];
+        }
+
+        var parsed = new List<CodexConversationTurnSnapshot>();
+        foreach (var turn in turns.OfType<JsonObject>())
+        {
+            var turnId = ReadString(turn, "id");
+            if (string.IsNullOrWhiteSpace(turnId))
+            {
+                continue;
+            }
+
+            var prompts = new List<string>();
+            var assistantMessages = new List<string>();
+            if (turn["items"] is JsonArray items)
+            {
+                foreach (var item in items.OfType<JsonObject>())
+                {
+                    switch (ReadString(item, "type"))
+                    {
+                        case "userMessage" when item["content"] is JsonArray content:
+                            prompts.AddRange(content
+                                .OfType<JsonObject>()
+                                .Where(input => string.Equals(ReadString(input, "type"), "text", StringComparison.Ordinal))
+                                .Select(input => ReadString(input, "text"))
+                                .Where(text => !string.IsNullOrWhiteSpace(text))!);
+                            break;
+                        case "agentMessage":
+                            var message = ReadString(item, "text");
+                            if (!string.IsNullOrWhiteSpace(message))
+                            {
+                                assistantMessages.Add(message);
+                            }
+                            break;
+                    }
+                }
+            }
+
+            parsed.Add(new CodexConversationTurnSnapshot
+            {
+                TurnId = turnId,
+                UserPrompt = string.Join(Environment.NewLine, prompts),
+                AssistantResponse = assistantMessages.LastOrDefault() ?? string.Empty,
+                Status = ParseTurnStatus(ReadString(turn, "status")),
+                StartedAt = ReadUnixTimestamp(turn, "startedAt") ?? DateTimeOffset.UtcNow,
+                CompletedAt = ReadUnixTimestamp(turn, "completedAt")
+            });
+        }
+
+        return parsed;
+    }
+
+    private static CodexTurnStatus ParseTurnStatus(string? status) => status switch
+    {
+        "inProgress" => CodexTurnStatus.Running,
+        "completed" => CodexTurnStatus.Completed,
+        "interrupted" => CodexTurnStatus.Cancelled,
+        "failed" => CodexTurnStatus.Failed,
+        _ => CodexTurnStatus.Idle
+    };
 
     public async ValueTask DisposeAsync()
     {

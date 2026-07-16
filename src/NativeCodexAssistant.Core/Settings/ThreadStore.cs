@@ -1,3 +1,5 @@
+using NativeCodexAssistant.Core.Codex.AppServer;
+
 namespace NativeCodexAssistant.Core.Settings;
 
 public sealed class ThreadStore
@@ -48,6 +50,7 @@ public sealed class ThreadStore
         existing.FinalResponse = state.FinalResponse;
         existing.TimelineItems = state.TimelineItems;
         existing.RawEvents = state.RawEvents;
+        existing.ConversationTurns = CloneTurns(state.ConversationTurns);
         existing.CreatedAt = state.CreatedAt;
         existing.UpdatedAt = state.UpdatedAt;
         return ToPresentation(existing);
@@ -105,6 +108,7 @@ public sealed class ThreadStore
         FinalResponse = source.FinalResponse,
         TimelineItems = [.. source.TimelineItems],
         RawEvents = [.. source.RawEvents],
+        ConversationTurns = CloneTurns(source.ConversationTurns),
         UpdatedAt = source.UpdatedAt
     };
 
@@ -126,6 +130,20 @@ public sealed class ThreadStore
         FinalResponse = source.FinalResponse,
         TimelineItems = [.. source.TimelineItems],
         RawEvents = [.. source.RawEvents],
+        ConversationTurns = CloneTurns(source.ConversationTurns),
         UpdatedAt = source.UpdatedAt
     };
+
+    private static List<CodexConversationTurnSnapshot> CloneTurns(
+        IEnumerable<CodexConversationTurnSnapshot> turns) =>
+        turns.Select(turn => new CodexConversationTurnSnapshot
+        {
+            TurnId = turn.TurnId,
+            UserPrompt = turn.UserPrompt,
+            AssistantResponse = turn.AssistantResponse,
+            Status = turn.Status,
+            StartedAt = turn.StartedAt,
+            CompletedAt = turn.CompletedAt,
+            Activity = [.. turn.Activity]
+        }).ToList();
 }

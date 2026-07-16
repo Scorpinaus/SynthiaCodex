@@ -8,12 +8,17 @@ public sealed class CodexThreadService
 {
     public const int MaximumTimelineItems = 500;
     public const int MaximumRawEvents = 500;
+    public const int MaximumConversationTurns = 100;
+    public const int MaximumPersistedActivityItemsPerTurn = 100;
 
     private readonly StringBuilder finalResponseBuilder = new();
+    private readonly object stateGate = new();
 
     public ObservableCollection<CodexTimelineItem> TimelineItems { get; } = [];
 
     public ObservableCollection<string> RawEvents { get; } = [];
+
+    public ObservableCollection<CodexConversationTurn> ConversationTurns { get; } = [];
 
     public string? ActiveThreadId { get; private set; }
 
@@ -27,10 +32,15 @@ public sealed class CodexThreadService
 
     public string LastErrorDetail { get; private set; } = string.Empty;
 
+    public CodexConversationTurn? ActiveConversationTurn => ConversationTurns.LastOrDefault(turn =>
+        turn.Status == CodexTurnStatus.Running ||
+        (!string.IsNullOrWhiteSpace(ActiveTurnId) && string.Equals(turn.TurnId, ActiveTurnId, StringComparison.Ordinal)));
+
     public void Reset()
     {
         TimelineItems.Clear();
         RawEvents.Clear();
+        ConversationTurns.Clear();
         ActiveThreadId = null;
         ActiveTurnId = null;
         ActiveTurnStatus = CodexTurnStatus.Idle;
@@ -44,7 +54,9 @@ public sealed class CodexThreadService
         string? threadId,
         string? finalResponse,
         IEnumerable<CodexTimelineItem>? timelineItems,
-        IEnumerable<string>? rawEvents)
+        IEnumerable<string>? rawEvents,
+        string? legacyPrompt = null,
+        IEnumerable<CodexConversationTurnSnapshot>? conversationTurns = null)
     {
         Reset();
         ActiveThreadId = threadId;
@@ -71,18 +83,179 @@ public sealed class CodexThreadService
                 AddBounded(RawEvents, rawEvent, MaximumRawEvents);
             }
         }
+
+        if (conversationTurns is not null)
+        {
+            foreach (var snapshot in conversationTurns.TakeLast(MaximumConversationTurns))
+            {
+                ConversationTurns.Add(CodexConversationTurn.FromSnapshot(snapshot));
+            }
+        }
+
+        if (ConversationTurns.Count == 0 &&
+            (!string.IsNullOrWhiteSpace(legacyPrompt) || !string.IsNullOrWhiteSpace(finalResponse)))
+        {
+            var legacyTurn = new CodexConversationTurn
+            {
+                UserPrompt = legacyPrompt ?? string.Empty,
+                AssistantResponse = finalResponse ?? string.Empty,
+                Status = CodexTurnStatus.Completed
+            };
+            foreach (var item in TimelineItems)
+            {
+                legacyTurn.Activity.Add(item);
+            }
+            ConversationTurns.Add(legacyTurn);
+        }
+
+        RefreshCompatibilityResponse();
     }
+
+    public CodexConversationTurn BeginTurn(string prompt)
+    {
+        lock (stateGate)
+        {
+            var turn = new CodexConversationTurn
+            {
+                UserPrompt = prompt,
+                Status = CodexTurnStatus.Running,
+                StartedAt = DateTimeOffset.UtcNow
+            };
+            AddBounded(ConversationTurns, turn, MaximumConversationTurns);
+            ActiveTurnId = null;
+            ActiveTurnStatus = CodexTurnStatus.Running;
+            finalResponseBuilder.Clear();
+            FinalResponse = string.Empty;
+            return turn;
+        }
+    }
+
+    public CodexConversationTurn BindPendingTurn(string turnId)
+    {
+        lock (stateGate)
+        {
+            var existing = ConversationTurns.FirstOrDefault(item =>
+                string.Equals(item.TurnId, turnId, StringComparison.Ordinal));
+            var pending = ConversationTurns.LastOrDefault(item =>
+                item.Status == CodexTurnStatus.Running && string.IsNullOrWhiteSpace(item.TurnId));
+            var turn = existing ?? pending ?? GetOrCreateTurn(turnId);
+            if (existing is not null && pending is not null && !ReferenceEquals(existing, pending))
+            {
+                if (string.IsNullOrWhiteSpace(existing.UserPrompt))
+                {
+                    existing.UserPrompt = pending.UserPrompt;
+                }
+                foreach (var item in pending.Activity)
+                {
+                    AddBounded(existing.Activity, item, MaximumTimelineItems);
+                }
+                ConversationTurns.Remove(pending);
+            }
+            turn.TurnId = turnId;
+            if (turn.Status == CodexTurnStatus.Idle)
+            {
+                turn.Status = CodexTurnStatus.Running;
+            }
+            ActiveTurnId = turnId;
+            ActiveTurnStatus = turn.Status;
+            return turn;
+        }
+    }
+
+    public void FailPendingTurn(string detail)
+    {
+        var turn = ConversationTurns.LastOrDefault(item => item.Status == CodexTurnStatus.Running);
+        if (turn is null)
+        {
+            return;
+        }
+
+        turn.Status = CodexTurnStatus.Failed;
+        turn.CompletedAt = DateTimeOffset.UtcNow;
+        if (string.IsNullOrWhiteSpace(turn.AssistantResponse))
+        {
+            turn.AssistantResponse = detail;
+        }
+        ActiveTurnStatus = CodexTurnStatus.Failed;
+        ActiveTurnId = null;
+        RefreshCompatibilityResponse();
+    }
+
+    public void AddGuidance(string guidance)
+    {
+        if (ActiveConversationTurn is not { } turn || string.IsNullOrWhiteSpace(guidance))
+        {
+            return;
+        }
+
+        var item = new CodexTimelineItem(
+            CodexTimelineItemKind.UserGuidance,
+            "Guidance added",
+            guidance,
+            "turn/steer",
+            DateTimeOffset.Now);
+        AddBounded(turn.Activity, item, MaximumTimelineItems);
+        AddBounded(TimelineItems, item, MaximumTimelineItems);
+    }
+
+    public void ReconcileHistory(IEnumerable<CodexConversationTurnSnapshot> history)
+    {
+        var snapshots = history.TakeLast(MaximumConversationTurns).ToList();
+        if (snapshots.Count == 0)
+        {
+            return;
+        }
+
+        if (ConversationTurns.Count == 1 && string.IsNullOrWhiteSpace(ConversationTurns[0].TurnId))
+        {
+            ConversationTurns.Clear();
+        }
+
+        foreach (var snapshot in snapshots)
+        {
+            var turn = ConversationTurns.FirstOrDefault(item =>
+                !string.IsNullOrWhiteSpace(snapshot.TurnId) &&
+                string.Equals(item.TurnId, snapshot.TurnId, StringComparison.Ordinal));
+            if (turn is null)
+            {
+                ConversationTurns.Add(CodexConversationTurn.FromSnapshot(snapshot));
+                continue;
+            }
+
+            turn.UserPrompt = snapshot.UserPrompt;
+            turn.AssistantResponse = snapshot.AssistantResponse;
+            turn.Status = snapshot.Status;
+            turn.StartedAt = snapshot.StartedAt;
+            turn.CompletedAt = snapshot.CompletedAt;
+        }
+
+        while (ConversationTurns.Count > MaximumConversationTurns)
+        {
+            ConversationTurns.RemoveAt(0);
+        }
+        RefreshCompatibilityResponse();
+    }
+
+    public IReadOnlyList<CodexConversationTurnSnapshot> SnapshotConversation() =>
+        ConversationTurns.TakeLast(MaximumConversationTurns).Select(turn =>
+        {
+            var snapshot = turn.ToSnapshot();
+            snapshot.Activity = [.. snapshot.Activity.TakeLast(MaximumPersistedActivityItemsPerTurn)];
+            return snapshot;
+        }).ToList();
 
     public void ApplyNotification(AppServerNotification notification)
     {
-        AddBounded(
-            RawEvents,
-            $"{notification.Method}: {notification.Params.ToJsonString()}",
-            MaximumRawEvents);
-        CaptureErrorState(notification.Params);
-
-        switch (notification.Method)
+        lock (stateGate)
         {
+            AddBounded(
+                RawEvents,
+                $"{notification.Method}: {notification.Params.ToJsonString()}",
+                MaximumRawEvents);
+            CaptureErrorState(notification.Params);
+
+            switch (notification.Method)
+            {
             case "thread/started":
                 ActiveThreadId = ReadString(notification.Params, "thread.id");
                 Add(CodexTimelineItemKind.ThreadStarted, "Thread started", ActiveThreadId, notification);
@@ -91,6 +264,10 @@ public sealed class CodexThreadService
             case "turn/started":
                 ActiveTurnId = ReadString(notification.Params, "turn.id");
                 ActiveTurnStatus = CodexTurnStatus.Running;
+                if (!string.IsNullOrWhiteSpace(ActiveTurnId))
+                {
+                    BindPendingTurn(ActiveTurnId);
+                }
                 Add(CodexTimelineItemKind.TurnStarted, "Turn started", ActiveTurnId, notification);
                 break;
 
@@ -98,6 +275,11 @@ public sealed class CodexThreadService
                 var delta = ReadString(notification.Params, "delta") ?? ReadString(notification.Params, "text") ?? string.Empty;
                 if (!string.IsNullOrEmpty(delta))
                 {
+                    var responseTurn = GetNotificationTurn(notification);
+                    if (responseTurn is not null)
+                    {
+                        responseTurn.AssistantResponse += delta;
+                    }
                     finalResponseBuilder.Append(delta);
                     FinalResponse = finalResponseBuilder.ToString();
                 }
@@ -108,7 +290,14 @@ public sealed class CodexThreadService
             case "turn/completed":
                 ActiveTurnId ??= ReadString(notification.Params, "turn.id");
                 ActiveTurnStatus = ReadTurnStatus(ReadString(notification.Params, "status") ?? ReadString(notification.Params, "turn.status"));
+                var completedTurn = GetNotificationTurn(notification);
+                if (completedTurn is not null)
+                {
+                    completedTurn.Status = ActiveTurnStatus;
+                    completedTurn.CompletedAt = DateTimeOffset.UtcNow;
+                }
                 Add(CodexTimelineItemKind.TurnCompleted, "Turn completed", ReadTurnCompletedDetail(notification.Params), notification);
+                RefreshCompatibilityResponse();
                 break;
 
             case "item/started":
@@ -122,6 +311,7 @@ public sealed class CodexThreadService
             default:
                 Add(ReadFallbackKind(notification), notification.Method, ReadItemDetail(notification.Params), notification);
                 break;
+            }
         }
     }
 
@@ -135,6 +325,11 @@ public sealed class CodexThreadService
 
         if (kind == CodexTimelineItemKind.AgentMessage && !string.IsNullOrWhiteSpace(agentText))
         {
+            var responseTurn = GetNotificationTurn(notification);
+            if (responseTurn is not null)
+            {
+                responseTurn.AssistantResponse = agentText;
+            }
             finalResponseBuilder.Clear();
             finalResponseBuilder.Append(agentText);
             FinalResponse = finalResponseBuilder.ToString();
@@ -272,15 +467,21 @@ public sealed class CodexThreadService
 
     private void Add(CodexTimelineItemKind kind, string title, string? detail, AppServerNotification notification)
     {
-        AddBounded(
-            TimelineItems,
-            new CodexTimelineItem(
+        var item = new CodexTimelineItem(
                 kind,
                 title,
                 detail ?? string.Empty,
                 notification.Method,
-                DateTimeOffset.Now),
-            MaximumTimelineItems);
+                DateTimeOffset.Now);
+        AddBounded(TimelineItems, item, MaximumTimelineItems);
+
+        var itemType = ReadString(notification.Params, "item.type");
+        if (kind is not (CodexTimelineItemKind.AgentMessage or CodexTimelineItemKind.AgentMessageDelta) &&
+            itemType is not ("userMessage" or "user_message" or "agentMessage" or "agent_message") &&
+            GetNotificationTurn(notification) is { } turn)
+        {
+            AddBounded(turn.Activity, item, MaximumTimelineItems);
+        }
     }
 
     private static void AddBounded<T>(ObservableCollection<T> collection, T item, int maximumCount)
@@ -291,6 +492,51 @@ public sealed class CodexThreadService
         }
 
         collection.Add(item);
+    }
+
+    private CodexConversationTurn GetOrCreateTurn(string turnId)
+    {
+        var existing = ConversationTurns.FirstOrDefault(turn =>
+            string.Equals(turn.TurnId, turnId, StringComparison.Ordinal));
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var pending = ConversationTurns.LastOrDefault(turn =>
+            turn.Status == CodexTurnStatus.Running && string.IsNullOrWhiteSpace(turn.TurnId));
+        if (pending is not null)
+        {
+            pending.TurnId = turnId;
+            return pending;
+        }
+
+        var created = new CodexConversationTurn
+        {
+            TurnId = turnId,
+            Status = CodexTurnStatus.Running,
+            StartedAt = DateTimeOffset.UtcNow
+        };
+        AddBounded(ConversationTurns, created, MaximumConversationTurns);
+        return created;
+    }
+
+    private CodexConversationTurn? GetNotificationTurn(AppServerNotification notification)
+    {
+        var turnId = ReadString(notification.Params, "turnId") ?? ReadString(notification.Params, "turn.id");
+        if (!string.IsNullOrWhiteSpace(turnId))
+        {
+            return GetOrCreateTurn(turnId);
+        }
+
+        return ActiveConversationTurn;
+    }
+
+    private void RefreshCompatibilityResponse()
+    {
+        FinalResponse = ConversationTurns.LastOrDefault()?.AssistantResponse ?? FinalResponse;
+        finalResponseBuilder.Clear();
+        finalResponseBuilder.Append(FinalResponse);
     }
 
     private static string? ReadString(JsonObject obj, string path)
@@ -381,7 +627,8 @@ public enum CodexTimelineItemKind
     ToolProgress,
     Error,
     TurnCompleted,
-    Raw
+    Raw,
+    UserGuidance
 }
 
 public enum CodexTurnStatus

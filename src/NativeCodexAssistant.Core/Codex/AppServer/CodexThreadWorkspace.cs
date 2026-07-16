@@ -14,7 +14,13 @@ public sealed class CodexThreadWorkspace
     {
         ArgumentNullException.ThrowIfNull(state);
         var service = GetOrCreate(state.ThreadId);
-        service.Restore(state.ThreadId, state.FinalResponse, state.TimelineItems, state.RawEvents);
+        service.Restore(
+            state.ThreadId,
+            state.FinalResponse,
+            state.TimelineItems,
+            state.RawEvents,
+            state.Preview,
+            state.ConversationTurns);
         return service;
     }
 

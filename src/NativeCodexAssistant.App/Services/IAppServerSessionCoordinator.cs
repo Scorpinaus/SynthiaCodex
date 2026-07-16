@@ -41,6 +41,8 @@ public interface IAppServerSessionCoordinator : IAsyncDisposable
 
     Task<CodexThreadResumeResult> ResumeThreadAsync(CodexThreadResumeRequest request, CancellationToken cancellationToken = default);
 
+    Task<CodexThreadReadResult> ReadThreadAsync(CodexThreadReadRequest request, CancellationToken cancellationToken = default);
+
     Task<CodexThreadForkResult> ForkThreadAsync(CodexThreadForkRequest request, CancellationToken cancellationToken = default);
 
     Task ArchiveThreadAsync(string threadId, CancellationToken cancellationToken = default);

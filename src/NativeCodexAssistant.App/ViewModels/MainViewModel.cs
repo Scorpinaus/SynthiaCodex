@@ -677,6 +677,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 workspacePath,
                 CodexSandbox.WorkspaceWrite,
                 NormalizeOverride(ModelOverride))).ConfigureAwait(true);
+            threadService.ReconcileHistory(result.Turns ?? []);
+            TaskWorkspace.NotifyResponseChanged();
             loadedThreadIds.Add(result.ThreadId);
             activeThreadLoaded = true;
             StatusMessage = "Codex thread resumed";
@@ -727,6 +729,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 worktree?.Path,
                 worktree?.Branch);
             state.Preview = sourceThread.Preview;
+            var sourceService = threadWorkspace.GetRequired(sourceThread.ThreadId);
+            state.FinalResponse = sourceService.FinalResponse;
+            state.ConversationTurns = sourceService.SnapshotConversation().Select(CloneConversationTurn).ToList();
+            threadStore.Upsert(settings, state);
             loadedThreadIds.Add(result.ThreadId);
             RefreshProjectThreads(result.ThreadId);
             StatusMessage = "Codex thread forked";
@@ -795,10 +801,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
+            var guidance = SteeringText.Trim();
             await appServerSessionCoordinator.SteerTurnAsync(new CodexTurnSteerRequest(
                 activeThreadId,
                 activeTurnId,
-                SteeringText.Trim())).ConfigureAwait(true);
+                guidance)).ConfigureAwait(true);
+            threadService.AddGuidance(guidance);
+            TaskWorkspace.NotifyResponseChanged();
             SteeringText = string.Empty;
             StatusMessage = "Steering sent to active turn";
         }
@@ -1016,7 +1025,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        IsTurnRunning = true;
         StatusMessage = "Starting Codex task";
 
         try
@@ -1025,6 +1033,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             TaskWorkspace.SubmittedPrompt = submittedPrompt;
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
             activeThreadId = await EnsureActiveThreadAsync().ConfigureAwait(true);
+            threadService.BeginTurn(submittedPrompt);
+            TaskWorkspace.NotifyResponseChanged();
             if (SelectedThread is not null)
             {
                 SelectedThread.Preview = submittedPrompt;
@@ -1037,10 +1047,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 persistedThread.Preview = submittedPrompt;
             }
 
-            runningThreadIds.Add(activeThreadId);
-            UpdateThreadActivity(activeThreadId, isRunning: true, "Running");
-            IsTurnRunning = true;
-
             var workspacePath = GetActiveWorkspacePath();
             settings.LastModelOverride = NormalizeOverride(ModelOverride);
             settings.LastReasoningEffortOverride = NormalizeOverride(ReasoningEffortOverride);
@@ -1052,14 +1058,32 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 NormalizeOverride(ModelOverride),
                 ParseReasoningEffort(ReasoningEffortOverride))).ConfigureAwait(true);
 
-            activeTurnId = turn.TurnId;
-            activeTurnIds[activeThreadId] = turn.TurnId;
+            var boundTurn = threadService.BindPendingTurn(turn.TurnId);
             threadWorkspace.RegisterTurn(activeThreadId, turn.TurnId);
+            if (boundTurn.Status == CodexTurnStatus.Running)
+            {
+                runningThreadIds.Add(activeThreadId);
+                UpdateThreadActivity(activeThreadId, isRunning: true, "Running");
+                IsTurnRunning = true;
+                activeTurnId = turn.TurnId;
+                activeTurnIds[activeThreadId] = turn.TurnId;
+            }
+            else
+            {
+                activeTurnId = null;
+                activeTurnIds.Remove(activeThreadId);
+                runningThreadIds.Remove(activeThreadId);
+                IsTurnRunning = false;
+            }
             cancelTurnCommand.RaiseCanExecuteChanged();
-            StatusMessage = "Codex turn running";
+            StatusMessage = boundTurn.Status == CodexTurnStatus.Running
+                ? "Codex turn running"
+                : $"Codex turn {boundTurn.Status.ToString().ToLowerInvariant()}";
         }
         catch (Exception ex)
         {
+            threadService.FailPendingTurn(ex.Message);
+            TaskWorkspace.NotifyResponseChanged();
             if (!string.IsNullOrWhiteSpace(activeThreadId))
             {
                 runningThreadIds.Remove(activeThreadId);
@@ -1118,6 +1142,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 activeThreadId,
                 GetActiveWorkspacePath(),
                 CodexSandbox.WorkspaceWrite)).ConfigureAwait(true);
+            threadService.ReconcileHistory(resumed.Turns ?? []);
+            TaskWorkspace.NotifyResponseChanged();
             activeThreadLoaded = true;
             loadedThreadIds.Add(resumed.ThreadId);
             StatusMessage = "Codex thread resumed";
@@ -1189,7 +1215,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
 
         var shutdownTimer = System.Diagnostics.Stopwatch.StartNew();
-        var activeTurnsAtStart = activeTurnIds.Count;
+        var activeTurnsAtStart = activeTurnIds.Count > 0
+            ? activeTurnIds.Count
+            : IsTurnRunning ? 1 : 0;
         var terminalSessionsAtStart = Terminal.SessionCount;
         IsShuttingDown = true;
         StatusMessage = "Closing application";
@@ -1577,7 +1605,18 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         persisted.FinalResponse = service.FinalResponse;
         persisted.TimelineItems = [.. service.TimelineItems.TakeLast(100)];
         persisted.RawEvents = [.. service.RawEvents.TakeLast(100)];
+        persisted.ConversationTurns = service.SnapshotConversation().Select(CloneConversationTurn).ToList();
         persisted.UpdatedAt = DateTimeOffset.UtcNow;
+        var presentation = ProjectThreads.FirstOrDefault(thread =>
+            string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
+        if (presentation is not null)
+        {
+            presentation.FinalResponse = persisted.FinalResponse;
+            presentation.TimelineItems = [.. persisted.TimelineItems];
+            presentation.RawEvents = [.. persisted.RawEvents];
+            presentation.ConversationTurns = persisted.ConversationTurns.Select(CloneConversationTurn).ToList();
+            presentation.UpdatedAt = persisted.UpdatedAt;
+        }
         try
         {
             await settingsStore.SaveAsync(settings).ConfigureAwait(true);
@@ -1730,6 +1769,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             persisted.FinalResponse = threadService.FinalResponse;
             persisted.TimelineItems = [.. threadService.TimelineItems.TakeLast(100)];
             persisted.RawEvents = [.. threadService.RawEvents.TakeLast(100)];
+            persisted.ConversationTurns = threadService.SnapshotConversation().Select(CloneConversationTurn).ToList();
             persisted.UpdatedAt = DateTimeOffset.UtcNow;
             threadStore.Upsert(settings, persisted);
 
@@ -1762,6 +1802,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         DiagnosticsViewModel.RaiseCommandStates();
         RaiseThreadCommandStates();
     }
+
+    private static CodexConversationTurnSnapshot CloneConversationTurn(CodexConversationTurnSnapshot source) => new()
+    {
+        TurnId = source.TurnId,
+        UserPrompt = source.UserPrompt,
+        AssistantResponse = source.AssistantResponse,
+        Status = source.Status,
+        StartedAt = source.StartedAt,
+        CompletedAt = source.CompletedAt,
+        Activity = [.. source.Activity]
+    };
 
     public async ValueTask DisposeAsync()
     {

@@ -55,6 +55,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("thread store keeps multiple project threads", TestThreadStoreKeepsMultipleProjectThreadsAsync),
     ("thread workspace routes parallel notifications", TestThreadWorkspaceRoutesParallelNotificationsAsync),
     ("view model preserves prompt after auth failed turn", TestViewModelPreservesPromptAfterAuthFailedTurnAsync),
+    ("view model runs follow-up turns on the same thread", TestViewModelRunsFollowUpOnSameThreadAsync),
     ("view model cancellation sends active thread and turn", TestViewModelCancellationSendsActiveThreadAndTurnAsync),
     ("view model restores persisted thread and resumes it", TestViewModelRestoresPersistedThreadAndResumesItAsync),
     ("view model sends selected model and reasoning", TestViewModelSendsSelectedModelAndReasoningAsync),
@@ -84,6 +85,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("live codex app-server initializes when enabled", TestLiveCodexAppServerInitializesWhenEnabledAsync)
 };
 tests.AddRange(Phase5BBoundaryTests.All);
+tests.AddRange(Phase5CMultiTurnTests.All);
 
 var failures = 0;
 var testFilter = Environment.GetEnvironmentVariable("NCA_TEST_FILTER");
@@ -1274,6 +1276,57 @@ static async Task TestViewModelPreservesPromptAfterAuthFailedTurnAsync()
     AssertEqual(prompt, viewModel.PromptText, "prompt is preserved after auth failure");
     AssertTrue(viewModel.StatusMessage.Contains("sign in", StringComparison.OrdinalIgnoreCase) ||
         viewModel.StatusMessage.Contains("authentication", StringComparison.OrdinalIgnoreCase), "auth failure status is actionable");
+
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelRunsFollowUpOnSameThreadAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var projectPath = temp.CreateDirectory("Repo");
+    var viewModel = CreateMainViewModel(transport, projectPath, AuthReadiness.LikelySignedIn);
+
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => string.Equals(viewModel.SelectedProjectPath, projectPath, StringComparison.OrdinalIgnoreCase), "project selection");
+
+    viewModel.PromptText = "First question";
+    viewModel.SubmitPromptCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend("""{"id":0,"result":{"userAgent":"test"}}""");
+    await transport.WaitForClientMessageCountAsync(3);
+    transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thread-1"}}}""");
+    await transport.WaitForClientMessageCountAsync(4);
+    transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-1"}}}""");
+    transport.ServerSend("""{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","text":"First answer"}}}""");
+    transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","items":[]}}}""");
+    await WaitUntilAsync(() => !viewModel.IsTurnRunning, "first turn completed");
+    await WaitUntilAsync(() => viewModel.SubmitPromptCommand.CanExecute(null), "first submit command completed");
+
+    viewModel.PromptText = "Follow-up question";
+    viewModel.SubmitPromptCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(5);
+    var followUpRequest = ParseMessage(transport.ClientMessages[4]);
+    AssertJsonString("turn/start", followUpRequest, "method", "follow-up method");
+    AssertJsonString("thread-1", followUpRequest, "params.threadId", "follow-up reuses thread");
+    transport.ServerSend("""{"id":3,"result":{"turn":{"id":"turn-2"}}}""");
+    transport.ServerSend("""{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-2","item":{"type":"agentMessage","text":"Second answer"}}}""");
+    transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-2","status":"completed","items":[]}}}""");
+    await WaitUntilAsync(() =>
+        !viewModel.IsTurnRunning &&
+        viewModel.TaskWorkspace.ConversationTurns.Count == 2 &&
+        string.Equals(
+            viewModel.TaskWorkspace.ConversationTurns[1].AssistantResponse,
+            "Second answer",
+            StringComparison.Ordinal),
+        "follow-up completed");
+
+    AssertEqual(2, viewModel.TaskWorkspace.ConversationTurns.Count, "two visible turns");
+    AssertEqual("First question", viewModel.TaskWorkspace.ConversationTurns[0].UserPrompt, "first prompt retained");
+    AssertEqual("First answer", viewModel.TaskWorkspace.ConversationTurns[0].AssistantResponse, "first answer retained");
+    AssertEqual("Follow-up question", viewModel.TaskWorkspace.ConversationTurns[1].UserPrompt, "follow-up retained");
+    AssertEqual("Second answer", viewModel.TaskWorkspace.ConversationTurns[1].AssistantResponse, "follow-up answer retained");
 
     await viewModel.DisposeAsync();
 }

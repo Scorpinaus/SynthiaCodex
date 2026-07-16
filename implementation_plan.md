@@ -636,6 +636,30 @@ Phase 5B optimizes and reorganizes existing behavior. It must not introduce Phas
 - App-server recovery and application shutdown do not leak processes or lose visible thread state.
 - The full behavioral suite, new performance regressions, build, and portable publish gates pass.
 
+## 12C. Phase 5C: Multi-turn Conversations
+
+**Status:** Complete - 15 July 2026. The detailed checklist is maintained in `phase_5c_multi_turn_conversations.md`.
+
+### Goals
+
+Make each Codex thread a durable multi-turn conversation while preserving turn-specific prompts, activity, responses, statuses, and timestamps.
+
+### Delivered architecture
+
+- Core owns bounded, app-neutral conversation-turn state and routes app-server notifications by thread and turn.
+- Infrastructure exposes typed `thread/read` history loading with `includeTurns: true` and parses canonical user/assistant messages.
+- Local settings persist deep-copied conversation snapshots and remain compatible with legacy single-response thread records.
+- The task surface renders a virtualized chronological transcript and retains a fixed composer for follow-up turns and active-turn guidance.
+- Thread switching, resume, fork, recovery, and shutdown preserve independent conversation histories.
+
+### Acceptance criteria
+
+- Follow-up prompts use the existing app-server thread rather than creating a new thread.
+- Responses and activity remain associated with the correct turn during streaming and completion races.
+- Restarted and resumed threads hydrate canonical history without duplicating local turns.
+- Long histories are bounded to 100 turns and 100 persisted activity records per turn.
+- The Release build, behavioral suite, and self-contained portable publish gates pass.
+
 ## 13. Phase 6: Skills, Plugins, MCP, and Settings
 
 ### Goals

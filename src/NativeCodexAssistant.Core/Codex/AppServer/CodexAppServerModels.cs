@@ -28,7 +28,15 @@ public sealed record CodexThreadResumeRequest(
     CodexSandbox Sandbox,
     string? Model = null);
 
-public sealed record CodexThreadResumeResult(string ThreadId);
+public sealed record CodexThreadResumeResult(
+    string ThreadId,
+    IReadOnlyList<CodexConversationTurnSnapshot>? Turns = null);
+
+public sealed record CodexThreadReadRequest(string ThreadId, bool IncludeTurns = true);
+
+public sealed record CodexThreadReadResult(
+    string ThreadId,
+    IReadOnlyList<CodexConversationTurnSnapshot> Turns);
 
 public sealed record CodexThreadListRequest(
     string? Cwd = null,

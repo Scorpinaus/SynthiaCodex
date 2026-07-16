@@ -660,6 +660,33 @@ Make each Codex thread a durable multi-turn conversation while preserving turn-s
 - Long histories are bounded to 100 turns and 100 persisted activity records per turn.
 - The Release build, behavioral suite, and self-contained portable publish gates pass.
 
+## 12D. Phase 5D: Project and Thread Navigation Consolidation
+
+**Status:** Complete - 16 July 2026. The detailed checklist is maintained in `phase_5d_project_thread_navigation.md`.
+
+### Goals
+
+Replace the separate recent-project and thread lists with one project-scoped hierarchy so a project's threads appear directly when that project is selected.
+
+### Delivered experience
+
+- Project rows own disclosure, thread counts, running summaries, and nested project-specific thread lists.
+- Selecting a project expands it, collapses the previous project, restores its active thread, and refreshes its workspace context.
+- A project-row `+` action creates a current-checkout thread immediately; isolated worktree creation remains in the project's advanced menu.
+- Selected-thread lifecycle actions are available from a compact contextual menu.
+- Project rows omit filesystem paths, and the Task/Changes workspace header shows only the selected thread title.
+- Selecting an existing project preserves its navigation position, and action-menu buttons use a dedicated high-contrast style.
+- Completed and idle status pills are omitted; running, failed, cancelled, and archived states remain visible.
+- Existing `RecentProjects` and path-keyed `ProjectThreads` storage remains backward compatible without migration.
+
+### Acceptance criteria
+
+- Projects and threads are presented as one hierarchy in recent-project order.
+- Thread selection restores the correct conversation, terminal, Git, and workspace context.
+- Empty projects and running background threads remain discoverable.
+- Light/dark theme and keyboard focus states remain readable.
+- All behavioral tests, the Release build, and the self-contained portable publish gates pass.
+
 ## 13. Phase 6: Skills, Plugins, MCP, and Settings
 
 ### Goals

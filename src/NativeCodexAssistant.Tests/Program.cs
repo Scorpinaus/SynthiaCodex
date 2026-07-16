@@ -86,6 +86,7 @@ var tests = new List<(string Name, Func<Task> Run)>
 };
 tests.AddRange(Phase5BBoundaryTests.All);
 tests.AddRange(Phase5CMultiTurnTests.All);
+tests.AddRange(Phase5DNavigationTests.All);
 
 var failures = 0;
 var testFilter = Environment.GetEnvironmentVariable("NCA_TEST_FILTER");
@@ -128,11 +129,14 @@ static Task TestRecentProjectsAsync()
 
     AssertEqual(10, settings.RecentProjects.Count, "recent project cap");
 
-    var duplicate = settings.RecentProjects[4].Path;
+    var duplicateIndex = 4;
+    var duplicate = settings.RecentProjects[duplicateIndex].Path;
+    var previousTimestamp = settings.RecentProjects[duplicateIndex].LastOpenedUtc;
     service.AddRecentProject(settings, duplicate);
 
     AssertEqual(10, settings.RecentProjects.Count, "dedupe preserves cap");
-    AssertEqual(duplicate, settings.RecentProjects[0].Path, "duplicate moves to top");
+    AssertEqual(duplicate, settings.RecentProjects[duplicateIndex].Path, "existing project keeps its position");
+    AssertTrue(settings.RecentProjects[duplicateIndex].LastOpenedUtc >= previousTimestamp, "existing project refreshes its timestamp in place");
     AssertEqual(1, settings.RecentProjects.Count(project => string.Equals(project.Path, duplicate, StringComparison.OrdinalIgnoreCase)), "duplicate count");
 
     return Task.CompletedTask;

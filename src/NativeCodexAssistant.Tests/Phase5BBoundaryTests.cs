@@ -141,6 +141,7 @@ internal static class Phase5BBoundaryTests
 
         Assert(viewModel.SelectedProjectName == "Repo", "project presentation owns project name");
         Assert(selected?.ThreadId == "thread-one", "selection callback is explicit");
+        Assert(viewModel.SelectedThreadTitle == "One", "workspace header presents only the selected thread title");
         Assert(viewModel.ActiveWorkspaceLabel == "Current checkout", "workspace presentation is derived locally");
         return Task.CompletedTask;
     }

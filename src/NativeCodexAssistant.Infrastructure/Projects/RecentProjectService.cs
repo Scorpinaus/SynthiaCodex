@@ -23,11 +23,24 @@ public sealed class RecentProjectService : IRecentProjectService
             name = fullPath;
         }
 
-        settings.RecentProjects = settings.RecentProjects
-            .Where(project => !string.Equals(project.Path, fullPath, StringComparison.OrdinalIgnoreCase))
-            .Prepend(new RecentProject(fullPath, name, DateTimeOffset.UtcNow))
-            .Take(MaxRecentProjects)
-            .ToList();
+        var updated = new RecentProject(fullPath, name, DateTimeOffset.UtcNow);
+        var existingIndex = settings.RecentProjects.FindIndex(project =>
+            string.Equals(project.Path, fullPath, StringComparison.OrdinalIgnoreCase));
+        if (existingIndex >= 0)
+        {
+            settings.RecentProjects[existingIndex] = updated;
+        }
+        else
+        {
+            settings.RecentProjects.Insert(0, updated);
+        }
+
+        if (settings.RecentProjects.Count > MaxRecentProjects)
+        {
+            settings.RecentProjects.RemoveRange(
+                MaxRecentProjects,
+                settings.RecentProjects.Count - MaxRecentProjects);
+        }
 
         return settings.RecentProjects;
     }

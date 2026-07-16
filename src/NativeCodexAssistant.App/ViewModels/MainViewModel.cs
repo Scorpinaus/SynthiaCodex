@@ -1634,6 +1634,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             threadService.Reset();
             SelectedThread = null;
+            RefreshProjectNavigation();
             return;
         }
 
@@ -1652,6 +1653,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(nameof(RawEvents));
             OnPropertyChanged(nameof(FinalResponse));
         }
+
+        RefreshProjectNavigation();
     }
 
     private ProjectThreadState? FindProjectThreadState()
@@ -1682,6 +1685,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         SelectedThread = ProjectThreads.FirstOrDefault(thread =>
             string.Equals(thread.ThreadId, selectedThreadId, StringComparison.Ordinal));
+        RefreshProjectNavigation();
     }
 
     private void HandleSelectedThreadChanged(ProjectThreadState? state)
@@ -1783,11 +1787,26 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void RefreshRecentProjects()
     {
-        RecentProjects.Clear();
+        ProjectWorkspace.RefreshRecentProjects(settings.RecentProjects);
+        RefreshProjectNavigation();
+    }
+
+    private void RefreshProjectNavigation()
+    {
+        var threads = new List<ProjectThreadState>();
         foreach (var project in settings.RecentProjects)
         {
-            RecentProjects.Add(project);
+            if (ProjectNavigationItemViewModel.PathsEqual(project.Path, SelectedProjectPath))
+            {
+                threads.AddRange(ProjectThreads);
+            }
+            else
+            {
+                threads.AddRange(threadStore.GetProjectThreads(settings, project.Path));
+            }
         }
+
+        ProjectWorkspace.RefreshProjectNavigation(settings.RecentProjects, threads);
     }
 
     private void RaiseComputedProperties()

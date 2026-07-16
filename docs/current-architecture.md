@@ -1,8 +1,8 @@
-# Native Codex Assistant: Current Architecture through Phase 5C
+# Native Codex Assistant: Current Architecture through Phase 5D
 
 **Recorded:** 15 July 2026  
-**Phase:** 5C - Multi-turn Conversations
-**Purpose:** Describe the current post-Phase-5C architecture while retaining the Phase 5B performance baseline.
+**Phase:** 5D - Project and Thread Navigation Consolidation
+**Purpose:** Describe the current post-Phase-5D architecture while retaining the Phase 5B performance baseline.
 
 ## System shape
 
@@ -43,6 +43,10 @@ This ordering deliberately keeps shell visibility independent of Codex app-serve
 App-server lifecycle is exposed to presentation through `IAppServerSessionCoordinator`. Its implementation owns `CodexAppServerClient`, process transport startup, reconnect serialization, batched notifications, typed app-server operations, health transitions, and disposal. Protocol request/response JSON and delta-payload batching remain in the Codex Core/Infrastructure boundary rather than WPF presentation.
 
 `MainWindow.xaml` is a 44-line shell that composes `ProjectThreadView`, `TaskView`, `TerminalView`, `GitView`, and `DetailsView`. Feature controls bind directly to their feature view models. Timeline, raw-event, thread, diagnostic, recent-project, and changed-file lists use recycling virtualization and content scrolling.
+
+`ProjectThreadViewModel` also owns the unified project/thread navigation projection. `ProjectNavigationItemViewModel` groups presentation threads by normalized project path, tracks project disclosure and running summaries, and preserves the existing active-project `Threads` collection as a compatibility surface. The persisted `RecentProjects` and `ProjectThreads` collections remain unchanged.
+
+`ProjectThreadView` renders project-name disclosure rows with their project-scoped threads and empty state; filesystem paths are retained for routing but omitted from the navigation UI. A project-row `+` creates a current-checkout thread immediately; isolated worktree creation is retained in the project's advanced menu. Only the selected project is expanded automatically. Selecting an existing project refreshes its recent timestamp in place rather than reordering the hierarchy. Completed and idle thread pills are intentionally suppressed; running, failed, cancelled, and archived states remain visible. Selected-thread lifecycle operations are exposed through high-contrast contextual action buttons. The workspace heading above Task and Changes contains only the selected thread title.
 
 `MainViewModel.cs` is 1,589 physical lines (down 36% from 2,473) and now owns shell coordination:
 
@@ -144,7 +148,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 | --- | --- | --- |
 | `MainViewModel.cs` | 1,589 physical lines | 36% smaller |
 | `MainWindow.xaml` | 44 physical lines plus five feature controls | 95% smaller shell; feature layout independently owned |
-| Behavioral suite | 72 passing tests | 13 coordinator, lifecycle, history, persistence, and multi-turn regressions added after the 59-test baseline |
+| Behavioral suite | 75 passing tests | 16 coordinator, lifecycle, history, persistence, multi-turn, and navigation regressions added after the 59-test baseline |
 | Startup shell/readiness | 541 ms / 759 ms | unchanged |
 | Codex long stream | 25,001 notifications, 2 UI batches, 20.71 MiB, 40.25 ms | same batching/allocation bound; synthetic CPU time varies locally |
 | Terminal storage/presentation | 39.06 MiB in 2.24 ms; 250,000 retained; 100 chunks to 1 UI update | faster storage run; same presentation bound |
@@ -152,7 +156,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 | Recovery | 27 ms | 5 ms slower locally, still well below interactive latency |
 | Active-resource shutdown | 2 ms | 10 ms faster locally |
 
-The Phase 5C Release solution build completed with zero warnings and errors and all 72 tests passed. The canonical self-contained `win-x64` portable folder was refreshed and launch-verified. SHA-256: executable `D67FC1D3E95E8E870BC5AA8646099D2D712B6E2753DA747F3ADB724EB0A6EC9B`; application DLL `8370BF25CDCCBDBAC1F03A8D565B6DF1C41C0BBC8779AB62B3A4A92589013269`.
+The Phase 5D Release solution build completed with zero warnings and errors and all 75 tests passed. The canonical self-contained `win-x64` portable folder was refreshed and launch-verified. SHA-256: executable `26BAECCA3862A5731EA5F20D5F4EE5869657B89B0B1A383C927F98D77F229447`; application DLL `537C40409C232ADFD8093DC9023D042B4574689350659747BAC3A686680BDFC3`.
 
 A no-build behavioral-runner invocation took approximately 12 seconds during the initial audit; this is a coarse runner-duration observation, not a product performance metric.
 
@@ -167,4 +171,4 @@ A no-build behavioral-runner invocation took approximately 12 seconds during the
 
 ## Phase boundary
 
-Phase 5C extends the completed Phase 5A/5B experience with durable multi-turn conversations. Skills, plugins, MCP, automations, and other Phase 6 work remain out of scope.
+Phase 5D consolidates project/thread navigation over the completed Phase 5A-5C experience. Skills, plugins, MCP, automations, and other Phase 6 work remain out of scope.

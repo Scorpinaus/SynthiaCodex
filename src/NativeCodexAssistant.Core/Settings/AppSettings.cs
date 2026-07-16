@@ -78,6 +78,7 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
             isArchived = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(ActivityLabel));
+            OnPropertyChanged(nameof(HasActionableStatus));
         }
     }
 
@@ -98,6 +99,7 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
             isRunning = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(ActivityLabel));
+            OnPropertyChanged(nameof(HasActionableStatus));
         }
     }
 
@@ -114,6 +116,7 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
             turnStatus = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(ActivityLabel));
+            OnPropertyChanged(nameof(HasActionableStatus));
         }
     }
 
@@ -168,6 +171,11 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
         : Title;
 
     public string ActivityLabel => IsArchived ? "Archived" : TurnStatus;
+
+    public bool HasActionableStatus =>
+        IsArchived ||
+        IsRunning ||
+        TurnStatus is "Failed" or "Cancelled" or "Canceled";
 
     public string WorkspaceModeLabel => Mode.ToLowerInvariant() switch
     {

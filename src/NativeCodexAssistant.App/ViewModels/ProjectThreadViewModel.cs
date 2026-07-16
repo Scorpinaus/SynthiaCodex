@@ -32,8 +32,31 @@ public sealed class ProjectThreadViewModel : ObservableObject
     {
         this.selectionChanged = selectionChanged;
         BrowseProjectCommand = new AsyncRelayCommand(browseProject);
-        OpenRecentProjectCommand = new AsyncRelayCommand(openRecentProject);
+        OpenRecentProjectCommand = new AsyncRelayCommand(async parameter =>
+        {
+            if (parameter is not string path || string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            var project = Projects.FirstOrDefault(item => ProjectNavigationItemViewModel.PathsEqual(item.Path, path));
+            if (ProjectNavigationItemViewModel.PathsEqual(SelectedProjectPath, path))
+            {
+                if (project is not null)
+                {
+                    project.IsExpanded = !project.IsExpanded;
+                }
+                return;
+            }
+
+            await openRecentProject(parameter).ConfigureAwait(true);
+            SynchronizeProjectSelection(expandSelected: true);
+        });
         NewThreadCommand = new AsyncRelayCommand(createThread, canManageThreads);
+        NewThreadForProjectCommand = new AsyncRelayCommand(parameter =>
+            CreateThreadForProjectAsync(parameter, "Current checkout", openRecentProject, createThread));
+        NewWorktreeThreadForProjectCommand = new AsyncRelayCommand(parameter =>
+            CreateThreadForProjectAsync(parameter, "New worktree", openRecentProject, createThread));
         ResumeThreadCommand = new AsyncRelayCommand(resumeThread, canUseSelectedThread);
         ForkThreadCommand = new AsyncRelayCommand(forkThread, canUseSelectedThread);
         ArchiveThreadCommand = new AsyncRelayCommand(archiveThread, canArchiveSelectedThread);
@@ -54,9 +77,13 @@ public sealed class ProjectThreadViewModel : ObservableObject
 
     public ObservableCollection<ProjectThreadState> Threads { get; } = [];
 
+    public ObservableCollection<ProjectNavigationItemViewModel> Projects { get; } = [];
+
     public ICommand BrowseProjectCommand { get; }
     public ICommand OpenRecentProjectCommand { get; }
     public ICommand NewThreadCommand { get; }
+    public ICommand NewThreadForProjectCommand { get; }
+    public ICommand NewWorktreeThreadForProjectCommand { get; }
     public ICommand ResumeThreadCommand { get; }
     public ICommand ForkThreadCommand { get; }
     public ICommand ArchiveThreadCommand { get; }
@@ -74,6 +101,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(SelectedProjectName));
                 OnPropertyChanged(nameof(ActiveWorkspacePath));
+                SynchronizeProjectSelection(expandSelected: true);
                 RaiseCommandStates();
             }
         }
@@ -99,6 +127,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(ActiveWorkspacePath));
                 OnPropertyChanged(nameof(ActiveWorkspaceLabel));
+                OnPropertyChanged(nameof(SelectedThreadTitle));
                 RaiseCommandStates();
                 selectionChanged(value);
             }
@@ -109,6 +138,8 @@ public sealed class ProjectThreadViewModel : ObservableObject
 
     public string ActiveWorkspaceLabel => SelectedThread?.WorkspaceModeLabel ?? "Current checkout";
 
+    public string SelectedThreadTitle => SelectedThread?.DisplayTitle ?? "No thread selected";
+
     public void SetSelectedProjectPath(string? path) => SelectedProjectPath = path;
 
     public void RefreshRecentProjects(IEnumerable<RecentProject> projects)
@@ -118,6 +149,40 @@ public sealed class ProjectThreadViewModel : ObservableObject
         {
             RecentProjects.Add(project);
         }
+    }
+
+    public void RefreshProjectNavigation(
+        IEnumerable<RecentProject> projects,
+        IEnumerable<ProjectThreadState> threads)
+    {
+        var projectList = projects.ToList();
+        var threadList = threads.ToList();
+        var existing = Projects.ToList();
+        var refreshed = new List<ProjectNavigationItemViewModel>();
+
+        foreach (var project in projectList)
+        {
+            var item = existing.FirstOrDefault(candidate =>
+                ProjectNavigationItemViewModel.PathsEqual(candidate.Path, project.Path))
+                ?? new ProjectNavigationItemViewModel(project);
+            item.Update(
+                project,
+                threadList.Where(thread => ProjectNavigationItemViewModel.PathsEqual(thread.ProjectPath, project.Path)));
+            refreshed.Add(item);
+        }
+
+        foreach (var removed in existing.Except(refreshed))
+        {
+            removed.Dispose();
+        }
+
+        Projects.Clear();
+        foreach (var item in refreshed)
+        {
+            Projects.Add(item);
+        }
+
+        SynchronizeProjectSelection(expandSelected: true);
     }
 
     public void ReplaceThreads(IEnumerable<ProjectThreadState> threads, string? selectedThreadId)
@@ -138,5 +203,47 @@ public sealed class ProjectThreadViewModel : ObservableObject
         {
             command.RaiseCanExecuteChanged();
         }
+    }
+
+    private void SynchronizeProjectSelection(bool expandSelected)
+    {
+        foreach (var project in Projects)
+        {
+            var selected = ProjectNavigationItemViewModel.PathsEqual(project.Path, SelectedProjectPath);
+            project.IsSelected = selected;
+            if (selected && expandSelected)
+            {
+                project.IsExpanded = true;
+            }
+            else if (!selected)
+            {
+                project.IsExpanded = false;
+            }
+        }
+    }
+
+    private async Task CreateThreadForProjectAsync(
+        object? parameter,
+        string workspaceMode,
+        Func<object?, Task> openRecentProject,
+        Func<Task> createThread)
+    {
+        if (parameter is not string path || string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        if (!ProjectNavigationItemViewModel.PathsEqual(SelectedProjectPath, path))
+        {
+            await openRecentProject(path).ConfigureAwait(true);
+        }
+
+        if (!ProjectNavigationItemViewModel.PathsEqual(SelectedProjectPath, path))
+        {
+            return;
+        }
+
+        NewThreadWorkspaceMode = workspaceMode;
+        await createThread().ConfigureAwait(true);
     }
 }

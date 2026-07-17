@@ -46,7 +46,7 @@ App-server lifecycle is exposed to presentation through `IAppServerSessionCoordi
 
 `ProjectThreadViewModel` also owns the unified project/thread navigation projection. `ProjectNavigationItemViewModel` groups presentation threads by normalized project path, tracks project disclosure and running summaries, and preserves the existing active-project `Threads` collection as a compatibility surface. The persisted `RecentProjects` and `ProjectThreads` collections remain unchanged.
 
-`ProjectThreadView` renders project-name disclosure rows with their project-scoped threads and empty state; filesystem paths are retained for routing but omitted from the navigation UI. A project-row `+` creates a current-checkout thread immediately; isolated worktree creation is retained in the project's advanced menu. Only the selected project is expanded automatically. Selecting an existing project refreshes its recent timestamp in place rather than reordering the hierarchy. Completed and idle thread pills are intentionally suppressed; running, failed, cancelled, and archived states remain visible. Selected-thread lifecycle operations are exposed through high-contrast contextual action buttons. The workspace heading above Task and Changes contains only the selected thread title.
+`ProjectThreadView` renders project-name disclosure rows with their project-scoped threads and empty state; filesystem paths are retained for routing but omitted from the navigation UI. A project-row `+` creates a current-checkout thread immediately; isolated worktree creation is retained in the project's advanced menu. Only the selected project is expanded automatically. Selecting an existing project refreshes its recent timestamp in place rather than reordering the hierarchy. Completed and idle thread pills are intentionally suppressed; running, failed, cancelled, and archived states remain visible. Selected-thread lifecycle operations are exposed through high-contrast contextual action buttons and fully theme-aware context-menu surfaces. The workspace heading above Task and Changes contains only the selected thread title.
 
 `MainViewModel.cs` is 1,589 physical lines (down 36% from 2,473) and now owns shell coordination:
 
@@ -156,7 +156,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 | Recovery | 27 ms | 5 ms slower locally, still well below interactive latency |
 | Active-resource shutdown | 2 ms | 10 ms faster locally |
 
-The Phase 5D Release solution build completed with zero warnings and errors and all 75 tests passed. The canonical self-contained `win-x64` portable folder was refreshed and launch-verified. SHA-256: executable `26BAECCA3862A5731EA5F20D5F4EE5869657B89B0B1A383C927F98D77F229447`; application DLL `537C40409C232ADFD8093DC9023D042B4574689350659747BAC3A686680BDFC3`.
+The Phase 5D Release solution build completed with zero warnings and errors and all 75 tests passed. The canonical self-contained `win-x64` portable folder was refreshed and launch-verified. SHA-256: executable `CA7497DDF1FAAC53C5AE968B8317974EAD5DC14109982E9CA56624DD1FB509A9`; application DLL `9111F7437E00AE840FC574977105CAF97E82115B4FC621F08A31B84BF2297F49`.
 
 A no-build behavioral-runner invocation took approximately 12 seconds during the initial audit; this is a coarse runner-duration observation, not a product performance metric.
 

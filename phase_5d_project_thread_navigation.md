@@ -31,6 +31,7 @@ Phase 5D consolidates the project and thread rails into one project-scoped navig
 - [x] Retain only running, failed, cancelled, and archived status pills.
 - [x] Preserve theme-aware button, selection, focus, and disabled-state resources.
 - [x] Give project/thread action menus a high-contrast theme-aware button style.
+- [x] Theme context-menu surfaces and menu-item hover/disabled states for dark mode.
 - [x] Add automation labels for the combined navigation and thread actions.
 
 ## Compatibility and verification

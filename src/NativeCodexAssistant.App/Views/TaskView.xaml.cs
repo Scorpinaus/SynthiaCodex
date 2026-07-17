@@ -133,7 +133,21 @@ public partial class TaskView : UserControl
             return;
         }
 
-        Dispatcher.BeginInvoke(() => ConversationList.ScrollIntoView(observedTurns[^1]), DispatcherPriority.Background);
+        var turns = observedTurns;
+        var latest = turns[^1];
+        Dispatcher.BeginInvoke(
+            () =>
+            {
+                if (!ReferenceEquals(observedTurns, turns) ||
+                    turns.Count == 0 ||
+                    !ReferenceEquals(turns[^1], latest))
+                {
+                    return;
+                }
+
+                ConversationList.ScrollIntoView(latest);
+            },
+            DispatcherPriority.Background);
     }
 
     private void OnConversationScrollChanged(object sender, ScrollChangedEventArgs e)

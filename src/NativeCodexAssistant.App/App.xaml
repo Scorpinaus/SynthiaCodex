@@ -7,6 +7,7 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="Themes/LightTheme.xaml" />
+                <ResourceDictionary Source="Themes/TransientSurfaces.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
         <FontFamily x:Key="UiFont">Segoe UI Variable Text, Segoe UI</FontFamily>
@@ -328,29 +329,6 @@
 
         <Style TargetType="{x:Type Menu}">
             <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
-        </Style>
-
-        <Style TargetType="{x:Type ContextMenu}">
-            <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
-            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource ButtonBorderBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="4" />
-        </Style>
-
-        <Style TargetType="{x:Type MenuItem}">
-            <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Padding" Value="10,7" />
-            <Style.Triggers>
-                <Trigger Property="IsHighlighted" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource ButtonHoverBrush}" />
-                    <Setter Property="Foreground" Value="{DynamicResource InkBrush}" />
-                </Trigger>
-                <Trigger Property="IsEnabled" Value="False">
-                    <Setter Property="Foreground" Value="{DynamicResource DisabledInkBrush}" />
-                </Trigger>
-            </Style.Triggers>
         </Style>
 
         <Style TargetType="{x:Type Separator}">

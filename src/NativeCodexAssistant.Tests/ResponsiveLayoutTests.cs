@@ -24,8 +24,11 @@ internal static class ResponsiveLayoutTests
     {
         var app = new Application();
         ConfigureTestResources(app.Resources);
+        ApplyDarkThemeForTest(app.Resources);
         try
         {
+            VerifyDarkLinkToolTip(app.Resources);
+            VerifyTextOnlyContextMenu(app.Resources);
             VerifyProjectNavigationWraps();
             VerifyTranscriptWrapsAndScrolls();
         }
@@ -34,6 +37,22 @@ internal static class ResponsiveLayoutTests
             app.Shutdown();
         }
     });
+
+    private static void ApplyDarkThemeForTest(ResourceDictionary resources)
+    {
+        resources.MergedDictionaries.Add(new ResourceDictionary
+        {
+            Source = new Uri(
+                "/NativeCodexAssistant.App;component/Themes/DarkTheme.xaml",
+                UriKind.Relative)
+        });
+        resources.MergedDictionaries.Add(new ResourceDictionary
+        {
+            Source = new Uri(
+                "/NativeCodexAssistant.App;component/Themes/TransientSurfaces.xaml",
+                UriKind.Relative)
+        });
+    }
 
     private static void ConfigureTestResources(ResourceDictionary resources)
     {
@@ -79,6 +98,86 @@ internal static class ResponsiveLayoutTests
         return style;
     }
 
+    private static void VerifyDarkLinkToolTip(ResourceDictionary resources)
+    {
+        var renderer = new MarkdownTextBlock { Markdown = "[Open documentation](https://example.com/docs)" };
+        var link = renderer.Inlines.OfType<Hyperlink>().Single();
+        var toolTip = link.ToolTip as ToolTip
+            ?? throw new InvalidOperationException("link URL is not hosted in a ToolTip control");
+        var style = resources[typeof(ToolTip)] as Style
+            ?? throw new InvalidOperationException("themed ToolTip style was not registered");
+
+        toolTip.Style = style;
+        toolTip.ApplyTemplate();
+
+        var foreground = toolTip.Foreground as SolidColorBrush
+            ?? throw new InvalidOperationException("tooltip foreground is not a solid theme brush");
+        var background = toolTip.Background as SolidColorBrush
+            ?? throw new InvalidOperationException("tooltip background is not a solid theme brush");
+        Assert(ContrastRatio(foreground.Color, background.Color) >= 4.5, "dark tooltip text has readable contrast");
+        var text = toolTip.Template.FindName("ToolTipText", toolTip) as TextBlock
+            ?? throw new InvalidOperationException("tooltip text presenter was not created");
+        Assert(text.TextWrapping == TextWrapping.Wrap, "long tooltip URLs wrap");
+    }
+
+    private static void VerifyTextOnlyContextMenu(ResourceDictionary resources)
+    {
+        var itemStyle = resources["TextOnlyContextMenuItem"] as Style
+            ?? throw new InvalidOperationException("text-only menu item style was not registered");
+        var contextMenuStyle = resources[typeof(ContextMenu)] as Style
+            ?? throw new InvalidOperationException("context menu style was not registered");
+        var itemContainerSetter = contextMenuStyle.Setters
+            .OfType<Setter>()
+            .SingleOrDefault(setter => setter.Property == ItemsControl.ItemContainerStyleProperty);
+
+        Assert(ReferenceEquals(itemContainerSetter?.Value, itemStyle), "context menus select the text-only item template");
+
+        var contextMenu = new ContextMenu { Style = contextMenuStyle };
+        var hostedItem = new MenuItem { Header = "Fork" };
+        contextMenu.Items.Add(hostedItem);
+        contextMenu.ApplyTemplate();
+        contextMenu.Measure(new Size(260, 120));
+        contextMenu.Arrange(new Rect(contextMenu.DesiredSize));
+        contextMenu.UpdateLayout();
+
+        Assert(contextMenu.OverridesDefaultStyle, "context menus do not use the stock icon-gutter template");
+        var contextMenuChrome = contextMenu.Template.FindName("ContextMenuChrome", contextMenu) as Border
+            ?? throw new InvalidOperationException("context menu themed surface was not created");
+        Assert(
+            ReferenceEquals(contextMenuChrome.Background, contextMenu.Background),
+            "context menu chrome paints the complete popup background");
+        Assert(
+            contextMenu.Template.FindName("ContextMenuItemsHost", contextMenu) is ItemsPresenter,
+            "context menu owns its complete items host");
+        Assert(ReferenceEquals(hostedItem.Style, itemStyle), "hosted menu items receive the text-only style");
+
+        var item = new MenuItem { Header = "Resume", Style = itemStyle };
+        item.ApplyTemplate();
+        item.Measure(new Size(240, 80));
+        item.Arrange(new Rect(item.DesiredSize));
+        item.UpdateLayout();
+
+        Assert(item.Template.FindName("MenuItemChrome", item) is Border, "menu item themed surface is present");
+        Assert(item.Template.FindName("MenuItemHeader", item) is ContentPresenter, "menu item header is present");
+        Assert(!FindVisualDescendants<Grid>(item).Any(), "text-only menu item has no icon gutter grid");
+    }
+
+    private static double ContrastRatio(Color first, Color second)
+    {
+        var lighter = Math.Max(RelativeLuminance(first), RelativeLuminance(second));
+        var darker = Math.Min(RelativeLuminance(first), RelativeLuminance(second));
+        return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    private static double RelativeLuminance(Color color) =>
+        0.2126 * LinearChannel(color.R) + 0.7152 * LinearChannel(color.G) + 0.0722 * LinearChannel(color.B);
+
+    private static double LinearChannel(byte channel)
+    {
+        var value = channel / 255d;
+        return value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
+    }
+
     private static void VerifyProjectNavigationWraps()
     {
         const string longProjectName = "ProjectNameThatMustWrapBecauseItIsMuchWiderThanTheNavigationColumn";
@@ -109,6 +208,20 @@ internal static class ResponsiveLayoutTests
         };
 
         PumpLayout(view);
+        var actionMenus = FindVisualDescendants<Button>(view)
+            .Select(button => button.ContextMenu)
+            .OfType<ContextMenu>()
+            .ToList();
+        Assert(actionMenus.Count >= 2, "project navigation creates project and thread action menus");
+        foreach (var actionMenu in actionMenus)
+        {
+            actionMenu.ApplyTemplate();
+            Assert(actionMenu.OverridesDefaultStyle, "navigation action menus use the owned popup chrome");
+            Assert(
+                actionMenu.Template.FindName("ContextMenuChrome", actionMenu) is Border,
+                "navigation action menus paint their complete popup background");
+        }
+
         var projectList = FindVisualDescendants<ListBox>(view).First();
         var scroller = FindVisualDescendant<ScrollViewer>(projectList)
             ?? throw new InvalidOperationException("project navigation scroll viewer was not created");

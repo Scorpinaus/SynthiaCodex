@@ -89,7 +89,7 @@ public sealed class MarkdownTextBlock : TextBlock
         var link = new Hyperlink(new Run(label))
         {
             NavigateUri = target,
-            ToolTip = target.AbsoluteUri
+            ToolTip = new ToolTip { Content = target.AbsoluteUri }
         };
         link.RequestNavigate += OnLinkRequestNavigate;
         Inlines.Add(link);

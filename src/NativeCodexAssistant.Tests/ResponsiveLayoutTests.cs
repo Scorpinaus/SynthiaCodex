@@ -20,22 +20,14 @@ internal static class ResponsiveLayoutTests
         ("responsive navigation and transcript constrain long content", ResponsiveViewsConstrainLongContentAsync)
     ];
 
-    private static Task ResponsiveViewsConstrainLongContentAsync() => RunOnStaAsync(() =>
+    private static Task ResponsiveViewsConstrainLongContentAsync() => WpfTestHost.RunAsync(() =>
     {
-        var app = new Application();
-        ConfigureTestResources(app.Resources);
-        ApplyDarkThemeForTest(app.Resources);
-        try
-        {
-            VerifyDarkLinkToolTip(app.Resources);
-            VerifyTextOnlyContextMenu(app.Resources);
-            VerifyProjectNavigationWraps();
-            VerifyTranscriptWrapsAndScrolls();
-        }
-        finally
-        {
-            app.Shutdown();
-        }
+        ConfigureTestResources(Application.Current.Resources);
+        ApplyDarkThemeForTest(Application.Current.Resources);
+        VerifyDarkLinkToolTip(Application.Current.Resources);
+        VerifyTextOnlyContextMenu(Application.Current.Resources);
+        VerifyProjectNavigationWraps();
+        VerifyTranscriptWrapsAndScrolls();
     });
 
     private static void ApplyDarkThemeForTest(ResourceDictionary resources)
@@ -334,26 +326,6 @@ internal static class ResponsiveLayoutTests
 
     private static T? FindVisualDescendant<T>(DependencyObject root)
         where T : DependencyObject => FindVisualDescendants<T>(root).FirstOrDefault();
-
-    private static Task RunOnStaAsync(Action action)
-    {
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                action();
-                completion.SetResult();
-            }
-            catch (Exception exception)
-            {
-                completion.SetException(exception);
-            }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        return completion.Task;
-    }
 
     private static void AssertNear(double expected, double actual, string message)
     {

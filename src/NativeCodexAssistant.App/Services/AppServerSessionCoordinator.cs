@@ -135,6 +135,15 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
     public Task<IReadOnlyList<CodexModelOption>> ListModelsAsync(CancellationToken cancellationToken = default) =>
         GetConnectedClient().ListModelsAsync(cancellationToken);
 
+    public Task<CodexAccountReadResult> ReadAccountAsync(
+        bool refreshToken = false,
+        CancellationToken cancellationToken = default) =>
+        GetConnectedClient().ReadAccountAsync(refreshToken, cancellationToken);
+
+    public Task<CodexAccountRateLimitsResult> ReadAccountRateLimitsAsync(
+        CancellationToken cancellationToken = default) =>
+        GetConnectedClient().ReadAccountRateLimitsAsync(cancellationToken);
+
     public void FlushNotifications() => notificationBatcher.Flush();
 
     public async ValueTask DisposeAsync()

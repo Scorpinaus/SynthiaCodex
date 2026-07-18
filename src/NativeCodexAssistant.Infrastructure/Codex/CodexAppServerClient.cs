@@ -200,6 +200,32 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         return models;
     }
 
+    public async Task<CodexAccountReadResult> ReadAccountAsync(
+        bool refreshToken = false,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var result = await SendRequestAsync(
+            "account/read",
+            new JsonObject
+            {
+                ["refreshToken"] = refreshToken
+            },
+            cancellationToken).ConfigureAwait(false) as JsonObject;
+        return CodexAccountProtocolParser.ParseAccount(result);
+    }
+
+    public async Task<CodexAccountRateLimitsResult> ReadAccountRateLimitsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var result = await SendRequestAsync(
+            "account/rateLimits/read",
+            parameters: null,
+            cancellationToken).ConfigureAwait(false) as JsonObject;
+        return CodexAccountProtocolParser.ParseRateLimits(result);
+    }
+
     public async Task<CodexThreadListResult> ListThreadsAsync(
         CodexThreadListRequest request,
         CancellationToken cancellationToken = default)
@@ -430,7 +456,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
     private async Task<JsonNode?> SendRequestAsync(
         string method,
-        JsonObject parameters,
+        JsonObject? parameters,
         CancellationToken cancellationToken)
     {
         var response = await SendRequestForResponseAsync(method, parameters, cancellationToken).ConfigureAwait(false);
@@ -440,7 +466,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
     private async Task<PendingResponse> SendRequestForResponseAsync(
         string method,
-        JsonObject parameters,
+        JsonObject? parameters,
         CancellationToken cancellationToken)
     {
         var id = AllocateRequestId();
@@ -453,9 +479,12 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         var message = new JsonObject
         {
             ["method"] = method,
-            ["id"] = id,
-            ["params"] = parameters
+            ["id"] = id
         };
+        if (parameters is not null)
+        {
+            message["params"] = parameters;
+        }
 
         try
         {

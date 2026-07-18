@@ -57,5 +57,9 @@ public interface IAppServerSessionCoordinator : IAsyncDisposable
 
     Task<IReadOnlyList<CodexModelOption>> ListModelsAsync(CancellationToken cancellationToken = default);
 
+    Task<CodexAccountReadResult> ReadAccountAsync(bool refreshToken = false, CancellationToken cancellationToken = default);
+
+    Task<CodexAccountRateLimitsResult> ReadAccountRateLimitsAsync(CancellationToken cancellationToken = default);
+
     void FlushNotifications();
 }

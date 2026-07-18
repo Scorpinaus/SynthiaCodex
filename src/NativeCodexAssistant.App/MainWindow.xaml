@@ -22,8 +22,7 @@
             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <Border Style="{StaticResource StatePill}" Margin="0,0,8,0" ToolTip="Codex app-server connection status"><StackPanel Orientation="Horizontal"><Ellipse Width="7" Height="7" Margin="0,0,6,0"><Ellipse.Style><Style TargetType="Ellipse"><Setter Property="Fill" Value="{DynamicResource MutedInkBrush}"/><Style.Triggers><DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex connected"><Setter Property="Fill" Value="{DynamicResource SuccessBrush}"/></DataTrigger><DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex connecting"><Setter Property="Fill" Value="{DynamicResource WarningBrush}"/></DataTrigger><DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex reconnecting"><Setter Property="Fill" Value="{DynamicResource WarningBrush}"/></DataTrigger><DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex unavailable"><Setter Property="Fill" Value="{DynamicResource DangerBrush}"/></DataTrigger></Style.Triggers></Style></Ellipse.Style></Ellipse><TextBlock Text="{Binding TaskWorkspace.AppServerHealth}" FontSize="11" VerticalAlignment="Center"/></StackPanel></Border>
                 <Button Content="Terminal" Command="{Binding Terminal.ToggleCommand}" Style="{StaticResource HeaderButton}" ToolTip="Open or hide Terminal (Ctrl+Shift+T)"/>
-                <Button Content="Details" Command="{Binding ToggleDetailsPaneCommand}" Style="{StaticResource HeaderButton}" ToolTip="Open diagnostics and account details (Ctrl+Shift+D)"/>
-                <ComboBox ItemsSource="{Binding ThemeOptions}" SelectedItem="{Binding SelectedTheme, UpdateSourceTrigger=PropertyChanged}" Width="88" Margin="6,0"/>
+                <Button Content="Settings" Command="{Binding OpenSettingsCommand}" Style="{StaticResource HeaderButton}" ToolTip="Open settings and diagnostics (Ctrl+Shift+D)"/>
                 <Button Content="Exit" Command="{Binding ExitApplicationCommand}" Style="{StaticResource HeaderButton}"/>
             </StackPanel>
         </Grid></Border>
@@ -43,6 +42,6 @@
             </Grid>
             <views:DetailsView Grid.Column="2" Visibility="{Binding IsDetailsPaneOpen, Converter={StaticResource BooleanToVisibilityConverter}}"/>
         </Grid>
-        <Border Grid.Row="2" Background="{DynamicResource StatusBarBrush}"><Grid Margin="12,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center" FontSize="11"/><TextBlock Grid.Column="1" Text="Ctrl+O project  ·  Ctrl+Enter run  ·  Ctrl+B navigation  ·  Ctrl+Shift+D details" VerticalAlignment="Center" Foreground="{DynamicResource MutedInkBrush}" FontSize="10"/></Grid></Border>
+        <Border Grid.Row="2" Background="{DynamicResource StatusBarBrush}"><Grid Margin="12,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center" FontSize="11"/><TextBlock Grid.Column="1" Text="Ctrl+O project  ·  Ctrl+Enter run  ·  Ctrl+B navigation  ·  Ctrl+Shift+D settings" VerticalAlignment="Center" Foreground="{DynamicResource MutedInkBrush}" FontSize="10"/></Grid></Border>
     </Grid>
 </Window>

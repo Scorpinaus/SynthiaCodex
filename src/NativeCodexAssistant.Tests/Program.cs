@@ -102,6 +102,7 @@ var tests = new List<(string Name, Func<Task> Run)>
 tests.AddRange(Phase5BBoundaryTests.All);
 tests.AddRange(Phase5CMultiTurnTests.All);
 tests.AddRange(Phase5DNavigationTests.All);
+tests.AddRange(AccountFeatureTests.All);
 tests.AddRange(ResponsiveLayoutTests.All);
 tests.AddRange(MarkdownLinkTests.All);
 

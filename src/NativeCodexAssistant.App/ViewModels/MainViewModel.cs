@@ -48,6 +48,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand removeWorktreeCommand;
     private readonly RelayCommand toggleProjectRailCommand;
     private readonly RelayCommand toggleDetailsPaneCommand;
+    private readonly RelayCommand openSettingsCommand;
 
     private AppSettings settings = new();
     private CodexInstallation currentCodex => DiagnosticsViewModel.Installation;
@@ -198,6 +199,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ToggleTerminalCommand = Terminal.ToggleCommand;
         ToggleProjectRailCommand = toggleProjectRailCommand = new RelayCommand(ToggleProjectRail, () => !IsShuttingDown);
         ToggleDetailsPaneCommand = toggleDetailsPaneCommand = new RelayCommand(ToggleDetailsPane, () => !IsShuttingDown);
+        OpenSettingsCommand = openSettingsCommand = new RelayCommand(OpenSettings, () => !IsShuttingDown);
+        Account = new AccountViewModel(
+            cancellationToken => appServerSessionCoordinator.ReadAccountAsync(false, cancellationToken),
+            appServerSessionCoordinator.ReadAccountRateLimitsAsync,
+            OpenSettings,
+            SignInChatGptCommand,
+            SignOutCommand,
+            logger);
     }
 
     public event EventHandler? CloseRequested;
@@ -219,6 +228,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public TerminalViewModel Terminal { get; }
 
     public DiagnosticsViewModel DiagnosticsViewModel { get; }
+
+    public AccountViewModel Account { get; }
 
     public GitViewModel Git { get; }
 
@@ -299,6 +310,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public ICommand ToggleProjectRailCommand { get; }
 
     public ICommand ToggleDetailsPaneCommand { get; }
+
+    public ICommand OpenSettingsCommand { get; }
 
     public string? SelectedProjectPath
     {
@@ -513,6 +526,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 Terminal.RaiseCommandStates();
                 toggleProjectRailCommand.RaiseCanExecuteChanged();
                 toggleDetailsPaneCommand.RaiseCanExecuteChanged();
+                openSettingsCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -929,6 +943,19 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         settings.IsProjectRailOpen = IsProjectRailOpen;
         settings.IsDetailsPaneOpen = IsDetailsPaneOpen;
+        _ = SaveLayoutSelectionAsync();
+    }
+
+    private void OpenSettings()
+    {
+        IsDetailsPaneOpen = true;
+        if (viewportWidth < 1000)
+        {
+            IsProjectRailOpen = false;
+        }
+
+        settings.IsProjectRailOpen = IsProjectRailOpen;
+        settings.IsDetailsPaneOpen = true;
         _ = SaveLayoutSelectionAsync();
     }
 
@@ -1436,6 +1463,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             activeThreadLoaded = false;
             activeTurnId = null;
             IsTurnRunning = false;
+            Account.MarkDisconnected();
             AppServerHealth = "Codex reconnecting";
             StatusMessage = $"Codex app-server stopped: {args.Exception.Message}. The next action will restart it.";
         }
@@ -1457,15 +1485,22 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void OnAppServerStateChanged(object? sender, AppServerSessionStateChangedEventArgs args)
     {
-        void ApplyState() => AppServerHealth = args.State switch
+        void ApplyState()
         {
-            AppServerSessionState.Connecting => "Codex connecting",
-            AppServerSessionState.Connected => "Codex connected",
-            AppServerSessionState.Reconnecting => "Codex reconnecting",
-            AppServerSessionState.Unavailable => "Codex unavailable",
-            AppServerSessionState.Disposed => "Codex stopped",
-            _ => "Codex idle"
-        };
+            AppServerHealth = args.State switch
+            {
+                AppServerSessionState.Connecting => "Codex connecting",
+                AppServerSessionState.Connected => "Codex connected",
+                AppServerSessionState.Reconnecting => "Codex reconnecting",
+                AppServerSessionState.Unavailable => "Codex unavailable",
+                AppServerSessionState.Disposed => "Codex stopped",
+                _ => "Codex idle"
+            };
+            if (args.State == AppServerSessionState.Connected && Account.IsActive && Account.IsStale)
+            {
+                _ = Account.RefreshAsync(appServerWarmUpCancellation.Token);
+            }
+        }
 
         if (synchronizationContext is null || ReferenceEquals(SynchronizationContext.Current, synchronizationContext))
         {
@@ -1490,6 +1525,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void ApplyNotification(AppServerNotification notification)
     {
+        if (Account.TryApplyNotification(notification))
+        {
+            return;
+        }
+
         var routedThreadId = threadWorkspace.ApplyNotification(notification);
         if (string.IsNullOrWhiteSpace(routedThreadId))
         {

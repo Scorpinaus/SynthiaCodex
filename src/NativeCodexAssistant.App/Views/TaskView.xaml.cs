@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using System.Windows.Threading;
 using NativeCodexAssistant.App.ViewModels;
 using NativeCodexAssistant.Core.Codex.AppServer;
@@ -11,8 +12,11 @@ namespace NativeCodexAssistant.App.Views;
 
 public partial class TaskView : UserControl
 {
+    private const double FollowLatestThreshold = 24;
+
     private ObservableCollection<CodexConversationTurn>? observedTurns;
     private TaskViewModel? taskViewModel;
+    private ScrollViewer? conversationScroller;
     private bool followLatest = true;
 
     public TaskView()
@@ -140,25 +144,33 @@ public partial class TaskView : UserControl
             {
                 if (!ReferenceEquals(observedTurns, turns) ||
                     turns.Count == 0 ||
-                    !ReferenceEquals(turns[^1], latest))
+                    !ReferenceEquals(turns[^1], latest) ||
+                    !followLatest)
                 {
                     return;
                 }
 
-                ConversationList.ScrollIntoView(latest);
+                conversationScroller ??= FindVisualDescendant<ScrollViewer>(ConversationList);
+                if (conversationScroller is null)
+                {
+                    ConversationList.ScrollIntoView(latest);
+                    return;
+                }
+
+                conversationScroller.ScrollToVerticalOffset(conversationScroller.ScrollableHeight);
             },
             DispatcherPriority.Background);
     }
 
     private void OnConversationScrollChanged(object sender, ScrollChangedEventArgs e)
     {
-        if (e.ExtentHeightChange != 0 && followLatest)
+        if ((e.ExtentHeightChange != 0 || e.ViewportHeightChange != 0) && followLatest)
         {
             FollowLatest();
             return;
         }
 
-        followLatest = e.VerticalOffset >= e.ExtentHeight - e.ViewportHeight - 24;
+        followLatest = e.VerticalOffset >= e.ExtentHeight - e.ViewportHeight - FollowLatestThreshold;
         JumpLatestButton.Visibility = followLatest ? Visibility.Collapsed : Visibility.Visible;
     }
 
@@ -167,5 +179,26 @@ public partial class TaskView : UserControl
         followLatest = true;
         JumpLatestButton.Visibility = Visibility.Collapsed;
         FollowLatest();
+    }
+
+    private static T? FindVisualDescendant<T>(DependencyObject root)
+        where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is T match)
+            {
+                return match;
+            }
+
+            var descendant = FindVisualDescendant<T>(child);
+            if (descendant is not null)
+            {
+                return descendant;
+            }
+        }
+
+        return null;
     }
 }

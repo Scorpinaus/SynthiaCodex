@@ -8,7 +8,19 @@
         <Border Style="{StaticResource Card}" AutomationProperties.Name="Task transcript">
             <Grid>
             <TextBlock Text="Start a conversation by describing a task below." Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding TaskWorkspace.HasConversation, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
-            <ListBox x:Name="ConversationList" ItemsSource="{Binding TaskWorkspace.ConversationTurns}" BorderThickness="0" Background="Transparent" Padding="2" VirtualizingStackPanel.IsVirtualizing="True" VirtualizingStackPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True" ScrollViewer.ScrollChanged="OnConversationScrollChanged" AutomationProperties.Name="Multi-turn conversation">
+            <ListBox x:Name="ConversationList"
+                     ItemsSource="{Binding TaskWorkspace.ConversationTurns}"
+                     BorderThickness="0"
+                     Background="Transparent"
+                     Padding="2"
+                     VirtualizingStackPanel.IsVirtualizing="True"
+                     VirtualizingStackPanel.VirtualizationMode="Recycling"
+                     VirtualizingPanel.ScrollUnit="Pixel"
+                     ScrollViewer.CanContentScroll="True"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     ScrollViewer.ScrollChanged="OnConversationScrollChanged"
+                     AutomationProperties.Name="Multi-turn conversation">
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="ListBoxItem">
                         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -55,7 +67,7 @@
                                                         <Grid>
                                                             <Grid.ColumnDefinitions><ColumnDefinition Width="8"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                             <Ellipse Width="7" Height="7" Fill="{DynamicResource SignalBrush}" VerticalAlignment="Top" Margin="0,5,0,0"/>
-                                                            <StackPanel Grid.Column="2"><TextBlock Text="{Binding Title}" Style="{StaticResource ConversationActivityTitleText}"/><TextBlock Text="{Binding Detail}" Style="{StaticResource ConversationActivityDetailText}" Margin="0,2,0,0"/></StackPanel>
+                                                            <StackPanel Grid.Column="2"><TextBlock Text="{Binding Title}" Style="{StaticResource ConversationActivityTitleText}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource ConversationActivityDetailText}" Margin="0,2,0,0"/></StackPanel>
                                                             <TextBlock Grid.Column="3" Text="{Binding CategoryLabel}" Style="{StaticResource ConversationMetadataText}" Margin="8,2,0,0"/>
                                                         </Grid>
                                                     </Border>

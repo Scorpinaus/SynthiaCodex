@@ -102,6 +102,7 @@ var tests = new List<(string Name, Func<Task> Run)>
 tests.AddRange(Phase5BBoundaryTests.All);
 tests.AddRange(Phase5CMultiTurnTests.All);
 tests.AddRange(Phase5DNavigationTests.All);
+tests.AddRange(ResponsiveLayoutTests.All);
 
 var failures = 0;
 var testFilter = Environment.GetEnvironmentVariable("NCA_TEST_FILTER");

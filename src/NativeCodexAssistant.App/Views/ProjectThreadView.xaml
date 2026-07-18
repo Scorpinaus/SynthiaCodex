@@ -32,7 +32,9 @@
                      HorizontalContentAlignment="Stretch"
                      VirtualizingStackPanel.IsVirtualizing="True"
                      VirtualizingStackPanel.VirtualizationMode="Recycling"
-                     ScrollViewer.CanContentScroll="True">
+                     ScrollViewer.CanContentScroll="True"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto">
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="ListBoxItem">
                         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -78,7 +80,7 @@
                                                    Text="{Binding Name}"
                                                    FontWeight="SemiBold"
                                                    VerticalAlignment="Center"
-                                                   TextTrimming="CharacterEllipsis"/>
+                                                   TextWrapping="Wrap"/>
                                         <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="8,0,0,0">
                                             <TextBlock Text="{Binding ThreadCount}" Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Right"/>
                                             <TextBlock Text="{Binding RunningSummary}" Foreground="{DynamicResource WarningBrush}" FontSize="9" HorizontalAlignment="Right"
@@ -144,8 +146,8 @@
                                                     <ColumnDefinition Width="Auto"/>
                                                 </Grid.ColumnDefinitions>
                                                 <StackPanel>
-                                                    <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                                    <TextBlock Text="{Binding WorkspaceModeLabel}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10"/>
+                                                    <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                    <TextBlock Text="{Binding WorkspaceModeLabel}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10" TextWrapping="Wrap"/>
                                                 </StackPanel>
                                                 <Border Grid.Column="1"
                                                         Style="{StaticResource StatePill}"

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Windows.Input;
+using NativeCodexAssistant.App.Services;
 using NativeCodexAssistant.Core.Codex.AppServer;
 
 namespace NativeCodexAssistant.App.ViewModels;
@@ -10,6 +11,7 @@ public sealed class TaskViewModel : ObservableObject
     private readonly AsyncRelayCommand cancelCommand;
     private readonly AsyncRelayCommand loadModelsCommand;
     private readonly AsyncRelayCommand steerCommand;
+    private readonly RelayCommand openExternalUriCommand;
     private CodexThreadService threadService = new();
     private string prompt = string.Empty;
     private string submittedPrompt = string.Empty;
@@ -25,12 +27,22 @@ public sealed class TaskViewModel : ObservableObject
         Func<Task> loadModels,
         Func<Task> steer,
         Func<bool> canCancel,
-        Func<bool> canSteer)
+        Func<bool> canSteer,
+        Action<Uri>? openExternalUri = null)
     {
         SubmitCommand = submitCommand = new AsyncRelayCommand(submit);
         CancelCommand = cancelCommand = new AsyncRelayCommand(cancel, canCancel);
         LoadModelsCommand = loadModelsCommand = new AsyncRelayCommand(loadModels);
         SteerCommand = steerCommand = new AsyncRelayCommand(steer, canSteer);
+        OpenExternalUriCommand = openExternalUriCommand = new RelayCommand(
+            parameter =>
+            {
+                if (parameter is Uri uri && ExternalUriPolicy.IsSupported(uri))
+                {
+                    (openExternalUri ?? (_ => { }))(uri);
+                }
+            },
+            parameter => parameter is Uri uri && ExternalUriPolicy.IsSupported(uri));
     }
 
     public ObservableCollection<CodexTimelineItem> TimelineItems => threadService.TimelineItems;
@@ -56,6 +68,7 @@ public sealed class TaskViewModel : ObservableObject
     public ICommand CancelCommand { get; }
     public ICommand LoadModelsCommand { get; }
     public ICommand SteerCommand { get; }
+    public ICommand OpenExternalUriCommand { get; }
 
     public CodexThreadService ThreadService => threadService;
 
@@ -161,5 +174,6 @@ public sealed class TaskViewModel : ObservableObject
         cancelCommand.RaiseCanExecuteChanged();
         loadModelsCommand.RaiseCanExecuteChanged();
         steerCommand.RaiseCanExecuteChanged();
+        openExternalUriCommand.RaiseCanExecuteChanged();
     }
 }

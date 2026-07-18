@@ -6,6 +6,8 @@
     <SolidColorBrush x:Key="PanelBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="RailBrush" Color="#E9EFEA" />
     <SolidColorBrush x:Key="SignalBrush" Color="#2D6CDF" />
+    <SolidColorBrush x:Key="LinkBrush" Color="#1456B8" />
+    <SolidColorBrush x:Key="LinkHoverBrush" Color="#0E4290" />
     <SolidColorBrush x:Key="CopperBrush" Color="#B76135" />
     <SolidColorBrush x:Key="LineBrush" Color="#D9E0DB" />
     <SolidColorBrush x:Key="FieldBrush" Color="#FFFFFF" />

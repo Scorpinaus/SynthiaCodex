@@ -103,6 +103,7 @@ tests.AddRange(Phase5BBoundaryTests.All);
 tests.AddRange(Phase5CMultiTurnTests.All);
 tests.AddRange(Phase5DNavigationTests.All);
 tests.AddRange(ResponsiveLayoutTests.All);
+tests.AddRange(MarkdownLinkTests.All);
 
 var failures = 0;
 var testFilter = Environment.GetEnvironmentVariable("NCA_TEST_FILTER");
@@ -2748,6 +2749,10 @@ internal sealed class FakeUserInteractionService : IUserInteractionService
     public bool ConfirmDestructiveAction(string title, string message) => true;
 
     public void OpenInEditor(string path)
+    {
+    }
+
+    public void OpenExternalUri(Uri uri)
     {
     }
 

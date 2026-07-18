@@ -39,6 +39,20 @@ public sealed class WpfUserInteractionService : IUserInteractionService
         }
     }
 
+    public void OpenExternalUri(Uri uri)
+    {
+        if (!ExternalUriPolicy.IsSupported(uri))
+        {
+            throw new InvalidOperationException("Only HTTP and HTTPS links can be opened.");
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = uri.AbsoluteUri,
+            UseShellExecute = true
+        });
+    }
+
     public void RevealInExplorer(string path)
     {
         var startInfo = new ProcessStartInfo

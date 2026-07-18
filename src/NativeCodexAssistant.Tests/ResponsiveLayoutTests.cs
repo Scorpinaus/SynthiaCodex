@@ -2,8 +2,10 @@ using System.Collections.ObjectModel;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Threading;
+using NativeCodexAssistant.App.Controls;
 using NativeCodexAssistant.App.Services;
 using NativeCodexAssistant.App.ViewModels;
 using NativeCodexAssistant.App.Views;
@@ -120,7 +122,7 @@ internal static class ResponsiveLayoutTests
 
     private static void VerifyTranscriptWrapsAndScrolls()
     {
-        var longLine = string.Join(' ', Enumerable.Repeat("A responsive assistant response must stay inside the transcript column.", 18));
+        var longLine = string.Join(' ', Enumerable.Repeat("A responsive assistant response with [release notes](https://example.com/releases) must stay inside the transcript column.", 18));
         var tallResponse = string.Join(Environment.NewLine, Enumerable.Repeat(longLine, 12));
         var turns = new ObservableCollection<CodexConversationTurn>
         {
@@ -143,12 +145,13 @@ internal static class ResponsiveLayoutTests
         PumpLayout(view);
         var scroller = FindVisualDescendant<ScrollViewer>(conversationList)
             ?? throw new InvalidOperationException("conversation scroll viewer was not created");
-        var responseText = FindVisualDescendants<TextBlock>(conversationList)
-            .Single(block => block.Text == tallResponse);
+        var responseText = FindVisualDescendants<MarkdownTextBlock>(conversationList)
+            .Single(block => block.Markdown == tallResponse);
 
         AssertNear(0, scroller.ScrollableWidth, "transcript has no horizontal scroll extent");
         Assert(responseText.ActualWidth <= scroller.ViewportWidth + 0.5, "assistant response stays within transcript viewport");
         Assert(responseText.ActualHeight > responseText.FontSize * 3, "assistant response wraps to multiple lines");
+        Assert(responseText.Inlines.OfType<Hyperlink>().Any(), "assistant response renders a clickable markdown link");
         Assert(
             VirtualizingPanel.GetScrollUnit(conversationList) == ScrollUnit.Pixel,
             "transcript uses pixel scrolling for variable-height turns");

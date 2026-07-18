@@ -135,7 +135,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             LoadModelOptionsAsync,
             SteerTurnAsync,
             CanCancelTurn,
-            CanSteerTurn);
+            CanSteerTurn,
+            userInteractionService.OpenExternalUri);
         TaskWorkspace.PropertyChanged += (_, args) => RelayTaskPropertyChanged(args.PropertyName);
 
         ProjectWorkspace = new ProjectThreadViewModel(

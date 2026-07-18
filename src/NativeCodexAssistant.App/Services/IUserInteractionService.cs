@@ -6,5 +6,7 @@ public interface IUserInteractionService
 
     void OpenInEditor(string path);
 
+    void OpenExternalUri(Uri uri);
+
     void RevealInExplorer(string path);
 }

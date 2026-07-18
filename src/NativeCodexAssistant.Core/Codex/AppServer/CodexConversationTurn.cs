@@ -102,14 +102,14 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
         {
             TurnId = snapshot.TurnId,
             UserPrompt = snapshot.UserPrompt,
-            AssistantResponse = snapshot.AssistantResponse,
+            AssistantResponse = UnicodeTextNormalizer.RepairLegacyMojibake(snapshot.AssistantResponse),
             Status = snapshot.Status,
             StartedAt = snapshot.StartedAt,
             CompletedAt = snapshot.CompletedAt
         };
         foreach (var item in snapshot.Activity)
         {
-            turn.Activity.Add(item);
+            turn.Activity.Add(UnicodeTextNormalizer.RepairLegacyMojibake(item));
         }
 
         return turn;

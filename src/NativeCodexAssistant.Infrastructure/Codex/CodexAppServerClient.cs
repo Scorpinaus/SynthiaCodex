@@ -748,7 +748,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                             var message = ReadString(item, "text");
                             if (!string.IsNullOrWhiteSpace(message))
                             {
-                                assistantMessages.Add(message);
+                                assistantMessages.Add(UnicodeTextNormalizer.RepairLegacyMojibake(message));
                             }
                             break;
                     }

@@ -92,7 +92,7 @@ Submitting a follow-up calls `turn/start` with the existing thread ID. A pending
 
 Thread selection and resume use typed `thread/read`/resume results with `includeTurns: true`. Canonical app-server user and assistant messages are reconciled with local turn snapshots, while richer local activity remains attached to its matching turn. If the server cannot provide history, the local snapshot remains usable. Legacy records containing only a preview and final response synthesize one visible completed turn.
 
-`TaskView` presents the collection as a recycling-virtualized chronological transcript. It follows live output while the viewport is near the bottom, exposes a Jump to latest action after manual scrolling, collapses historical activity, and keeps the composer fixed. The first action is labelled Run task; subsequent submissions are labelled Send follow-up. During an active turn, the same composer becomes the guidance input.
+`TaskView` presents the collection as a recycling-virtualized chronological transcript. Each turn has a distinct outer boundary and separate user, activity, and assistant surfaces, so adjacent turns remain visually independent while scrolling. The app-server stream is retained in bounded raw-event and diagnostic collections, while visible turn activity is an allowlisted projection of commentary, commands, file changes, tools, searches, plans, collaboration, guidance, and actionable errors. Stable item keys consolidate start, progress, and completion into one row; lifecycle, token, output-delta, reasoning, final-answer, and unknown notifications remain diagnostics-only. It follows live output while the viewport is near the bottom, exposes a Jump to latest action after manual scrolling, hides empty activity, collapses historical activity, and keeps the composer fixed. The first action is labelled Run task; subsequent submissions are labelled Send follow-up. During an active turn, the same composer becomes the guidance input.
 
 ### Terminal
 
@@ -148,7 +148,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 | --- | --- | --- |
 | `MainViewModel.cs` | 1,589 physical lines | 36% smaller |
 | `MainWindow.xaml` | 44 physical lines plus five feature controls | 95% smaller shell; feature layout independently owned |
-| Behavioral suite | 75 passing tests | 16 coordinator, lifecycle, history, persistence, multi-turn, and navigation regressions added after the 59-test baseline |
+| Behavioral suite | 82 passing tests | 23 coordinator, lifecycle, history, persistence, multi-turn, selective-activity, presentation-state, and navigation regressions added after the 59-test baseline |
 | Startup shell/readiness | 541 ms / 759 ms | unchanged |
 | Codex long stream | 25,001 notifications, 2 UI batches, 20.71 MiB, 40.25 ms | same batching/allocation bound; synthetic CPU time varies locally |
 | Terminal storage/presentation | 39.06 MiB in 2.24 ms; 250,000 retained; 100 chunks to 1 UI update | faster storage run; same presentation bound |

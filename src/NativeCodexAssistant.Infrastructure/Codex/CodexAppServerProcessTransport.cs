@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Text;
 using NativeCodexAssistant.Core.Codex.AppServer;
 using NativeCodexAssistant.Core.Logging;
 
@@ -7,6 +8,10 @@ namespace NativeCodexAssistant.Infrastructure.Codex;
 
 public sealed class CodexAppServerProcessTransport(string executablePath, IAppLogger logger) : IAppServerTransport
 {
+    private static readonly Encoding ProtocolEncoding = new UTF8Encoding(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
+
     private Process? process;
     private Task? stderrTask;
 
@@ -78,6 +83,14 @@ public sealed class CodexAppServerProcessTransport(string executablePath, IAppLo
         catch (InvalidOperationException)
         {
         }
+        catch (DecoderFallbackException ex)
+        {
+            logger.Log(
+                AppLogLevel.Error,
+                "codex_app_server_stderr_invalid_utf8",
+                "Codex app-server stderr contained invalid UTF-8.",
+                exception: ex);
+        }
         catch (Exception ex)
         {
             logger.Log(AppLogLevel.Warning, "codex_app_server_stop_failed", "Stopping codex app-server failed.", exception: ex);
@@ -139,6 +152,9 @@ public sealed class CodexAppServerProcessTransport(string executablePath, IAppLo
             RedirectStandardError = true,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
+            StandardErrorEncoding = ProtocolEncoding,
+            StandardInputEncoding = ProtocolEncoding,
+            StandardOutputEncoding = ProtocolEncoding,
             UseShellExecute = false,
             CreateNoWindow = true
         };

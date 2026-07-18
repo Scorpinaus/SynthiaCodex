@@ -27,6 +27,52 @@
             <Setter Property="CornerRadius" Value="10" />
             <Setter Property="Padding" Value="8,3" />
         </Style>
+        <Style x:Key="ConversationTurnCard" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource ConversationTurnBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="14" />
+        </Style>
+        <Style x:Key="ConversationMessageSurface" TargetType="Border">
+            <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="12" />
+        </Style>
+        <Style x:Key="ConversationUserSurface" TargetType="Border" BasedOn="{StaticResource ConversationMessageSurface}">
+            <Setter Property="Background" Value="{DynamicResource ConversationUserBrush}" />
+        </Style>
+        <Style x:Key="ConversationAssistantSurface" TargetType="Border" BasedOn="{StaticResource ConversationMessageSurface}">
+            <Setter Property="Background" Value="{DynamicResource ConversationAssistantBrush}" />
+        </Style>
+        <Style x:Key="ConversationActivitySurface" TargetType="Border" BasedOn="{StaticResource ConversationMessageSurface}">
+            <Setter Property="Background" Value="{DynamicResource ConversationActivityBrush}" />
+            <Setter Property="Padding" Value="10,8" />
+        </Style>
+        <Style x:Key="ConversationBodyText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="LineHeight" Value="22" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style x:Key="ConversationRoleText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="ConversationMetadataText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+        <Style x:Key="ConversationActivityTitleText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="ConversationActivityDetailText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource MutedInkBrush}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="LineHeight" Value="18" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
 
         <ControlTemplate x:Key="StandardButtonTemplate" TargetType="{x:Type Button}">
             <Border x:Name="ButtonChrome"

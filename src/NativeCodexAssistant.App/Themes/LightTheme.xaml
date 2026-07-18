@@ -28,4 +28,8 @@
     <SolidColorBrush x:Key="WarningBrush" Color="#B7791F" />
     <SolidColorBrush x:Key="DangerBrush" Color="#C43D3D" />
     <SolidColorBrush x:Key="StatusBarBrush" Color="#16201D" />
+    <SolidColorBrush x:Key="ConversationTurnBrush" Color="#F0F3F0" />
+    <SolidColorBrush x:Key="ConversationUserBrush" Color="#E7EEF9" />
+    <SolidColorBrush x:Key="ConversationAssistantBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ConversationActivityBrush" Color="#F7F9F7" />
 </ResourceDictionary>

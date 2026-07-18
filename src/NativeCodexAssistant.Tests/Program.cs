@@ -20,6 +20,20 @@ using System.Runtime.CompilerServices;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Reflection;
+
+if (args.Contains("--unicode-transport-fixture", StringComparer.Ordinal))
+{
+    Console.InputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+    Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+    var fixtureLine = await Console.In.ReadLineAsync();
+    if (fixtureLine is not null)
+    {
+        await Console.Out.WriteLineAsync(fixtureLine);
+        await Console.Out.FlushAsync();
+    }
+    return 0;
+}
 
 var tests = new List<(string Name, Func<Task> Run)>
 {
@@ -38,6 +52,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("codex discovery skips unusable path candidates", TestCodexDiscoverySkipsUnusablePathCandidatesAsync),
     ("codex discovery checks OpenAI local app bin", TestCodexDiscoveryChecksOpenAiLocalAppBinAsync),
     ("app-server client writes initialize handshake", TestAppServerInitializeWritesHandshakeAsync),
+    ("app-server process transport preserves UTF-8", TestAppServerProcessTransportPreservesUtf8Async),
     ("app-server client serializes initialize writes", TestAppServerClientSerializesInitializeWritesAsync),
     ("app-server client starts thread and turn", TestAppServerStartsThreadAndTurnAsync),
     ("app-server client sends model and reasoning overrides", TestAppServerSendsModelAndReasoningOverridesAsync),
@@ -142,6 +157,54 @@ static Task TestRecentProjectsAsync()
     return Task.CompletedTask;
 }
 
+static async Task TestAppServerProcessTransportPreservesUtf8Async()
+{
+    using var temp = TempWorkspace.Create();
+    var startInfoFactory = typeof(CodexAppServerProcessTransport).GetMethod(
+        "CreateStartInfo",
+        BindingFlags.NonPublic | BindingFlags.Static)
+        ?? throw new InvalidOperationException("transport start-info factory was not found");
+    var inspected = (ProcessStartInfo?)startInfoFactory.Invoke(null, ["codex.exe"])
+        ?? throw new InvalidOperationException("transport start-info factory returned null");
+    AssertUtf8ProtocolEncoding(inspected.StandardInputEncoding, "standard input");
+    AssertUtf8ProtocolEncoding(inspected.StandardOutputEncoding, "standard output");
+    AssertUtf8ProtocolEncoding(inspected.StandardErrorEncoding, "standard error");
+
+    var testAssemblyPath = typeof(TestLogger).Assembly.Location;
+    var testExecutablePath = Path.ChangeExtension(testAssemblyPath, ".exe");
+    var fixtureCommand = File.Exists(testExecutablePath)
+        ? $"\"{testExecutablePath}\" --unicode-transport-fixture"
+        : $"dotnet \"{testAssemblyPath}\" --unicode-transport-fixture";
+    var fixturePath = Path.Combine(temp.Root, "unicode-fixture.cmd");
+    await File.WriteAllTextAsync(
+        fixturePath,
+        $"@echo off{Environment.NewLine}{fixtureCommand}{Environment.NewLine}",
+        new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+    await using var transport = new CodexAppServerProcessTransport(fixturePath, new TestLogger());
+    await transport.StartAsync();
+    var payload = "{\"text\":\"I\u2019m ready\u2014now\u2026 \u0395\u03bb\u03bb\u03b7\u03bd\u03b9\u03ba\u03ac \u65e5\u672c\u8a9e \ud83d\ude80\"}";
+    await transport.WriteLineAsync(payload);
+
+    string? echoed = null;
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+    await foreach (var line in transport.ReadLinesAsync(timeout.Token))
+    {
+        echoed = line;
+        break;
+    }
+
+    AssertEqual(payload, echoed, "UTF-8 protocol round trip");
+}
+
+static void AssertUtf8ProtocolEncoding(Encoding? encoding, string streamName)
+{
+    AssertTrue(encoding is not null, $"{streamName} encoding is explicit");
+    AssertEqual("utf-8", encoding!.WebName, $"{streamName} encoding");
+    AssertEqual(0, encoding.GetPreamble().Length, $"{streamName} BOM length");
+    AssertTrue(encoding.DecoderFallback is DecoderExceptionFallback, $"{streamName} rejects invalid UTF-8");
+}
+
 static async Task TestSettingsRoundTripAsync()
 {
     using var temp = TempWorkspace.Create();
@@ -174,6 +237,29 @@ static async Task TestSettingsRoundTripAsync()
                 DateTimeOffset.UtcNow)
         ],
         RawEvents = ["item/completed: {}"],
+        ConversationTurns =
+        [
+            new CodexConversationTurnSnapshot
+            {
+                TurnId = "turn_saved",
+                UserPrompt = "Saved prompt",
+                AssistantResponse = "Saved final response",
+                Status = CodexTurnStatus.Completed,
+                Activity =
+                [
+                    new CodexTimelineItem(
+                        CodexTimelineItemKind.CommandCompleted,
+                        "Ran command",
+                        "dotnet test",
+                        "item/commandExecution",
+                        DateTimeOffset.UtcNow)
+                    {
+                        ItemId = "command_saved",
+                        ActivityKey = "command:command_saved"
+                    }
+                ]
+            }
+        ],
         UpdatedAt = DateTimeOffset.UtcNow
     });
 
@@ -192,6 +278,10 @@ static async Task TestSettingsRoundTripAsync()
     AssertEqual("worktree", loaded.ProjectThreads[0].Mode, "project thread mode");
     AssertEqual(settings.ProjectThreads[0].WorkspacePath, loaded.ProjectThreads[0].WorkspacePath, "project thread workspace path");
     AssertEqual("Saved final response", loaded.ProjectThreads[0].FinalResponse, "project thread final response");
+    var loadedActivity = loaded.ProjectThreads[0].ConversationTurns.Single().Activity.Single();
+    AssertEqual("command_saved", loadedActivity.ItemId, "activity item identity survives JSON persistence");
+    AssertEqual("command:command_saved", loadedActivity.ActivityKey, "activity upsert key survives JSON persistence");
+    AssertEqual("Command", loadedActivity.CategoryLabel, "activity category is recomputed after JSON persistence");
     AssertTrue(File.Exists(store.SettingsPath), "settings file exists");
     var saveMetric = logger.Entries.Single(entry => entry.EventName == "settings_saved");
     AssertTrue(long.Parse(saveMetric.Properties?["serializedBytes"] ?? "0") > 0, "settings save byte metric");

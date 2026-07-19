@@ -108,6 +108,7 @@ tests.AddRange(Phase5CMultiTurnTests.All);
 tests.AddRange(Phase5DNavigationTests.All);
 tests.AddRange(Phase5GModelControlsTests.All);
 tests.AddRange(QueuedFollowUpTests.All);
+tests.AddRange(AttachmentInputTests.All);
 tests.AddRange(ApprovalProtocolTests.All);
 tests.AddRange(PermissionModeTests.All);
 tests.AddRange(ApprovalPresentationTests.All);

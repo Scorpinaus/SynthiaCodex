@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text;
+using SynthiaCode.Core.Attachments;
 
 namespace SynthiaCode.Core.Codex.AppServer;
 
@@ -67,6 +68,7 @@ public sealed class QueuedFollowUpSnapshot
     public QueuedFollowUpState State { get; set; }
     public string? LastError { get; set; }
     public QueuedTurnOptionsSnapshot Options { get; set; } = new();
+    public List<AttachmentReference> Images { get; set; } = [];
 
     public QueuedFollowUpSnapshot Clone() => new()
     {
@@ -76,7 +78,8 @@ public sealed class QueuedFollowUpSnapshot
         UpdatedAt = UpdatedAt,
         State = State,
         LastError = LastError,
-        Options = Options.Clone()
+        Options = Options.Clone(),
+        Images = [.. Images.Select(image => image.Clone())]
     };
 }
 
@@ -148,6 +151,10 @@ public sealed class QueuedFollowUp : INotifyPropertyChanged
 
     public QueuedTurnOptionsSnapshot Options { get; init; } = new();
 
+    public IReadOnlyList<AttachmentReference> Images { get; init; } = [];
+
+    public bool HasImages => Images.Count > 0;
+
     public string StateLabel => State switch
     {
         QueuedFollowUpState.Starting => "Starting",
@@ -168,7 +175,8 @@ public sealed class QueuedFollowUp : INotifyPropertyChanged
         UpdatedAt = UpdatedAt,
         State = State,
         LastError = LastError,
-        Options = Options.Clone()
+        Options = Options.Clone(),
+        Images = [.. Images.Select(image => image.Clone())]
     };
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
@@ -197,10 +205,14 @@ public sealed class CodexFollowUpQueue
 
     public ObservableCollection<QueuedFollowUp> Items { get; } = [];
 
-    public QueuedFollowUp Enqueue(string text, QueuedTurnOptionsSnapshot options)
+    public QueuedFollowUp Enqueue(
+        string text,
+        QueuedTurnOptionsSnapshot options,
+        IEnumerable<AttachmentReference>? images = null)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var normalized = ValidateText(text, replacingItemId: null);
+        var imageList = (images ?? []).Select(image => image.Clone()).ToList();
+        var normalized = ValidateContent(text, imageList, replacingItemId: null);
         if (Items.Count >= MaximumItems)
         {
             throw new InvalidOperationException($"A thread can queue at most {MaximumItems} follow-ups.");
@@ -215,7 +227,8 @@ public sealed class CodexFollowUpQueue
             CreatedAt = now,
             UpdatedAt = now,
             State = QueuedFollowUpState.Pending,
-            Options = options.Clone()
+            Options = options.Clone(),
+            Images = imageList
         };
         Items.Add(item);
         return item;
@@ -226,7 +239,7 @@ public sealed class CodexFollowUpQueue
         Items.Clear();
         foreach (var snapshot in (snapshots ?? []).Take(MaximumItems))
         {
-            if (string.IsNullOrWhiteSpace(snapshot.Text))
+            if (string.IsNullOrWhiteSpace(snapshot.Text) && snapshot.Images.Count == 0)
             {
                 continue;
             }
@@ -245,7 +258,8 @@ public sealed class CodexFollowUpQueue
                 LastError = snapshot.State == QueuedFollowUpState.Starting
                     ? InterruptedDeliveryMessage
                     : snapshot.LastError,
-                Options = (snapshot.Options ?? new QueuedTurnOptionsSnapshot()).Clone()
+                Options = (snapshot.Options ?? new QueuedTurnOptionsSnapshot()).Clone(),
+                Images = [.. snapshot.Images.Select(image => image.Clone())]
             });
         }
     }
@@ -257,7 +271,7 @@ public sealed class CodexFollowUpQueue
     {
         var item = GetRequired(id);
         EnsureMutable(item);
-        item.Text = ValidateText(text, id);
+        item.Text = ValidateContent(text, item.Images, id);
         item.EditText = item.Text;
         item.UpdatedAt = DateTimeOffset.UtcNow;
     }
@@ -343,12 +357,29 @@ public sealed class CodexFollowUpQueue
         Items.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.Ordinal))
         ?? throw new KeyNotFoundException($"Queued follow-up '{id}' was not found.");
 
-    private string ValidateText(string? text, string? replacingItemId)
+    private string ValidateContent(
+        string? text,
+        IReadOnlyCollection<AttachmentReference> images,
+        string? replacingItemId)
     {
         var normalized = text?.Trim() ?? string.Empty;
-        if (normalized.Length == 0)
+        if (normalized.Length == 0 && images.Count == 0)
         {
             throw new InvalidOperationException("A queued follow-up cannot be empty.");
+        }
+
+        if (images.Count > AttachmentLimits.MaximumImagesPerInput)
+        {
+            throw new InvalidOperationException($"A queued follow-up can contain at most {AttachmentLimits.MaximumImagesPerInput} images.");
+        }
+        if (images.Any(image => string.IsNullOrWhiteSpace(image.StorageKey) || image.ByteLength <= 0))
+        {
+            throw new InvalidOperationException("A queued follow-up contains an invalid image reference.");
+        }
+        var imageBytes = images.Sum(image => image.ByteLength);
+        if (imageBytes > AttachmentLimits.MaximumBytesPerInput)
+        {
+            throw new InvalidOperationException($"Queued images cannot exceed {AttachmentLimits.MaximumBytesPerInput / (1024 * 1024)} MiB per follow-up.");
         }
 
         var byteCount = Encoding.UTF8.GetByteCount(normalized);

@@ -81,9 +81,17 @@ public sealed record CodexThreadForkResult(
     string ThreadId,
     CodexActivePermissionProfile? ActivePermissionProfile = null);
 
+public abstract record CodexUserInput;
+
+public sealed record CodexTextInput(string Text) : CodexUserInput;
+
+public sealed record CodexImageInput(string DataUrl) : CodexUserInput;
+
+public sealed record CodexLocalImageInput(string Path) : CodexUserInput;
+
 public sealed record CodexTurnStartRequest(
     string ThreadId,
-    string Prompt,
+    IReadOnlyList<CodexUserInput> Inputs,
     string Cwd,
     CodexSandbox? Sandbox,
     string? Model = null,
@@ -91,11 +99,54 @@ public sealed record CodexTurnStartRequest(
     CodexServiceTierSelection ServiceTier = CodexServiceTierSelection.Inherit,
     CodexApprovalPolicy? ApprovalPolicy = null,
     CodexApprovalsReviewer? ApprovalsReviewer = null,
-    string? PermissionProfileId = null);
+    string? PermissionProfileId = null)
+{
+    public CodexTurnStartRequest(
+        string ThreadId,
+        string Prompt,
+        string Cwd,
+        CodexSandbox? Sandbox,
+        string? Model = null,
+        CodexReasoningEffort? ReasoningEffort = null,
+        CodexServiceTierSelection ServiceTier = CodexServiceTierSelection.Inherit,
+        CodexApprovalPolicy? ApprovalPolicy = null,
+        CodexApprovalsReviewer? ApprovalsReviewer = null,
+        string? PermissionProfileId = null)
+        : this(
+            ThreadId,
+            [new CodexTextInput(Prompt)],
+            Cwd,
+            Sandbox,
+            Model,
+            ReasoningEffort,
+            ServiceTier,
+            ApprovalPolicy,
+            ApprovalsReviewer,
+            PermissionProfileId)
+    {
+    }
+
+    public string Prompt => string.Join(
+        Environment.NewLine,
+        Inputs.OfType<CodexTextInput>().Select(input => input.Text));
+}
 
 public sealed record CodexTurnStartResult(string TurnId);
 
-public sealed record CodexTurnSteerRequest(string ThreadId, string ExpectedTurnId, string Prompt);
+public sealed record CodexTurnSteerRequest(
+    string ThreadId,
+    string ExpectedTurnId,
+    IReadOnlyList<CodexUserInput> Inputs)
+{
+    public CodexTurnSteerRequest(string threadId, string expectedTurnId, string prompt)
+        : this(threadId, expectedTurnId, [new CodexTextInput(prompt)])
+    {
+    }
+
+    public string Prompt => string.Join(
+        Environment.NewLine,
+        Inputs.OfType<CodexTextInput>().Select(input => input.Text));
+}
 
 public sealed record CodexTurnSteerResult(string TurnId);
 
@@ -110,7 +161,8 @@ public sealed record CodexModelOption(
     IReadOnlyList<CodexReasoningOption> SupportedReasoningEfforts,
     IReadOnlyList<CodexServiceTierOption> ServiceTiers,
     string? AvailabilityMessage,
-    IReadOnlyList<string>? AdditionalSpeedTiers = null)
+    IReadOnlyList<string>? AdditionalSpeedTiers = null,
+    IReadOnlyList<CodexInputModality>? InputModalities = null)
 {
     public CodexServiceTierOption? FastServiceTier => ServiceTiers.FirstOrDefault(tier =>
         string.Equals(tier.Id, "fast", StringComparison.OrdinalIgnoreCase) ||
@@ -120,6 +172,16 @@ public sealed record CodexModelOption(
         AdditionalSpeedTiers?.Any(tier =>
             string.Equals(tier, "fast", StringComparison.OrdinalIgnoreCase)) == true ||
         FastServiceTier is not null;
+
+    public bool SupportsImageInput =>
+        (InputModalities ?? [CodexInputModality.Text, CodexInputModality.Image])
+        .Contains(CodexInputModality.Image);
+}
+
+public enum CodexInputModality
+{
+    Text,
+    Image
 }
 
 public sealed record CodexReasoningOption(CodexReasoningEffort Effort, string Description)

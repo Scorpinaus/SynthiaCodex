@@ -1,12 +1,16 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using SynthiaCode.App.ViewModels;
+using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Codex.AppServer;
 
 namespace SynthiaCode.App.Views;
@@ -23,6 +27,8 @@ public partial class TaskView : UserControl
     public TaskView()
     {
         InitializeComponent();
+        ComposerDropTarget.AddHandler(DragOverEvent, new DragEventHandler(OnComposerDragOver), handledEventsToo: true);
+        ComposerDropTarget.AddHandler(DropEvent, new DragEventHandler(OnComposerDrop), handledEventsToo: true);
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         DataContextChanged += OnDataContextChanged;
@@ -180,6 +186,105 @@ public partial class TaskView : UserControl
         followLatest = true;
         JumpLatestButton.Visibility = Visibility.Collapsed;
         FollowLatest();
+    }
+
+    private async void OnAttachImagesClick(object sender, RoutedEventArgs e)
+    {
+        var picker = new OpenFileDialog
+        {
+            Title = "Attach images",
+            Filter = "Supported images|*.png;*.jpg;*.jpeg;*.gif;*.webp|PNG images|*.png|JPEG images|*.jpg;*.jpeg|GIF images|*.gif|WebP images|*.webp|All files|*.*",
+            Multiselect = true,
+            CheckFileExists = true
+        };
+        if (picker.ShowDialog(Window.GetWindow(this)) == true)
+        {
+            await ImportFilesAsync(picker.FileNames).ConfigureAwait(true);
+        }
+    }
+
+    private void OnOpenAttachmentClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: AttachmentReference attachment } ||
+            DataContext is not MainViewModel main)
+        {
+            return;
+        }
+        try
+        {
+            main.OpenAttachment(attachment);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            main.ReportAttachmentError(ex.Message);
+        }
+    }
+
+    private void OnComposerDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop)
+            ? DragDropEffects.Copy
+            : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void OnComposerDrop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths)
+        {
+            await ImportFilesAsync(paths).ConfigureAwait(true);
+        }
+        e.Handled = true;
+    }
+
+    private async void OnComposerPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.V || Keyboard.Modifiers != ModifierKeys.Control || DataContext is not MainViewModel main)
+        {
+            return;
+        }
+
+        try
+        {
+            if (Clipboard.ContainsFileDropList())
+            {
+                await main.AddImageFilesAsync(Clipboard.GetFileDropList().Cast<string>()).ConfigureAwait(true);
+                e.Handled = true;
+                return;
+            }
+
+            if (!Clipboard.ContainsImage())
+            {
+                return;
+            }
+
+            var bitmap = Clipboard.GetImage();
+            if (bitmap is null)
+            {
+                return;
+            }
+            await using var stream = new MemoryStream();
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            encoder.Save(stream);
+            stream.Position = 0;
+            await main.AddPastedImageAsync(stream).ConfigureAwait(true);
+            e.Handled = true;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            main.ReportAttachmentError(ex.Message);
+            e.Handled = true;
+        }
+    }
+
+    private async Task ImportFilesAsync(IEnumerable<string> paths)
+    {
+        if (DataContext is not MainViewModel main)
+        {
+            return;
+        }
+        await main.AddImageFilesAsync(paths).ConfigureAwait(true);
     }
 
     private void OnModelOptionsPreviewKeyDown(object sender, KeyEventArgs e)

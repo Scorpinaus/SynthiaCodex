@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows.Input;
 using SynthiaCode.App.Services;
+using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Codex.AppServer;
 
 namespace SynthiaCode.App.ViewModels;
@@ -26,6 +27,9 @@ public sealed class TaskViewModel : ObservableObject
     private readonly RelayCommand showOptionsMainCommand;
     private readonly RelayCommand showModelsCommand;
     private readonly RelayCommand showReasoningCommand;
+    private readonly RelayCommand removeAttachmentCommand;
+    private readonly RelayCommand moveAttachmentLeftCommand;
+    private readonly RelayCommand moveAttachmentRightCommand;
     private CodexThreadService threadService = new();
     private CodexFollowUpQueue followUpQueue = new();
     private string prompt = string.Empty;
@@ -67,6 +71,25 @@ public sealed class TaskViewModel : ObservableObject
         AlternateFollowUpCommand = alternateFollowUpCommand = new AsyncRelayCommand(
             alternateFollowUp ?? (() => Task.CompletedTask),
             canSteer);
+        RemoveAttachmentCommand = removeAttachmentCommand = new RelayCommand(
+            parameter =>
+            {
+                if (parameter is AttachmentReference attachment &&
+                    Attachments.FirstOrDefault(item => string.Equals(item.Id, attachment.Id, StringComparison.Ordinal)) is { } stored &&
+                    Attachments.Remove(stored))
+                {
+                    NotifyAttachmentsChanged();
+                }
+            },
+            parameter => parameter is AttachmentReference attachment &&
+                Attachments.Any(item => string.Equals(item.Id, attachment.Id, StringComparison.Ordinal)));
+        MoveAttachmentLeftCommand = moveAttachmentLeftCommand = new RelayCommand(
+            parameter => MoveAttachment(parameter as AttachmentReference, -1),
+            parameter => parameter is AttachmentReference attachment && Attachments.IndexOf(attachment) > 0);
+        MoveAttachmentRightCommand = moveAttachmentRightCommand = new RelayCommand(
+            parameter => MoveAttachment(parameter as AttachmentReference, 1),
+            parameter => parameter is AttachmentReference attachment &&
+                Attachments.IndexOf(attachment) >= 0 && Attachments.IndexOf(attachment) < Attachments.Count - 1);
         beginQueuedFollowUpEditCommand = new RelayCommand(
             parameter => MutateQueuedFollowUp(parameter, item => followUpQueue.BeginEdit(item.Id)),
             parameter => parameter is QueuedFollowUp { IsStarting: false, IsEditing: false });
@@ -141,6 +164,8 @@ public sealed class TaskViewModel : ObservableObject
 
     public ObservableCollection<QueuedFollowUp> QueuedFollowUps => followUpQueue.Items;
 
+    public ObservableCollection<AttachmentReference> Attachments { get; } = [];
+
     public ObservableCollection<string> ModelOptions { get; } = [];
 
     public ObservableCollection<CodexModelOption> ModelCatalog { get; } = [];
@@ -170,8 +195,60 @@ public sealed class TaskViewModel : ObservableObject
     public ICommand ShowOptionsMainCommand { get; }
     public ICommand ShowModelsCommand { get; }
     public ICommand ShowReasoningCommand { get; }
+    public ICommand RemoveAttachmentCommand { get; }
+    public ICommand MoveAttachmentLeftCommand { get; }
+    public ICommand MoveAttachmentRightCommand { get; }
 
     public CodexThreadService ThreadService => threadService;
+
+    public bool HasAttachments => Attachments.Count > 0;
+
+    public bool CanSubmitAttachments => !HasAttachments || SelectedModel?.SupportsImageInput != false;
+
+    public string AttachmentValidationMessage => CanSubmitAttachments
+        ? string.Empty
+        : $"{SelectedModel?.DisplayName ?? "The selected model"} does not accept image input. Remove the images or choose an image-capable model.";
+
+    public void AddAttachment(AttachmentReference attachment)
+    {
+        ArgumentNullException.ThrowIfNull(attachment);
+        if (Attachments.Any(existing =>
+                !string.IsNullOrWhiteSpace(existing.ContentSha256) &&
+                string.Equals(existing.ContentSha256, attachment.ContentSha256, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+        if (Attachments.Count >= AttachmentLimits.MaximumImagesPerInput)
+        {
+            throw new InvalidOperationException($"A prompt can contain at most {AttachmentLimits.MaximumImagesPerInput} images.");
+        }
+        if (Attachments.Sum(image => image.ByteLength) + attachment.ByteLength > AttachmentLimits.MaximumBytesPerInput)
+        {
+            throw new InvalidOperationException($"Prompt images cannot exceed {AttachmentLimits.MaximumBytesPerInput / (1024 * 1024)} MiB in total.");
+        }
+        Attachments.Add(attachment.Clone());
+        NotifyAttachmentsChanged();
+    }
+
+    public void ReplaceAttachments(IEnumerable<AttachmentReference>? attachments)
+    {
+        Attachments.Clear();
+        foreach (var attachment in attachments ?? [])
+        {
+            Attachments.Add(attachment.Clone());
+        }
+        NotifyAttachmentsChanged();
+    }
+
+    public void ClearAttachments()
+    {
+        if (Attachments.Count == 0)
+        {
+            return;
+        }
+        Attachments.Clear();
+        NotifyAttachmentsChanged();
+    }
 
     public string Prompt
     {
@@ -237,6 +314,9 @@ public sealed class TaskViewModel : ObservableObject
             ReconcileFastAvailability();
             OnPropertyChanged(nameof(ModelSelectionSummary));
             OnPropertyChanged(nameof(FastModeDescription));
+            OnPropertyChanged(nameof(CanSubmitAttachments));
+            OnPropertyChanged(nameof(AttachmentValidationMessage));
+            RaiseCommandStates();
         }
     }
 
@@ -512,6 +592,39 @@ public sealed class TaskViewModel : ObservableObject
         sendQueuedFollowUpCommand.RaiseCanExecuteChanged();
     }
 
+    private void MoveAttachment(AttachmentReference? attachment, int offset)
+    {
+        if (attachment is null)
+        {
+            return;
+        }
+
+        var currentIndex = Attachments.IndexOf(attachment);
+        var targetIndex = currentIndex + offset;
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= Attachments.Count)
+        {
+            return;
+        }
+
+        Attachments.Move(currentIndex, targetIndex);
+        NotifyAttachmentsChanged();
+    }
+
+    private void NotifyAttachmentsChanged()
+    {
+        OnPropertyChanged(nameof(Attachments));
+        OnPropertyChanged(nameof(HasAttachments));
+        OnPropertyChanged(nameof(CanSubmitAttachments));
+        OnPropertyChanged(nameof(AttachmentValidationMessage));
+        removeAttachmentCommand.RaiseCanExecuteChanged();
+        moveAttachmentLeftCommand.RaiseCanExecuteChanged();
+        moveAttachmentRightCommand.RaiseCanExecuteChanged();
+        submitCommand.RaiseCanExecuteChanged();
+        composerSendCommand.RaiseCanExecuteChanged();
+        steerCommand.RaiseCanExecuteChanged();
+        alternateFollowUpCommand.RaiseCanExecuteChanged();
+    }
+
     public void NotifyResponseChanged()
     {
         OnPropertyChanged(nameof(FinalResponse));
@@ -591,6 +704,9 @@ public sealed class TaskViewModel : ObservableObject
         loadModelsCommand.RaiseCanExecuteChanged();
         steerCommand.RaiseCanExecuteChanged();
         alternateFollowUpCommand.RaiseCanExecuteChanged();
+        removeAttachmentCommand.RaiseCanExecuteChanged();
+        moveAttachmentLeftCommand.RaiseCanExecuteChanged();
+        moveAttachmentRightCommand.RaiseCanExecuteChanged();
         RaiseQueuedFollowUpCommandStates();
         openExternalUriCommand.RaiseCanExecuteChanged();
         openOptionsCommand.RaiseCanExecuteChanged();

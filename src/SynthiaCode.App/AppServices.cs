@@ -1,4 +1,5 @@
 using SynthiaCode.App.Services;
+using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Auth;
 using SynthiaCode.Core.Codex;
 using SynthiaCode.Core.Logging;
@@ -8,6 +9,7 @@ using SynthiaCode.Core.Settings;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Infrastructure;
 using SynthiaCode.Infrastructure.Auth;
+using SynthiaCode.Infrastructure.Attachments;
 using SynthiaCode.Infrastructure.Codex;
 using SynthiaCode.Infrastructure.Logging;
 using SynthiaCode.Infrastructure.Git;
@@ -17,6 +19,7 @@ using SynthiaCode.Core.Worktrees;
 using SynthiaCode.Infrastructure.Worktrees;
 using SynthiaCode.Core.Terminal;
 using SynthiaCode.Infrastructure.Terminal;
+using System.IO;
 using System.Reflection;
 
 namespace SynthiaCode.App;
@@ -38,7 +41,8 @@ public sealed class AppServices
         ThreadStore threadStore,
         CodexThreadWorkspace threadWorkspace,
         ITerminalService terminalService,
-        IAppLogger logger)
+        IAppLogger logger,
+        IAttachmentStore attachmentStore)
     {
         SettingsStore = settingsStore;
         CodexDiscoveryService = codexDiscoveryService;
@@ -55,6 +59,7 @@ public sealed class AppServices
         ThreadWorkspace = threadWorkspace;
         TerminalService = terminalService;
         Logger = logger;
+        AttachmentStore = attachmentStore;
     }
 
     public ISettingsStore SettingsStore { get; }
@@ -87,6 +92,8 @@ public sealed class AppServices
 
     public IAppLogger Logger { get; }
 
+    public IAttachmentStore AttachmentStore { get; }
+
     public static AppServices Create()
     {
         var appDataDirectory = SystemPaths.AppDataDirectory;
@@ -114,6 +121,7 @@ public sealed class AppServices
         var threadStore = new ThreadStore();
         var threadWorkspace = new CodexThreadWorkspace();
         var terminalService = new WindowsConPtyTerminalService(logger);
+        var attachmentStore = new LocalAttachmentStore(Path.Combine(appDataDirectory, "attachments"), logger);
 
         logger.Log(AppLogLevel.Information, "app_services_created", "Application services were created.");
 
@@ -132,6 +140,7 @@ public sealed class AppServices
             threadStore,
             threadWorkspace,
             terminalService,
-            logger);
+            logger,
+            attachmentStore);
     }
 }

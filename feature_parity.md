@@ -22,7 +22,7 @@
 | Safety and approvals | **Near full** | The three composer permission modes and server-request approvals now map closely to ChatGPT desktop. |
 | Git and worktree lifecycle | **Moderate** | Core isolation and file-level Git operations exist; chunk review, handoff, push, PR, snapshots, and setup actions do not. |
 | Agent orchestration | **Partial** | Parallel top-level chats and collaboration activity exist, but subagent thread inspection and management are absent. |
-| Context and multimodal input | **Low** | Text and workspace context work; attachments, screenshots, image input, and artifact workflows are missing. |
+| Context and multimodal input | **Near for local images** | Local image picker, paste/drop, previews, multimodal turns, queues, and managed persistence are implemented; generic documents and artifact workflows remain out of scope. |
 | Tools and integrations | **Low** | Configured MCP/web activity can flow through app-server, but Browser, Chrome, plugins, connectors, skills management, and Scheduled are not product surfaces. |
 | Desktop convenience | **Moderate** | Native Windows shell, themes, diagnostics, and core shortcuts exist; search, notifications, dictation, quick chat, deep links, and personalization do not. |
 
@@ -88,7 +88,7 @@
 | Built-in Browser | No shared in-app browser, website permissions, comments, downloads, or browser developer mode | **Missing** | Requires a browser surface plus Browser tool/plugin integration. |
 | Chrome integration | No Chrome extension or signed-in Chrome control | **Missing** | ChatGPT can operate existing Chrome sessions through its extension. |
 | Computer Use | No screen/desktop control surface | **Missing** | ChatGPT can control supported desktop apps and browser UI with explicit permissions. |
-| File attachments and image inputs | Composer is text-only | **Missing** | Add file picker, drag/drop/paste, image preview, protocol input parts, limits, and persistence rules. |
+| File attachments and image inputs | Picker, clipboard/file paste, Explorer drag/drop, ordered previews, model-capability checks, image-only or mixed input, queued images, transcript previews, and content-addressed managed persistence | **Near** | Add bounded thumbnail decoding and materialize images found only in external app-server history; generic document attachment is not supported by the current input protocol. |
 | Artifact/file viewer | Markdown text and safe links render; no document/spreadsheet/slide/PDF artifact viewer | **Missing** | ChatGPT can create and preview files in conversation. |
 | Image generation, Sites, and visualizations | No dedicated generation or interactive artifact surfaces | **Missing** | These are broader ChatGPT capabilities rather than core local coding requirements. |
 | Scheduled tasks | No create/manage/run history or recurring local project tasks | **Missing** | ChatGPT Scheduled supports local/worktree runs, chat continuity, skills, plugins, and RRULE schedules. |
@@ -129,12 +129,21 @@ P0 queued follow-ups moved from **Missing** to **Near**:
 4. Failed or cancelled turns pause the queue; interrupted `Starting` items restore as `NeedsAttention` and are never retried automatically.
 5. Queue mutations persist immediately, and archive/worktree removal is blocked while queued work remains.
 
+P0 attachments and image input moved from **Missing** to **Near**:
+
+1. The composer accepts PNG, JPEG, WebP, and non-animated GIF through a multi-select picker, clipboard image/file paste, and handled routed drag/drop.
+2. Ordered image previews can be opened, moved, or removed; sent turns render their image previews in the transcript.
+3. `turn/start` and `turn/steer` now send typed ordered text/`localImage` parts and permit image-only requests.
+4. Model `inputModalities` blocks unsupported image submission without discarding the draft.
+5. Content-addressed managed copies survive source deletion, deduplicate, enforce format/size/dimension/store limits, and persist safely in drafts, queued follow-ups, and conversation snapshots.
+6. Startup rehydrates managed paths and performs reference-aware staging/orphan cleanup; unavailable files fail visibly.
+
 ## Recommended parity backlog
 
 ### P0 — Complete the core local coding experience
 
 1. **Queued follow-ups hardening (core implemented):** refresh and re-resolve model availability and managed permission policy immediately before background dispatch, then add live disconnect/reconnect smoke coverage.
-2. **Attachments and image input:** support file/image picker, paste/drag-drop, prompt input parts, previews, and safe persistence.
+2. **Attachments and image input (core implemented):** add bounded thumbnail decoding and external app-server history image materialization as follow-up hardening.
 3. **Structured Git review:** add hunk staging/revert, inline diff comments, and a dedicated review target flow.
 4. **Push and pull requests:** add native branch push and GitHub PR creation/status.
 5. **Worktree lifecycle:** add starting-branch selection, setup scripts/actions, Local/Worktree handoff, snapshots/restore, and retention settings.

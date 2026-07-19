@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using SynthiaCode.Core.Attachments;
 
 namespace SynthiaCode.Core.Codex.AppServer;
 
@@ -124,7 +125,9 @@ public sealed class CodexThreadService
         RefreshCompatibilityResponse();
     }
 
-    public CodexConversationTurn BeginTurn(string prompt)
+    public CodexConversationTurn BeginTurn(
+        string prompt,
+        IEnumerable<AttachmentReference>? images = null)
     {
         lock (stateGate)
         {
@@ -134,6 +137,10 @@ public sealed class CodexThreadService
                 Status = CodexTurnStatus.Running,
                 StartedAt = DateTimeOffset.UtcNow
             };
+            foreach (var image in images ?? [])
+            {
+                turn.UserImages.Add(image.Clone());
+            }
             AddBounded(ConversationTurns, turn, MaximumConversationTurns);
             ActiveTurnId = null;
             ActiveTurnStatus = CodexTurnStatus.Running;
@@ -161,6 +168,13 @@ public sealed class CodexThreadService
                 foreach (var item in pending.Activity)
                 {
                     AddBounded(existing.Activity, item, MaximumTimelineItems);
+                }
+                if (existing.UserImages.Count == 0)
+                {
+                    foreach (var image in pending.UserImages)
+                    {
+                        existing.UserImages.Add(image.Clone());
+                    }
                 }
                 ConversationTurns.Remove(pending);
             }
@@ -239,6 +253,14 @@ public sealed class CodexThreadService
             }
 
             turn.UserPrompt = snapshot.UserPrompt;
+            if (snapshot.UserImages.Count > 0)
+            {
+                turn.UserImages.Clear();
+                foreach (var image in snapshot.UserImages)
+                {
+                    turn.UserImages.Add(image.Clone());
+                }
+            }
             turn.AssistantResponse = UnicodeTextNormalizer.RepairLegacyMojibake(snapshot.AssistantResponse);
             turn.Status = snapshot.Status;
             turn.StartedAt = snapshot.StartedAt;

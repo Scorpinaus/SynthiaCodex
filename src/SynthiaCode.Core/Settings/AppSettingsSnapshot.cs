@@ -24,7 +24,8 @@ public static class AppSettingsSnapshot
             IsProjectRailOpen = source.IsProjectRailOpen,
             IsDetailsPaneOpen = source.IsDetailsPaneOpen,
             RecentProjects = [.. source.RecentProjects],
-            ProjectThreads = [.. source.ProjectThreads.Select(CloneThread)]
+            ProjectThreads = [.. source.ProjectThreads.Select(CloneThread)],
+            ComposerAttachmentDrafts = [.. source.ComposerAttachmentDrafts.Select(draft => draft.Clone())]
         };
     }
 
@@ -59,6 +60,7 @@ public static class AppSettingsSnapshot
         Status = source.Status,
         StartedAt = source.StartedAt,
         CompletedAt = source.CompletedAt,
-        Activity = [.. source.Activity]
+        Activity = [.. source.Activity],
+        UserImages = [.. source.UserImages.Select(image => image.Clone())]
     };
 }

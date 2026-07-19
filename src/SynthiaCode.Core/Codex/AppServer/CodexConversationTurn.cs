@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using SynthiaCode.Core.Attachments;
 
 namespace SynthiaCode.Core.Codex.AppServer;
 
@@ -75,6 +76,10 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
 
     public ObservableCollection<CodexTimelineItem> Activity { get; } = [];
 
+    public ObservableCollection<AttachmentReference> UserImages { get; } = [];
+
+    public bool HasUserImages => UserImages.Count > 0;
+
     public bool IsActivityExpanded
     {
         get => isActivityExpanded;
@@ -93,7 +98,8 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
         Status = Status,
         StartedAt = StartedAt,
         CompletedAt = CompletedAt,
-        Activity = [.. Activity]
+        Activity = [.. Activity],
+        UserImages = [.. UserImages.Select(image => image.Clone())]
     };
 
     public static CodexConversationTurn FromSnapshot(CodexConversationTurnSnapshot snapshot)
@@ -110,6 +116,10 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
         foreach (var item in snapshot.Activity)
         {
             turn.Activity.Add(UnicodeTextNormalizer.RepairLegacyMojibake(item));
+        }
+        foreach (var image in snapshot.UserImages)
+        {
+            turn.UserImages.Add(image.Clone());
         }
 
         return turn;
@@ -146,4 +156,5 @@ public sealed class CodexConversationTurnSnapshot
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAt { get; set; }
     public List<CodexTimelineItem> Activity { get; set; } = [];
+    public List<AttachmentReference> UserImages { get; set; } = [];
 }

@@ -147,7 +147,8 @@ public sealed class ThreadStore
             Status = turn.Status,
             StartedAt = turn.StartedAt,
             CompletedAt = turn.CompletedAt,
-            Activity = [.. turn.Activity]
+            Activity = [.. turn.Activity],
+            UserImages = [.. turn.UserImages.Select(image => image.Clone())]
         }).ToList();
 
     private static List<QueuedFollowUpSnapshot> CloneQueuedFollowUps(

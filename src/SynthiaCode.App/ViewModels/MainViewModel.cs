@@ -3,6 +3,7 @@ using System.IO;
 using System.Reflection;
 using System.Windows.Input;
 using SynthiaCode.App.Services;
+using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Auth;
 using SynthiaCode.Core.Codex;
 using SynthiaCode.Core.Codex.AppServer;
@@ -29,6 +30,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly CodexThreadWorkspace threadWorkspace;
     private readonly CodexFollowUpQueueWorkspace followUpQueueWorkspace = new();
     private readonly IAppLogger logger;
+    private readonly IAttachmentStore? attachmentStore;
     private readonly CancellationTokenSource appServerWarmUpCancellation = new();
     private CodexThreadService threadService
     {
@@ -67,6 +69,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool executionPolicyLoaded;
     private string? executionPolicyCwd;
     private bool isShuttingDown;
+    private bool isRestoringAttachmentDraft;
     private Task? shutdownTask;
     private Task? appServerWarmUpTask;
     private readonly HashSet<string> loadedThreadIds = new(StringComparer.Ordinal);
@@ -89,7 +92,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ThreadStore threadStore,
         CodexThreadWorkspace threadWorkspace,
         ITerminalService terminalService,
-        IAppLogger logger)
+        IAppLogger logger,
+        IAttachmentStore? attachmentStore = null)
     {
         this.settingsStore = settingsStore;
         this.appServerSessionCoordinator = appServerSessionCoordinator;
@@ -102,6 +106,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         this.threadStore = threadStore;
         this.threadWorkspace = threadWorkspace;
         this.logger = logger;
+        this.attachmentStore = attachmentStore;
         synchronizationContext = SynchronizationContext.Current;
         appServerSessionCoordinator.NotificationReceived += OnAppServerNotificationReceived;
         appServerSessionCoordinator.ServerRequestReceived += OnServerRequestReceived;
@@ -223,6 +228,141 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
 
     public event EventHandler? CloseRequested;
+
+    public async Task AddImageFilesAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        if (attachmentStore is null)
+        {
+            throw new InvalidOperationException("Attachment storage is unavailable.");
+        }
+
+        var imported = 0;
+        var failures = new List<string>();
+        foreach (var path in paths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var attachment = await attachmentStore.ImportFileAsync(path, cancellationToken).ConfigureAwait(true);
+                TaskWorkspace.AddAttachment(attachment);
+                imported++;
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException)
+            {
+                failures.Add($"{Path.GetFileName(path)}: {ex.Message}");
+            }
+        }
+
+        StatusMessage = failures.Count == 0
+            ? $"Added {imported} image{(imported == 1 ? string.Empty : "s")}"
+            : imported == 0
+                ? failures[0]
+                : $"Added {imported} image{(imported == 1 ? string.Empty : "s")}; {failures.Count} skipped";
+    }
+
+    public async Task AddPastedImageAsync(
+        Stream imageStream,
+        string displayName = "pasted-image.png",
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(imageStream);
+        if (attachmentStore is null)
+        {
+            throw new InvalidOperationException("Attachment storage is unavailable.");
+        }
+
+        var attachment = await attachmentStore
+            .ImportStreamAsync(imageStream, displayName, cancellationToken)
+            .ConfigureAwait(true);
+        TaskWorkspace.AddAttachment(attachment);
+        StatusMessage = "Added pasted image";
+    }
+
+    public void ReportAttachmentError(string message) =>
+        StatusMessage = string.IsNullOrWhiteSpace(message) ? "Could not add the image." : message;
+
+    public void OpenAttachment(AttachmentReference attachment)
+    {
+        ArgumentNullException.ThrowIfNull(attachment);
+        var path = attachmentStore is not null ? attachmentStore.ResolvePath(attachment) : attachment.ManagedPath;
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            throw new FileNotFoundException($"Attachment '{attachment.DisplayName}' is unavailable.", path);
+        }
+        userInteractionService.OpenInEditor(path);
+    }
+
+    private void CaptureAttachmentDraft(string? projectPath, string? threadId)
+    {
+        if (isRestoringAttachmentDraft || string.IsNullOrWhiteSpace(projectPath))
+        {
+            return;
+        }
+
+        var normalizedProject = Path.GetFullPath(projectPath);
+        var draft = settings.ComposerAttachmentDrafts.FirstOrDefault(item =>
+            string.Equals(Path.GetFullPath(item.ProjectPath), normalizedProject, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(item.ThreadId, threadId, StringComparison.Ordinal));
+        if (TaskWorkspace.Attachments.Count == 0)
+        {
+            if (draft is not null)
+            {
+                settings.ComposerAttachmentDrafts.Remove(draft);
+            }
+            return;
+        }
+
+        draft ??= new ComposerAttachmentDraftSnapshot
+        {
+            ProjectPath = normalizedProject,
+            ThreadId = threadId
+        };
+        if (!settings.ComposerAttachmentDrafts.Contains(draft))
+        {
+            settings.ComposerAttachmentDrafts.Add(draft);
+        }
+        draft.Images = [.. TaskWorkspace.Attachments.Select(image => image.Clone())];
+        draft.UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    private void RestoreAttachmentDraft(string? projectPath, string? threadId)
+    {
+        isRestoringAttachmentDraft = true;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(projectPath))
+            {
+                TaskWorkspace.ClearAttachments();
+                return;
+            }
+            var normalizedProject = Path.GetFullPath(projectPath);
+            var draft = settings.ComposerAttachmentDrafts.FirstOrDefault(item =>
+                string.Equals(Path.GetFullPath(item.ProjectPath), normalizedProject, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(item.ThreadId, threadId, StringComparison.Ordinal));
+            TaskWorkspace.ReplaceAttachments(draft?.Images ?? []);
+        }
+        finally
+        {
+            isRestoringAttachmentDraft = false;
+        }
+    }
+
+    private async Task SaveAttachmentDraftAsync()
+    {
+        if (isRestoringAttachmentDraft)
+        {
+            return;
+        }
+        CaptureAttachmentDraft(SelectedProjectPath, activeThreadId);
+        try
+        {
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            logger.Log(AppLogLevel.Warning, "attachment_draft_save_failed", "Could not save the image draft.", exception: ex);
+        }
+    }
 
     public ObservableCollection<RecentProject> RecentProjects => ProjectWorkspace.RecentProjects;
 
@@ -555,6 +695,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         logger.Log(AppLogLevel.Information, "view_model_initialize", "Main view model initialization started.");
         settings = await settingsStore.LoadAsync().ConfigureAwait(true);
+        await RestoreAndCleanupAttachmentsAsync().ConfigureAwait(true);
         IsProjectRailOpen = settings.IsProjectRailOpen;
         IsDetailsPaneOpen = settings.IsDetailsPaneOpen;
         selectedTheme = NormalizeTheme(settings.Theme);
@@ -578,6 +719,51 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         await DiagnosticsViewModel.RefreshAsync().ConfigureAwait(true);
         StatusMessage = "Ready";
         appServerWarmUpTask = WarmUpAppServerAsync(appServerWarmUpCancellation.Token);
+    }
+
+    private async Task RestoreAndCleanupAttachmentsAsync()
+    {
+        if (attachmentStore is null)
+        {
+            return;
+        }
+
+        var references = settings.ProjectThreads
+            .SelectMany(thread =>
+                thread.ConversationTurns.SelectMany(turn => turn.UserImages)
+                    .Concat(thread.QueuedFollowUps.SelectMany(item => item.Images)))
+            .Concat(settings.ComposerAttachmentDrafts.SelectMany(draft => draft.Images))
+            .ToList();
+        foreach (var attachment in references)
+        {
+            try
+            {
+                attachment.ManagedPath = attachmentStore.ResolvePath(attachment);
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException)
+            {
+                attachment.ManagedPath = null;
+                logger.Log(
+                    AppLogLevel.Warning,
+                    "attachment_restore_unavailable",
+                    "A persisted image attachment is unavailable.",
+                    new Dictionary<string, string?> { ["storageKey"] = attachment.StorageKey },
+                    ex);
+            }
+        }
+
+        try
+        {
+            await attachmentStore.CleanupAsync(references.Select(item => item.StorageKey)).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            logger.Log(
+                AppLogLevel.Warning,
+                "attachment_cleanup_failed",
+                "Managed attachment cleanup could not be completed.",
+                exception: ex);
+        }
     }
 
     private async Task WarmUpAppServerAsync(CancellationToken cancellationToken)
@@ -642,6 +828,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task SelectProjectAsync(string path)
     {
+        CaptureAttachmentDraft(SelectedProjectPath, activeThreadId);
+        await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        isRestoringAttachmentDraft = true;
+        try
+        {
+            TaskWorkspace.ClearAttachments();
+        }
+        finally
+        {
+            isRestoringAttachmentDraft = false;
+        }
         SelectedProjectPath = Path.GetFullPath(path);
         activeThreadId = null;
         activeTurnId = null;
@@ -864,11 +1061,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             var guidance = SteeringText.Trim();
+            var images = TaskWorkspace.Attachments.Select(image => image.Clone()).ToList();
             var queue = followUpQueueWorkspace.GetOrCreate(threadId);
-            queue.Enqueue(guidance, CaptureQueuedTurnOptions(GetWorkspacePathForThread(threadId)));
+            queue.Enqueue(guidance, CaptureQueuedTurnOptions(GetWorkspacePathForThread(threadId)), images);
             TaskWorkspace.NotifyQueuedFollowUpsChanged();
             await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
             SteeringText = string.Empty;
+            TaskWorkspace.ClearAttachments();
             StatusMessage = "Follow-up queued for the next turn";
         }
         catch (Exception ex)
@@ -918,8 +1117,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 await appServerSessionCoordinator.SteerTurnAsync(new CodexTurnSteerRequest(
                     threadId,
                     turnId,
-                    item.Text)).ConfigureAwait(true);
-                threadWorkspace.GetRequired(threadId).AddGuidance(item.Text);
+                    BuildUserInputs(item.Text, item.Images, item.Options.Model))).ConfigureAwait(true);
+                if (!string.IsNullOrWhiteSpace(item.Text))
+                {
+                    threadWorkspace.GetRequired(threadId).AddGuidance(item.Text);
+                }
                 queue.Remove(item.Id);
                 await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
                 TaskWorkspace.NotifyQueuedFollowUpsChanged();
@@ -960,16 +1162,21 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             var guidance = SteeringText.Trim();
+            var images = TaskWorkspace.Attachments.Select(image => image.Clone()).ToList();
             await appServerSessionCoordinator.SteerTurnAsync(new CodexTurnSteerRequest(
                 threadId,
                 turnId,
-                guidance)).ConfigureAwait(true);
+                BuildUserInputs(guidance, images))).ConfigureAwait(true);
             var service = threadWorkspace.ThreadIds.Contains(threadId)
                 ? threadWorkspace.GetRequired(threadId)
                 : threadService;
-            service.AddGuidance(guidance);
+            if (!string.IsNullOrWhiteSpace(guidance))
+            {
+                service.AddGuidance(guidance);
+            }
             TaskWorkspace.NotifyResponseChanged();
             SteeringText = string.Empty;
+            TaskWorkspace.ClearAttachments();
             StatusMessage = "Steering sent to active turn";
         }
         catch (Exception ex)
@@ -1190,9 +1397,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(PromptText))
+        if (string.IsNullOrWhiteSpace(PromptText) && !TaskWorkspace.HasAttachments)
         {
-            StatusMessage = "Enter a prompt before starting a Codex task";
+            StatusMessage = "Enter a prompt or attach an image before starting a Codex task";
+            return;
+        }
+
+        if (!TaskWorkspace.CanSubmitAttachments)
+        {
+            StatusMessage = TaskWorkspace.AttachmentValidationMessage;
             return;
         }
 
@@ -1213,21 +1426,26 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             var submittedPrompt = PromptText.Trim();
+            var submittedImages = TaskWorkspace.Attachments.Select(image => image.Clone()).ToList();
             TaskWorkspace.SubmittedPrompt = submittedPrompt;
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
             activeThreadId = await EnsureActiveThreadAsync().ConfigureAwait(true);
-            threadService.BeginTurn(submittedPrompt);
+            threadService.BeginTurn(submittedPrompt, submittedImages);
             TaskWorkspace.NotifyResponseChanged();
             if (SelectedThread is not null)
             {
-                SelectedThread.Preview = submittedPrompt;
+                SelectedThread.Preview = string.IsNullOrWhiteSpace(submittedPrompt)
+                    ? $"{submittedImages.Count} image{(submittedImages.Count == 1 ? string.Empty : "s")}"
+                    : submittedPrompt;
             }
 
             var persistedThread = settings.ProjectThreads.FirstOrDefault(thread =>
                 string.Equals(thread.ThreadId, activeThreadId, StringComparison.Ordinal));
             if (persistedThread is not null)
             {
-                persistedThread.Preview = submittedPrompt;
+                persistedThread.Preview = string.IsNullOrWhiteSpace(submittedPrompt)
+                    ? $"{submittedImages.Count} image{(submittedImages.Count == 1 ? string.Empty : "s")}"
+                    : submittedPrompt;
             }
 
             var workspacePath = GetActiveWorkspacePath();
@@ -1235,7 +1453,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             settings.LastReasoningEffortOverride = NormalizeOverride(ReasoningEffortOverride);
             settings.LastServiceTierOverride = ToSettingsValue(TaskWorkspace.ServiceTierSelection);
             var turn = await appServerSessionCoordinator
-                .StartTurnAsync(CreateTurnStartRequest(activeThreadId, submittedPrompt, workspacePath))
+                .StartTurnAsync(CreateTurnStartRequest(activeThreadId, submittedPrompt, submittedImages, workspacePath))
                 .ConfigureAwait(true);
 
             var boundTurn = threadService.BindPendingTurn(turn.TurnId);
@@ -1256,6 +1474,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 IsTurnRunning = false;
             }
             cancelTurnCommand.RaiseCanExecuteChanged();
+            TaskWorkspace.ClearAttachments();
             StatusMessage = boundTurn.Status == CodexTurnStatus.Running
                 ? "Codex turn running"
                 : $"Codex turn {boundTurn.Status.ToString().ToLowerInvariant()}";
@@ -1607,7 +1826,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         appServerSessionCoordinator.State == AppServerSessionState.Connected &&
         !string.IsNullOrWhiteSpace(activeThreadId) &&
         !string.IsNullOrWhiteSpace(activeTurnId) &&
-        !string.IsNullOrWhiteSpace(SteeringText);
+        (!string.IsNullOrWhiteSpace(SteeringText) || TaskWorkspace.HasAttachments) &&
+        TaskWorkspace.CanSubmitAttachments;
 
     private void RaiseThreadCommandStates()
     {
@@ -1677,12 +1897,57 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             permissions.PermissionProfileId);
     }
 
-    private CodexTurnStartRequest CreateTurnStartRequest(string threadId, string prompt, string cwd)
+    private IReadOnlyList<CodexUserInput> BuildUserInputs(
+        string text,
+        IReadOnlyList<AttachmentReference> images,
+        string? model = null)
+    {
+        var selectedModel = string.IsNullOrWhiteSpace(model)
+            ? TaskWorkspace.SelectedModel
+            : TaskWorkspace.ModelCatalog.FirstOrDefault(item =>
+                string.Equals(item.Model, model, StringComparison.OrdinalIgnoreCase));
+        if (images.Count > 0 && selectedModel?.SupportsImageInput == false)
+        {
+            throw new InvalidOperationException(
+                $"{selectedModel.DisplayName} does not accept image input. Remove the images or choose an image-capable model.");
+        }
+
+        var inputs = new List<CodexUserInput>();
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            inputs.Add(new CodexTextInput(text));
+        }
+
+        foreach (var image in images)
+        {
+            var path = attachmentStore is not null
+                ? attachmentStore.ResolvePath(image)
+                : image.ManagedPath;
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                throw new FileNotFoundException($"Attachment '{image.DisplayName}' is unavailable.", path);
+            }
+            image.ManagedPath = path;
+            inputs.Add(new CodexLocalImageInput(path));
+        }
+
+        if (inputs.Count == 0)
+        {
+            throw new InvalidOperationException("Enter a prompt or attach an image before sending.");
+        }
+        return inputs;
+    }
+
+    private CodexTurnStartRequest CreateTurnStartRequest(
+        string threadId,
+        string prompt,
+        IReadOnlyList<AttachmentReference> images,
+        string cwd)
     {
         var permissions = ResolvePermissionPolicy();
         return new CodexTurnStartRequest(
             threadId,
-            prompt,
+            BuildUserInputs(prompt, images),
             cwd,
             permissions.Sandbox,
             NormalizeOverride(ModelOverride),
@@ -1788,7 +2053,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             }
 
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
-            service.BeginTurn(item.Text);
+            service.BeginTurn(item.Text, item.Images);
             if (string.Equals(threadId, activeThreadId, StringComparison.Ordinal))
             {
                 TaskWorkspace.NotifyResponseChanged();
@@ -1799,7 +2064,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             persisted.Preview = item.Text;
             var turn = await appServerSessionCoordinator.StartTurnAsync(new CodexTurnStartRequest(
                 threadId,
-                item.Text,
+                BuildUserInputs(item.Text, item.Images, options.Model),
                 workspacePath,
                 options.Sandbox,
                 options.Model,
@@ -2328,6 +2593,21 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void SelectThread(ProjectThreadState? state)
     {
         var previousActiveThreadId = activeThreadId;
+        CaptureAttachmentDraft(SelectedProjectPath, previousActiveThreadId);
+        if (previousActiveThreadId is null && state is not null && !string.IsNullOrWhiteSpace(SelectedProjectPath))
+        {
+            var normalizedProject = Path.GetFullPath(SelectedProjectPath);
+            var newThreadDraft = settings.ComposerAttachmentDrafts.FirstOrDefault(item =>
+                string.Equals(Path.GetFullPath(item.ProjectPath), normalizedProject, StringComparison.OrdinalIgnoreCase) &&
+                item.ThreadId is null);
+            var existingThreadDraft = settings.ComposerAttachmentDrafts.Any(item =>
+                string.Equals(Path.GetFullPath(item.ProjectPath), normalizedProject, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(item.ThreadId, state.ThreadId, StringComparison.Ordinal));
+            if (newThreadDraft is not null && !existingThreadDraft)
+            {
+                newThreadDraft.ThreadId = state.ThreadId;
+            }
+        }
         activeThreadId = state?.ThreadId;
         if (!string.Equals(previousActiveThreadId, activeThreadId, StringComparison.Ordinal))
         {
@@ -2358,6 +2638,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 threadStore.SetActive(settings, SelectedProjectPath, state.ThreadId);
             }
         }
+
+        RestoreAttachmentDraft(SelectedProjectPath, activeThreadId);
 
         OnPropertyChanged(nameof(TimelineItems));
         OnPropertyChanged(nameof(RawEvents));
@@ -2461,7 +2743,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         Status = source.Status,
         StartedAt = source.StartedAt,
         CompletedAt = source.CompletedAt,
-        Activity = [.. source.Activity]
+        Activity = [.. source.Activity],
+        UserImages = [.. source.UserImages.Select(image => image.Clone())]
     };
 
     public async ValueTask DisposeAsync()
@@ -2541,6 +2824,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             settings.FollowUpBehavior = TaskWorkspace.FollowUpBehavior.ToSettingsValue();
             _ = SaveFollowUpPreferenceAsync();
+        }
+
+        if (propertyName == nameof(TaskViewModel.Attachments))
+        {
+            _ = SaveAttachmentDraftAsync();
         }
 
         var mainProperty = propertyName switch

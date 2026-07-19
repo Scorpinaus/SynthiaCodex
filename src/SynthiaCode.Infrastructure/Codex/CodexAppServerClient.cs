@@ -227,7 +227,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                         ReadReasoningEfforts(item),
                         ReadServiceTiers(item),
                         ReadString(item, "availabilityNux.message"),
-                        ReadStringArray(item, "additionalSpeedTiers")));
+                        ReadStringArray(item, "additionalSpeedTiers"),
+                        ReadInputModalities(item)));
                 }
             }
 
@@ -478,10 +479,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(request.Prompt))
-        {
-            throw new ArgumentException("Steering prompt is required.", nameof(request));
-        }
+        ValidateUserInputs(request.Inputs, nameof(request));
 
         var result = await SendRequestAsync(
             "turn/steer",
@@ -489,14 +487,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             {
                 ["threadId"] = request.ThreadId,
                 ["expectedTurnId"] = request.ExpectedTurnId,
-                ["input"] = new JsonArray
-                {
-                    new JsonObject
-                    {
-                        ["type"] = "text",
-                        ["text"] = request.Prompt
-                    }
-                }
+                ["input"] = WriteUserInputs(request.Inputs)
             },
             cancellationToken).ConfigureAwait(false) as JsonObject;
         var turnId = ReadString(result, "turnId");
@@ -518,10 +509,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             throw new ArgumentException("Thread ID is required.", nameof(request));
         }
 
-        if (string.IsNullOrWhiteSpace(request.Prompt))
-        {
-            throw new ArgumentException("Prompt is required.", nameof(request));
-        }
+        ValidateUserInputs(request.Inputs, nameof(request));
 
         ValidatePermissionBoundary(request.Sandbox, request.PermissionProfileId);
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
@@ -529,14 +517,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         var parameters = new JsonObject
         {
             ["threadId"] = request.ThreadId,
-            ["input"] = new JsonArray
-            {
-                new JsonObject
-                {
-                    ["type"] = "text",
-                    ["text"] = request.Prompt
-                }
-            },
+            ["input"] = WriteUserInputs(request.Inputs),
             ["cwd"] = request.Cwd
         };
 
@@ -1293,6 +1274,98 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
 
         return values;
+    }
+
+    private static IReadOnlyList<CodexInputModality>? ReadInputModalities(JsonObject source)
+    {
+        if (source["inputModalities"] is not JsonArray items)
+        {
+            return null;
+        }
+
+        var values = new List<CodexInputModality>();
+        foreach (var item in items.OfType<JsonValue>())
+        {
+            if (!item.TryGetValue<string>(out var value))
+            {
+                continue;
+            }
+            var modality = value.ToLowerInvariant() switch
+            {
+                "text" => CodexInputModality.Text,
+                "image" => CodexInputModality.Image,
+                _ => (CodexInputModality?)null
+            };
+            if (modality is { } known && !values.Contains(known))
+            {
+                values.Add(known);
+            }
+        }
+        return values;
+    }
+
+    private static void ValidateUserInputs(IReadOnlyList<CodexUserInput>? inputs, string parameterName)
+    {
+        if (inputs is null || inputs.Count == 0)
+        {
+            throw new ArgumentException("At least one prompt input is required.", parameterName);
+        }
+        var hasContent = false;
+        foreach (var input in inputs)
+        {
+            switch (input)
+            {
+                case CodexTextInput text when !string.IsNullOrWhiteSpace(text.Text):
+                    hasContent = true;
+                    break;
+                case CodexLocalImageInput image when !string.IsNullOrWhiteSpace(image.Path):
+                    hasContent = true;
+                    break;
+                case CodexImageInput image when image.DataUrl.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase):
+                    hasContent = true;
+                    break;
+                case CodexTextInput or CodexLocalImageInput or CodexImageInput:
+                    break;
+                default:
+                    throw new ArgumentException("The prompt contains an unsupported input part.", parameterName);
+            }
+        }
+        if (!hasContent)
+        {
+            throw new ArgumentException("At least one non-empty text or image input is required.", parameterName);
+        }
+    }
+
+    private static JsonArray WriteUserInputs(IReadOnlyList<CodexUserInput> inputs)
+    {
+        var result = new JsonArray();
+        foreach (var input in inputs)
+        {
+            JsonObject? item = input switch
+            {
+                CodexTextInput text when !string.IsNullOrWhiteSpace(text.Text) => new JsonObject
+                {
+                    ["type"] = "text",
+                    ["text"] = text.Text
+                },
+                CodexLocalImageInput image when !string.IsNullOrWhiteSpace(image.Path) => new JsonObject
+                {
+                    ["type"] = "localImage",
+                    ["path"] = image.Path
+                },
+                CodexImageInput image when image.DataUrl.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase) => new JsonObject
+                {
+                    ["type"] = "image",
+                    ["url"] = image.DataUrl
+                },
+                _ => null
+            };
+            if (item is not null)
+            {
+                result.Add(item);
+            }
+        }
+        return result;
     }
 
     private static CodexSandbox? ParseSandbox(string? value) => value?.ToLowerInvariant() switch

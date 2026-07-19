@@ -1,4 +1,5 @@
 using SynthiaCode.Core.Projects;
+using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Codex.AppServer;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -36,6 +37,24 @@ public sealed class AppSettings
     public List<RecentProject> RecentProjects { get; set; } = [];
 
     public List<PersistedProjectThread> ProjectThreads { get; set; } = [];
+
+    public List<ComposerAttachmentDraftSnapshot> ComposerAttachmentDrafts { get; set; } = [];
+}
+
+public sealed class ComposerAttachmentDraftSnapshot
+{
+    public string ProjectPath { get; set; } = string.Empty;
+    public string? ThreadId { get; set; }
+    public List<AttachmentReference> Images { get; set; } = [];
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public ComposerAttachmentDraftSnapshot Clone() => new()
+    {
+        ProjectPath = ProjectPath,
+        ThreadId = ThreadId,
+        Images = [.. Images.Select(image => image.Clone())],
+        UpdatedAt = UpdatedAt
+    };
 }
 
 // Storage-only DTO. Keep property names stable so Phase 3-5A settings.json files

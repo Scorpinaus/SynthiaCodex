@@ -58,6 +58,6 @@
 - The pre-implementation test run failed at compile time because the new terminal contracts, ConPTY implementation, and view-model surface were intentionally absent. This establishes the red baseline before production code.
 - The focused ConPTY run exposed that anonymous pipe handles are synchronous and that `STARTF_USESTDHANDLES` is required to keep the hosted PowerShell attached to ConPTY instead of the parent console. Output reading now runs on a dedicated background task.
 - The expanded console runner passes all 48 tests, including a real ConPTY PowerShell session that verifies streamed output and the requested working directory.
-- `dotnet build NativeCodexAssistant.sln --no-restore` passes with zero warnings and zero errors.
-- `scripts\publish-portable.cmd` produced the self-contained `portable\NativeCodexAssistant\NativeCodexAssistant.App.exe` artifact.
+- `dotnet build SynthiaCode.sln --no-restore` passes with zero warnings and zero errors.
+- `scripts\publish-portable.cmd` produced the self-contained `portable\SynthiaCode\SynthiaCode.App.exe` artifact.
 - `scripts\maintenance-sweep.cmd` removed eight reproducible build/intermediate directories, recovered 144.74 MiB, and preserved the canonical portable build.

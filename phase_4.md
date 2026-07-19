@@ -56,7 +56,7 @@
 ## Implementation notes
 
 - The pre-implementation test run failed at compile time because the new worktree contracts and implementation were intentionally absent, establishing the red test baseline.
-- The expanded console runner passes all 44 tests. The opt-in live Codex smoke test remains skipped unless `NCA_RUN_LIVE_CODEX_SMOKE=1` is set.
-- `dotnet build NativeCodexAssistant.sln --no-restore` passes with zero warnings and zero errors.
-- The first portable publish attempt failed because the sandboxed process could not authenticate to NuGet over TLS. The approved network-enabled retry restored successfully and produced `portable\NativeCodexAssistant\NativeCodexAssistant.App.exe`.
+- The expanded console runner passes all 44 tests. The opt-in live Codex smoke test remains skipped unless `SYNTHIACODE_RUN_LIVE_CODEX_SMOKE=1` is set.
+- `dotnet build SynthiaCode.sln --no-restore` passes with zero warnings and zero errors.
+- The first portable publish attempt failed because the sandboxed process could not authenticate to NuGet over TLS. The approved network-enabled retry restored successfully and produced `portable\SynthiaCode\SynthiaCode.App.exe`.
 - `scripts\maintenance-sweep.cmd` removed eight reproducible build/intermediate directories, recovered 144.42 MiB, and preserved the canonical portable build.

@@ -8,10 +8,10 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $repoFullPath = [System.IO.Path]::GetFullPath($repoRoot).TrimEnd('\', '/')
 $repoPrefix = $repoFullPath + [System.IO.Path]::DirectorySeparatorChar
-$solutionPath = Join-Path $repoFullPath "NativeCodexAssistant.sln"
+$solutionPath = Join-Path $repoFullPath "SynthiaCode.sln"
 $srcPath = Join-Path $repoFullPath "src"
 $portableRoot = Join-Path $repoFullPath "portable"
-$canonicalPortablePath = Join-Path $portableRoot "NativeCodexAssistant"
+$canonicalPortablePath = Join-Path $portableRoot "SynthiaCode"
 
 if (-not (Test-Path -LiteralPath $solutionPath -PathType Leaf)) {
     throw "Repository marker was not found: $solutionPath"
@@ -94,10 +94,10 @@ Get-ChildItem -LiteralPath $srcPath -Recurse -Filter *.csproj -File | ForEach-Ob
 
 Add-Candidate -Path (Join-Path $repoFullPath ".vs") -Category "Visual Studio cache"
 Add-Candidate -Path (Join-Path $repoFullPath "TestResults") -Category "test results"
-Add-Candidate -Path (Join-Path $repoFullPath "NativeCodexAssistant.log") -Category "root application log"
+Add-Candidate -Path (Join-Path $repoFullPath "SynthiaCode.log") -Category "root application log"
 
 if (Test-Path -LiteralPath $portableRoot -PathType Container) {
-    Get-ChildItem -LiteralPath $portableRoot -Directory -Force -Filter "NativeCodexAssistant-*" | ForEach-Object {
+    Get-ChildItem -LiteralPath $portableRoot -Directory -Force -Filter "SynthiaCode-*" | ForEach-Object {
         Add-Candidate -Path $_.FullName -Category "noncanonical portable build"
     }
 }

@@ -1,0 +1,390 @@
+<UserControl x:Class="SynthiaCode.App.Views.TaskView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:SynthiaCode.App.Controls"
+             UseLayoutRounding="True"
+             SnapsToDevicePixels="True">
+    <Grid Margin="0,10,0,0">
+        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <Border Style="{StaticResource Card}" AutomationProperties.Name="Task transcript">
+            <Grid>
+            <TextBlock Text="Start a conversation by describing a task below." Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding TaskWorkspace.HasConversation, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
+            <ListBox x:Name="ConversationList"
+                     ItemsSource="{Binding TaskWorkspace.ConversationTurns}"
+                     BorderThickness="0"
+                     Background="Transparent"
+                     Padding="2"
+                     VirtualizingStackPanel.IsVirtualizing="True"
+                     VirtualizingStackPanel.VirtualizationMode="Recycling"
+                     VirtualizingPanel.ScrollUnit="Pixel"
+                     ScrollViewer.CanContentScroll="True"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     ScrollViewer.ScrollChanged="OnConversationScrollChanged"
+                     AutomationProperties.Name="Multi-turn conversation">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        <Setter Property="Padding" Value="0"/>
+                        <Setter Property="Margin" Value="0"/>
+                        <Setter Property="Background" Value="Transparent"/>
+                        <Setter Property="Focusable" Value="False"/>
+                        <Setter Property="IsTabStop" Value="False"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <ContentPresenter HorizontalAlignment="Stretch"/>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource ConversationTurnCard}" Margin="2,2,2,18" AutomationProperties.Name="Conversation turn">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Turn" Style="{StaticResource SectionLabel}" Margin="0"/>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <TextBlock Text="{Binding StartedAt, StringFormat={}{0:g}}" Style="{StaticResource ConversationMetadataText}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <Border Style="{StaticResource StatePill}"><TextBlock Text="{Binding StatusLabel}" Style="{StaticResource ConversationMetadataText}"/></Border>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Border Style="{StaticResource ConversationUserSurface}" Margin="48,0,0,12" AutomationProperties.Name="User message">
+                                    <StackPanel>
+                                        <TextBlock Text="You" Style="{StaticResource ConversationRoleText}" Foreground="{DynamicResource SignalBrush}" Margin="0,0,0,6"/>
+                                        <TextBlock Text="{Binding UserPrompt}" Style="{StaticResource ConversationBodyText}"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource ConversationActivitySurface}" Margin="24,0,24,12" Visibility="{Binding HasActivity, Converter={StaticResource BooleanToVisibilityConverter}}" AutomationProperties.Name="Turn activities">
+                                    <Expander Header="{Binding ActivitySummary}" IsExpanded="{Binding IsActivityExpanded, Mode=TwoWay}" AutomationProperties.Name="Turn activity">
+                                        <ItemsControl ItemsSource="{Binding Activity}" Margin="8,5,0,0">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1" Padding="0,7">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions><ColumnDefinition Width="8"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                            <Ellipse Width="7" Height="7" Fill="{DynamicResource SignalBrush}" VerticalAlignment="Top" Margin="0,5,0,0"/>
+                                                            <StackPanel Grid.Column="2"><TextBlock Text="{Binding Title}" Style="{StaticResource ConversationActivityTitleText}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource ConversationActivityDetailText}" Margin="0,2,0,0"/></StackPanel>
+                                                            <TextBlock Grid.Column="3" Text="{Binding CategoryLabel}" Style="{StaticResource ConversationMetadataText}" Margin="8,2,0,0"/>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </Expander>
+                                </Border>
+
+                                <Border Style="{StaticResource ConversationAssistantSurface}" Margin="0,0,48,0" AutomationProperties.Name="Assistant message">
+                                    <StackPanel>
+                                        <TextBlock Text="Assistant" Style="{StaticResource ConversationRoleText}" Foreground="{DynamicResource CreateActionBrush}" Margin="0,0,0,6"/>
+                                        <controls:MarkdownTextBlock Markdown="{Binding AssistantResponseDisplay}"
+                                                                    LinkCommand="{Binding DataContext.TaskWorkspace.OpenExternalUriCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                    Style="{StaticResource ConversationBodyText}"
+                                                                    AutomationProperties.LiveSetting="Polite"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <Button x:Name="JumpLatestButton" Content="Jump to latest" Style="{StaticResource CompactButton}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,14,14" Visibility="Collapsed" Click="OnJumpLatestClick"/>
+            </Grid>
+        </Border>
+        <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,12,0,0" Padding="12" AutomationProperties.Name="Task composer">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <Grid>
+                    <TextBox x:Name="PromptBox"
+                             Text="{Binding TaskWorkspace.Prompt, UpdateSourceTrigger=PropertyChanged}"
+                             AcceptsReturn="True"
+                             MinHeight="82"
+                             MaxHeight="150"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             Padding="10"
+                             Visibility="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                             ToolTip="Describe a task. Press Ctrl+Enter to run."
+                             AutomationProperties.Name="Task prompt"/>
+                    <TextBox x:Name="GuidanceBox"
+                             Text="{Binding TaskWorkspace.SteeringText, UpdateSourceTrigger=PropertyChanged}"
+                             AcceptsReturn="True"
+                             MinHeight="82"
+                             MaxHeight="150"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             Padding="10"
+                             Visibility="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource BooleanToVisibilityConverter}}"
+                             ToolTip="Guide the active task using this same composer."
+                             AutomationProperties.Name="Active task guidance"/>
+                </Grid>
+
+                <Grid Grid.Row="1" Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <WrapPanel x:Name="ComposerOptionsPanel" VerticalAlignment="Center">
+                    <Button x:Name="ModelOptionsButton"
+                            Command="{Binding TaskWorkspace.OpenOptionsCommand}"
+                            Style="{StaticResource CompactButton}"
+                            MinHeight="32"
+                            MaxWidth="340"
+                            Padding="10,4"
+                            HorizontalAlignment="Left"
+                            HorizontalContentAlignment="Left"
+                            IsEnabled="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                            ToolTip="Choose the model, reasoning effort, and Fast mode for the next turn."
+                            AutomationProperties.Name="Model, reasoning, and Fast options">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding TaskWorkspace.ModelSelectionSummary}"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="⌄" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Button>
+
+                        <ComboBox x:Name="ExecutionPolicySelector"
+                                  ItemsSource="{Binding ExecutionPolicy.ModeOptions}"
+                                  SelectedItem="{Binding ExecutionPolicy.SelectedMode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                  IsEnabled="{Binding CanChangeExecutionPolicy}"
+                                  MinHeight="32"
+                                  MinWidth="132"
+                                  MaxWidth="180"
+                                  Margin="8,0,0,0"
+                                  VerticalContentAlignment="Center"
+                                  AutomationProperties.Name="Execution policy">
+                            <ComboBox.ToolTip>
+                                <StackPanel MaxWidth="320">
+                                    <TextBlock Text="{Binding ExecutionPolicy.EffectiveSummary}"/>
+                                    <TextBlock Text="{Binding ExecutionPolicy.ManagedSummary}"
+                                               Foreground="{DynamicResource MutedInkBrush}"
+                                               Margin="0,4,0,0"
+                                               TextWrapping="Wrap"/>
+                                    <TextBlock Text="{Binding ExecutionPolicy.ConfigurationWarning}"
+                                               Foreground="{DynamicResource DangerBrush}"
+                                               Margin="0,4,0,0"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </ComboBox.ToolTip>
+                        </ComboBox>
+
+                        <ComboBox x:Name="CustomPermissionProfileSelector"
+                                  ItemsSource="{Binding ExecutionPolicy.CustomProfileOptions}"
+                                  SelectedValuePath="Id"
+                                  SelectedValue="{Binding ExecutionPolicy.SelectedCustomProfileId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                  IsEnabled="{Binding CanChangeExecutionPolicy}"
+                                  Visibility="{Binding ExecutionPolicy.IsCustom, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                  MinHeight="32"
+                                  MinWidth="150"
+                                  MaxWidth="220"
+                                  Margin="8,0,0,0"
+                                  VerticalContentAlignment="Center"
+                                  ToolTip="Choose the config.toml default or a named permission profile."
+                                  AutomationProperties.Name="Custom permission profile">
+                            <ComboBox.ItemContainerStyle>
+                                <Style TargetType="{x:Type ComboBoxItem}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsAllowed}" Value="False">
+                                            <Setter Property="IsEnabled" Value="False"/>
+                                            <Setter Property="Opacity" Value="0.55"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ComboBox.ItemContainerStyle>
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Label}"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding Description}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </WrapPanel>
+
+                    <Popup x:Name="ModelOptionsPopup"
+                           PlacementTarget="{Binding ElementName=ModelOptionsButton}"
+                           Placement="Top"
+                           VerticalOffset="-8"
+                           IsOpen="{Binding TaskWorkspace.IsOptionsFlyoutOpen, Mode=TwoWay}"
+                           StaysOpen="False"
+                           AllowsTransparency="True"
+                           PopupAnimation="Fade"
+                           DataContext="{Binding DataContext, ElementName=ModelOptionsButton}">
+                        <Border Width="380"
+                                MaxHeight="460"
+                                Padding="12"
+                                CornerRadius="8"
+                                Background="{DynamicResource PanelBrush}"
+                                BorderBrush="{DynamicResource ButtonBorderBrush}"
+                                BorderThickness="1"
+                                PreviewKeyDown="OnModelOptionsPreviewKeyDown">
+                            <Grid>
+                                <StackPanel Visibility="{Binding TaskWorkspace.IsOptionsMainPage, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <Grid Margin="4,2,4,10">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="Model options" FontSize="15" FontWeight="SemiBold"/>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding TaskWorkspace.AccountPlanLabel}"
+                                                   Foreground="{DynamicResource MutedInkBrush}"
+                                                   Visibility="{Binding TaskWorkspace.HasAccountPlanLabel, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                   AutomationProperties.Name="Account plan context"/>
+                                    </Grid>
+
+                                    <Button Command="{Binding TaskWorkspace.ShowModelsCommand}"
+                                            Margin="0,2"
+                                            Padding="10,8"
+                                            HorizontalContentAlignment="Stretch"
+                                            AutomationProperties.Name="Choose model">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Text="Model" Foreground="{DynamicResource MutedInkBrush}"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding TaskWorkspace.SelectedModel.DisplayName, TargetNullValue=Load models}" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Grid.Column="2" Text="›" Margin="8,0,0,0"/>
+                                        </Grid>
+                                    </Button>
+
+                                    <Button Command="{Binding TaskWorkspace.ShowReasoningCommand}"
+                                            Margin="0,2"
+                                            Padding="10,8"
+                                            HorizontalContentAlignment="Stretch"
+                                            AutomationProperties.Name="Choose reasoning effort">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Text="Reasoning" Foreground="{DynamicResource MutedInkBrush}"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding TaskWorkspace.SelectedReasoning.DisplayName, TargetNullValue=Default}"/>
+                                            <TextBlock Grid.Column="2" Text="›" Margin="8,0,0,0"/>
+                                        </Grid>
+                                    </Button>
+
+                                    <Border Margin="0,8,0,4" Padding="10,8" Background="{DynamicResource FieldBrush}" CornerRadius="5">
+                                        <StackPanel>
+                                            <CheckBox Content="Fast mode"
+                                                      IsChecked="{Binding TaskWorkspace.IsFastModeEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                      IsEnabled="{Binding TaskWorkspace.IsFastModeAvailable}"
+                                                      AutomationProperties.Name="Fast mode"/>
+                                            <TextBlock Text="{Binding TaskWorkspace.FastModeDescription}"
+                                                       Foreground="{DynamicResource MutedInkBrush}"
+                                                       FontSize="11"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,5,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <TextBlock Text="Loading the model catalog..."
+                                               Margin="4,8,4,2"
+                                               Foreground="{DynamicResource MutedInkBrush}"
+                                               Visibility="{Binding TaskWorkspace.IsModelCatalogLoading, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                    <TextBlock Text="{Binding TaskWorkspace.ModelCatalogError}"
+                                               Margin="4,8,4,2"
+                                               Foreground="{DynamicResource DangerBrush}"
+                                               TextWrapping="Wrap"
+                                               Visibility="{Binding TaskWorkspace.HasModelCatalogError, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                               AutomationProperties.LiveSetting="Polite"/>
+                                    <Button Content="Refresh models"
+                                            Command="{Binding TaskWorkspace.LoadModelsCommand}"
+                                            Style="{StaticResource CompactButton}"
+                                            HorizontalAlignment="Left"
+                                            Margin="0,8,0,0"/>
+                                </StackPanel>
+
+                                <StackPanel Visibility="{Binding TaskWorkspace.IsOptionsModelPage, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <Button Content="‹  Model"
+                                            Command="{Binding TaskWorkspace.ShowOptionsMainCommand}"
+                                            Style="{StaticResource CompactButton}"
+                                            HorizontalAlignment="Left"
+                                            Margin="0,0,0,8"/>
+                                    <ListBox ItemsSource="{Binding TaskWorkspace.ModelCatalog}"
+                                             SelectedItem="{Binding TaskWorkspace.SelectedModel, Mode=TwoWay}"
+                                             MaxHeight="360"
+                                             BorderThickness="0"
+                                             Background="Transparent"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                             AutomationProperties.Name="Available models">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="8,4"
+                                                            MaxHeight="44"
+                                                            ToolTip="{Binding AvailabilityMessage}">
+                                                    <TextBlock Text="{Binding DisplayName}"
+                                                               FontWeight="SemiBold"
+                                                               TextWrapping="NoWrap"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding Description}"
+                                                               Foreground="{DynamicResource MutedInkBrush}"
+                                                               FontSize="11"
+                                                               TextWrapping="NoWrap"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               ToolTip="{Binding Description}"
+                                                               Margin="0,2,0,0"/>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+
+                                <StackPanel Visibility="{Binding TaskWorkspace.IsOptionsReasoningPage, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <Button Content="‹  Reasoning"
+                                            Command="{Binding TaskWorkspace.ShowOptionsMainCommand}"
+                                            Style="{StaticResource CompactButton}"
+                                            HorizontalAlignment="Left"
+                                            Margin="0,0,0,8"/>
+                                    <TextBlock Text="{Binding TaskWorkspace.SelectedModel.DisplayName}"
+                                               Foreground="{DynamicResource MutedInkBrush}"
+                                               Margin="8,0,8,6"/>
+                                    <ListBox ItemsSource="{Binding TaskWorkspace.ReasoningOptions}"
+                                             SelectedItem="{Binding TaskWorkspace.SelectedReasoning, Mode=TwoWay}"
+                                             MaxHeight="330"
+                                             BorderThickness="0"
+                                             Background="Transparent"
+                                             AutomationProperties.Name="Supported reasoning efforts">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="8,6">
+                                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource MutedInkBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Popup>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="10,0,0,0">
+                        <Button Content="{Binding TaskWorkspace.ComposerActionLabel}"
+                                Command="{Binding TaskWorkspace.SubmitCommand}"
+                                Style="{StaticResource RunTaskButton}"
+                                MinWidth="104"
+                                Visibility="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
+                        <Button Content="Guide task"
+                                Command="{Binding TaskWorkspace.SteerCommand}"
+                                Style="{StaticResource RunTaskButton}"
+                                MinWidth="104"
+                                Visibility="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        <Button Content="Cancel"
+                                Command="{Binding TaskWorkspace.CancelCommand}"
+                                MinWidth="104"
+                                Margin="8,0,0,0"
+                                Visibility="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

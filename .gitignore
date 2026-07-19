@@ -5,5 +5,5 @@ obj/
 *.user
 *.suo
 TestResults/
-NativeCodexAssistant.log
+SynthiaCode.log
 portable/

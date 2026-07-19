@@ -13,6 +13,6 @@
 - Safety: Git actions are disabled and rejected when the selected project is not inside a detected repository. The app does not commit or push automatically.
 - UI: the main workspace now has Task and Changes tabs. Changes includes branch/status, changed files, diff modes, stage/unstage/discard controls, commit message entry, and editor/Explorer actions.
 - Integration: Git status refreshes when a project is selected, after every Git mutation, and when a Codex turn completes.
-- Verification: `dotnet build NativeCodexAssistant.sln --no-restore` passed with 0 warnings and 0 errors.
+- Verification: `dotnet build SynthiaCode.sln --no-restore` passed with 0 warnings and 0 errors.
 - Verification: the console assertion runner passed all 26 tests, including temporary-repository coverage for status, spaces in paths, untracked diffs, staged diffs, rename metadata, stage, unstage, commit, discard, and non-repository refusal.
 - Upgrade note: the solution now targets .NET 10 directly, so tests run on the installed .NET 10 runtime without a major-version roll-forward override.

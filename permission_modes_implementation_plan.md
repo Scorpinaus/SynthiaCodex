@@ -1,8 +1,8 @@
 # SynthiaCode Permission Modes Implementation Plan
 
-- **Status:** Proposed for review
+- **Status:** Implemented 19 July 2026
 - **Date:** 19 July 2026
-- **Target:** SynthiaCode / Native Codex Assistant
+- **Target:** SynthiaCode / SynthiaCode
 - **Scope:** Replace the low-level execution-policy selectors with ChatGPT-aligned permission modes: **Ask for approval**, **Approve for me**, and **Custom** profiles resolved from `config.toml`
 - **Implementation principle:** TDD, backward-compatible settings migration, fail-closed policy resolution, and no direct edits to Codex configuration
 
@@ -44,13 +44,14 @@ Authoritative references:
 
 The implementation should target the generated schema from the locally discovered `codex-cli 0.144.4`, while retaining compatibility with older app-server versions.
 
-The following command was used during planning:
+Both the stable and experimental bundles were checked during planning:
 
 ```powershell
+codex app-server generate-json-schema --out <temporary-directory>
 codex app-server generate-json-schema --experimental --out <temporary-directory>
 ```
 
-The generated v2 schema confirms:
+`permissionProfile/list` and the related lifecycle fields are present in the stable bundle. The generated v2 schemas confirm:
 
 - `permissionProfile/list` accepts `cwd`, `cursor`, and `limit`.
 - Each returned profile has `id`, optional `description`, and `allowed`.
@@ -416,20 +417,20 @@ Disable changing permission mode while the selected turn is active. A changed mo
 
 ### Core
 
-- `src/NativeCodexAssistant.Core/Codex/AppServer/CodexApprovalModels.cs`
+- `src/SynthiaCode.Core/Codex/AppServer/CodexApprovalModels.cs`
   - Add permission-mode, capability, requirement, profile-summary, and active-profile records.
   - Consider splitting execution-policy models into `CodexPermissionModels.cs` to avoid further concentration.
-- `src/NativeCodexAssistant.Core/Codex/AppServer/CodexAppServerModels.cs`
+- `src/SynthiaCode.Core/Codex/AppServer/CodexAppServerModels.cs`
   - Add mutually exclusive `PermissionProfileId` to thread/turn lifecycle records.
   - Extend relevant results with active-profile provenance.
-- `src/NativeCodexAssistant.Core/Settings/AppSettings.cs`
+- `src/SynthiaCode.Core/Settings/AppSettings.cs`
   - Add new mode/profile/schema fields while retaining legacy fields for migration.
-- `src/NativeCodexAssistant.Core/Settings/AppSettingsSnapshot.cs`
+- `src/SynthiaCode.Core/Settings/AppSettingsSnapshot.cs`
   - Clone all new and retained migration fields.
 
 ### Infrastructure
 
-- `src/NativeCodexAssistant.Infrastructure/Codex/CodexAppServerClient.cs`
+- `src/SynthiaCode.Infrastructure/Codex/CodexAppServerClient.cs`
   - Implement `permissionProfile/list` pagination and tolerant method-not-found handling.
   - Parse reviewer/profile requirements.
   - Serialize profile IDs on start/resume/fork/turn.
@@ -438,36 +439,36 @@ Disable changing permission mode while the selected turn is active. A changed mo
 
 ### Application services
 
-- `src/NativeCodexAssistant.App/Services/IAppServerSessionCoordinator.cs`
+- `src/SynthiaCode.App/Services/IAppServerSessionCoordinator.cs`
   - Add profile-list/capability operations.
-- `src/NativeCodexAssistant.App/Services/AppServerSessionCoordinator.cs`
+- `src/SynthiaCode.App/Services/AppServerSessionCoordinator.cs`
   - Cache capability state by client generation or expose generation-safe reads.
   - Clear profile state with connection replacement.
 
 ### View models
 
-- `src/NativeCodexAssistant.App/ViewModels/ExecutionPolicyViewModel.cs`
+- `src/SynthiaCode.App/ViewModels/ExecutionPolicyViewModel.cs`
   - Replace low-level selection state with mode cards, custom profile selection, effective summary, and availability reasons.
   - Rename to `PermissionModeViewModel` only if the rename improves clarity without unnecessary churn.
-- `src/NativeCodexAssistant.App/ViewModels/MainViewModel.cs`
+- `src/SynthiaCode.App/ViewModels/MainViewModel.cs`
   - Compose the resolver, remove hardcoded reviewers, route resolved selection to all lifecycle requests, and refresh profiles outside the task critical path.
 
 ### Views
 
-- `src/NativeCodexAssistant.App/Views/DetailsView.xaml`
+- `src/SynthiaCode.App/Views/DetailsView.xaml`
   - Replace the two combo boxes with three permission-mode choices.
   - Add custom profile expansion, effective summary, disabled-reason text, refresh, and config shortcut.
 - Existing theme resources should be reused unless radio cards need one small semantic selected/disabled style.
 
 ### Tests
 
-- `src/NativeCodexAssistant.Tests/ApprovalProtocolTests.cs`
+- `src/SynthiaCode.Tests/ApprovalProtocolTests.cs`
   - Add profile-list and exact serialization coverage.
-- `src/NativeCodexAssistant.Tests/ApprovalPresentationTests.cs`
+- `src/SynthiaCode.Tests/ApprovalPresentationTests.cs`
   - Replace low-level selector assertions with permission-mode and custom-profile assertions.
 - Add `PermissionModeTests.cs`
   - Resolver, requirements, capabilities, migration, and view-model behavior.
-- `src/NativeCodexAssistant.Tests/Program.cs`
+- `src/SynthiaCode.Tests/Program.cs`
   - Register the new test group.
 
 ### Documentation
@@ -691,7 +692,7 @@ Safe fields include mode, profile ID, legacy-fallback flag, Codex version, catal
 
 | Risk | Mitigation |
 | --- | --- |
-| Profile API is experimental and changes | Isolate parsing/serialization, ignore unknown fields, gate by capability, retain legacy fallback |
+| Permission profiles are beta and may evolve | Isolate parsing/serialization, ignore unknown fields, gate by capability, retain legacy fallback |
 | Profile and sandbox accidentally sent together | Core invariant plus pre-write serializer guard and exact JSON tests |
 | Auto-review is mistaken for broader access | Keep the same `:workspace` boundary and state reviewer distinction in UI |
 | Custom silently becomes Full access | Never infer from catalog order; require explicit profile ID/default and respect managed restrictions |

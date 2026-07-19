@@ -69,7 +69,7 @@ All checklist items and Phase 5A acceptance gates are fulfilled. Further UI/UX c
 - Accessibility names were added to primary inputs and streamed surfaces. Header/status rows can grow for text scaling, long paths trim or wrap, and virtualized lists are used for long thread, activity, changed-file, and raw-event surfaces.
 - Visual QA covered light, dark, system, wide, and compact states. It exposed stock WPF dark-theme foreground problems in text, tabs, and combo boxes; palette-controlled styles/templates now keep those states readable.
 - The expanded assertion runner passes all 52 tests. The final solution build completes with zero warnings and zero errors.
-- The first portable publish attempt was blocked by sandboxed NuGet network access. The approved retry restored successfully and refreshed `portable\NativeCodexAssistant\NativeCodexAssistant.App.exe`.
+- The first portable publish attempt was blocked by sandboxed NuGet network access. The approved retry restored successfully and refreshed `portable\SynthiaCode\SynthiaCode.App.exe`.
 - Dark-mode follow-up QA replaced the stock WPF button chrome with palette-controlled normal, hover, pressed, keyboard-focus, primary, and disabled states. Combo boxes now use the same dark surface instead of a bright Windows frame.
 - The Changes view now replaces its disabled file/diff/commit workspace with a focused empty state when the selected folder is not a Git repository.
 - Startup now shows the shell immediately, completes Codex/auth diagnostics, and then warms the Codex app-server in the background. The connection badge uses neutral, warning, success, and error colors for idle, connecting/reconnecting, connected, and unavailable/sign-in states. A failed warm-up remains retryable on the next Codex action.

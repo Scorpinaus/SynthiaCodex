@@ -2,8 +2,10 @@
 
 - **Status:** Implemented 19 July 2026
 - **Date:** 19 July 2026
-- **Target:** Native Codex Assistant / SynthiaCode
+- **Target:** SynthiaCode / SynthiaCode
 - **Scope:** Bidirectional app-server request handling, interactive approvals, and configurable sandbox/approval policies
+
+The later ChatGPT-style permission-mode refinement is documented and implemented through `permission_modes_implementation_plan.md`; this record remains the transport and approval-queue history.
 
 ## 1. Recommendation
 
@@ -195,7 +197,7 @@ The app-server read loop must never block waiting for WPF. It raises an event an
 
 ## 5. Core domain model
 
-Add focused files under `NativeCodexAssistant.Core/Codex/AppServer` rather than continuing to grow `CodexAppServerModels.cs`.
+Add focused files under `SynthiaCode.Core/Codex/AppServer` rather than continuing to grow `CodexAppServerModels.cs`.
 
 ### 5.1 Request envelope
 
@@ -570,10 +572,10 @@ Do not send policy changes through `turn/steer`; policy selection is disabled wh
 
 ### Tests
 
-- `NativeCodexAssistant.Tests/ApprovalProtocolTests.cs`.
-- `NativeCodexAssistant.Tests/ApprovalQueueTests.cs`.
-- `NativeCodexAssistant.Tests/ExecutionPolicyTests.cs`.
-- `NativeCodexAssistant.Tests/ApprovalPresentationTests.cs` or additions to responsive layout tests.
+- `SynthiaCode.Tests/ApprovalProtocolTests.cs`.
+- `SynthiaCode.Tests/ApprovalQueueTests.cs`.
+- `SynthiaCode.Tests/ExecutionPolicyTests.cs`.
+- `SynthiaCode.Tests/ApprovalPresentationTests.cs` or additions to responsive layout tests.
 - `Program.cs` — register the new console-runner tests.
 
 ### Documentation after implementation

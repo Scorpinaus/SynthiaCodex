@@ -19,10 +19,10 @@ The normal sweep removes:
 - each project's `bin\` and `obj\` directories
 - project and root `TestResults\` directories
 - the root `.vs\` Visual Studio cache
-- the root `NativeCodexAssistant.log` file
-- portable directories matching `portable\NativeCodexAssistant-*\`
+- the root `SynthiaCode.log` file
+- portable directories matching `portable\SynthiaCode-*\`
 
-The canonical `portable\NativeCodexAssistant\` build is preserved. To produce the smallest source-only folder, explicitly remove it too:
+The canonical `portable\SynthiaCode\` build is preserved. To produce the smallest source-only folder, explicitly remove it too:
 
 ```powershell
 .\scripts\maintenance-sweep.cmd -RemovePortable

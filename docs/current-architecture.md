@@ -1,7 +1,7 @@
-# Native Codex Assistant: Current Architecture through Server-Request Approvals
+# SynthiaCode: Current Architecture through Permission Modes
 
 **Recorded:** 19 July 2026
-**Phase:** Server-request approvals and configurable execution policies after Phase 5G
+**Phase:** Server-request approvals and permission modes after Phase 5G
 **Purpose:** Describe the current architecture while retaining the Phase 5B performance baseline.
 
 ## System shape
@@ -10,10 +10,10 @@ The solution is a Windows-only WPF desktop application with four projects:
 
 | Project | Responsibility | Dependencies |
 | --- | --- | --- |
-| `NativeCodexAssistant.Core` | App-neutral contracts, settings records, thread state, Codex notification state, Git/worktree/terminal models | None |
-| `NativeCodexAssistant.Infrastructure` | Codex CLI/app-server transport, JSON settings, Git, worktrees, ConPTY terminal, auth, logging | Core |
-| `NativeCodexAssistant.App` | WPF composition root, window, theme resources, UI services, commands, presentation state | Core and Infrastructure |
-| `NativeCodexAssistant.Tests` | Console-based behavioral and integration-style assertion runner | App, Core, and Infrastructure |
+| `SynthiaCode.Core` | App-neutral contracts, settings records, thread state, Codex notification state, Git/worktree/terminal models | None |
+| `SynthiaCode.Infrastructure` | Codex CLI/app-server transport, JSON settings, Git, worktrees, ConPTY terminal, auth, logging | Core |
+| `SynthiaCode.App` | WPF composition root, window, theme resources, UI services, commands, presentation state | Core and Infrastructure |
+| `SynthiaCode.Tests` | Console-based behavioral and integration-style assertion runner | App, Core, and Infrastructure |
 
 The intended dependency direction is therefore:
 
@@ -84,13 +84,15 @@ Composer command
 
 Protocol request construction, response correlation, parsing, and transport failure handling remain inside Infrastructure. Core owns app-server request/result records and notification-derived thread state.
 
-### Server-request approvals and execution policy
+### Server-request approvals and permission modes
 
 `CodexAppServerClient` classifies app-server messages as outgoing responses, notifications, or incoming server requests. Incoming request IDs retain their integer or string representation. Command-execution, file-change, and permission requests are parsed to typed Core models; malformed and unsupported requests receive deterministic JSON-RPC errors so the server is never left waiting. The client maintains separate outgoing and incoming registries and permits exactly one successful response for each incoming request.
 
 `AppServerSessionCoordinator` attaches request handlers to the active client generation and rejects responses from a replaced connection. `MainViewModel` marshals requests to the captured UI context and owns `ApprovalQueueViewModel`, which serializes prompts globally. `serverRequest/resolved`, reconnect, and shutdown events invalidate stale prompts. Permission responses are constructed by intersecting the selected top-level permission groups with the immutable original request.
 
-`ExecutionPolicyViewModel` owns the sandbox and approval-policy selectors. Defaults are `workspace-write` and `on-request`; either override can be omitted to inherit Codex configuration. Settings persist through `AppSettings`, while `config/read` and `configRequirements/read` supply effective and managed context when the Settings pane is opened. Full access and `never` approvals require confirmation. Managed restrictions reset an invalid saved override to inheritance and reject later disallowed selections. The resolved overrides are passed consistently to thread start, resume, fork, replacement-thread, and turn-start requests.
+`ExecutionPolicyViewModel` owns the three user-facing permission modes and delegates their exact mapping to `CodexPermissionModeResolver`. Ask for approval and Approve for me share the `:workspace` permission profile and `on-request` policy; their reviewers are `user` and `auto_review`, respectively. Custom omits all boundary/policy/reviewer overrides for the configured default or sends only a selected named profile. `permissionProfile/list` is scoped to the project working directory, paginated, deduplicated in server order, and guarded against stale app-server generations. Method-not-found becomes an explicit legacy capability state, where Ask uses `workspace-write` with the same policy and reviewer.
+
+Settings persist the mode and optional profile ID through `AppSettingsPermissionMigration`. Existing workspace-write/on-request settings migrate to Ask, explicit inheritance migrates to Custom, and nonstandard legacy combinations remain a distinct compatibility state without broadening access. `config/read` and `configRequirements/read` supply effective and managed context; reviewer and profile restrictions are enforced alongside legacy sandbox/policy restrictions. Unknown modes, stale profiles, and disallowed selections fail closed. The single resolved result is passed consistently to thread start, resume, fork, replacement-thread, and every turn-start request, and the client rejects any request that combines a permission profile with a legacy sandbox before writing to transport.
 
 ```text
 app-server request (method + id)

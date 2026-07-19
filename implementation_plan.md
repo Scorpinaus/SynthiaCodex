@@ -87,7 +87,7 @@ Default to bounded local execution:
 Use a predictable portable folder for local testing and zip sharing, then keep a normal Windows installer path for later releases:
 
 - development/testing: root-level portable folder produced by `scripts/publish-portable.cmd`
-- local zip artifact: `portable\NativeCodexAssistant\`
+- local zip artifact: `portable\SynthiaCode\`
 - internal preview: framework-dependent or self-contained installer
 - public/internal release: MSIX or signed installer
 
@@ -152,16 +152,16 @@ Local System
 ## 6. Proposed Repository Structure
 
 ```text
-NativeCodexAssistant/
+SynthiaCode/
   src/
-    NativeCodexAssistant.App/
+    SynthiaCode.App/
       App.xaml
       MainWindow.xaml
       Views/
       ViewModels/
       Themes/
       Resources/
-    NativeCodexAssistant.Core/
+    SynthiaCode.Core/
       Codex/
       Projects/
       Git/
@@ -170,12 +170,12 @@ NativeCodexAssistant/
       Auth/
       Settings/
       Security/
-    NativeCodexAssistant.Infrastructure/
+    SynthiaCode.Infrastructure/
       Processes/
       Persistence/
       Windows/
       Logging/
-    NativeCodexAssistant.Tests/
+    SynthiaCode.Tests/
   docs/
     architecture.md
     codex-app-server-notes.md
@@ -489,7 +489,7 @@ Responsibilities:
 
 ```text
 <repo>/
-  .codex-assistant/
+  .synthiacode/
     worktrees/
       <branch-or-task-id>/
 ```
@@ -758,6 +758,20 @@ Replace the permanent Run settings expander with a compact composer selector for
 
 This slice does not make SynthiaCode an editor for `config.toml` and does not expose persistent command or network policy amendments. Those remain advanced follow-up work after their live wire contracts are validated.
 
+## 12G. ChatGPT-Style Permission Modes
+
+**Status:** Complete - 19 July 2026. The reviewed design record is maintained in `permission_modes_implementation_plan.md`.
+
+### Delivered scope
+
+- Exactly three primary modes: Ask for approval, Approve for me, and Custom.
+- Modern `permissionProfile/list` discovery with pagination, allowed-state presentation, project scoping, and legacy method fallback.
+- Exact profile serialization on thread start/resume/fork and turn start, with profile/sandbox mutual exclusion enforced before transport writes.
+- One fail-closed resolver for workspace boundaries, approval policies, reviewers, managed restrictions, named profiles, and legacy compatibility.
+- Idempotent settings migration that preserves explicit inheritance and nonstandard legacy combinations without broadening access.
+- A Custom path that follows the configured default or selects a named `config.toml` profile without editing profile rules.
+- Focused protocol/resolver/migration/lifecycle/presentation coverage plus the complete behavioral and build gates.
+
 ## 13. Phase 6: Skills, Plugins, MCP, and Settings
 
 ### Goals
@@ -987,7 +1001,7 @@ Use local app data for assistant-owned metadata.
 Suggested path:
 
 ```text
-%LOCALAPPDATA%\NativeCodexAssistant\
+%LOCALAPPDATA%\SynthiaCode\
 ```
 
 Suggested storage:
@@ -1116,7 +1130,7 @@ Common recoveries:
 The development and manual-test artifact should always be produced into one predictable root-level folder:
 
 ```text
-portable\NativeCodexAssistant\
+portable\SynthiaCode\
 ```
 
 The folder is generated with:
@@ -1125,13 +1139,13 @@ The folder is generated with:
 .\scripts\publish-portable.cmd
 ```
 
-The command wrapper runs `scripts\publish-portable.ps1` with a process-local PowerShell execution-policy bypass so the workflow works on machines where direct `.ps1` execution is disabled. The script publishes `src\NativeCodexAssistant.App\NativeCodexAssistant.App.csproj` in Release mode, defaults to a self-contained `win-x64` build, and verifies that this executable exists:
+The command wrapper runs `scripts\publish-portable.ps1` with a process-local PowerShell execution-policy bypass so the workflow works on machines where direct `.ps1` execution is disabled. The script publishes `src\SynthiaCode.App\SynthiaCode.App.csproj` in Release mode, defaults to a self-contained `win-x64` build, and verifies that this executable exists:
 
 ```text
-portable\NativeCodexAssistant\NativeCodexAssistant.App.exe
+portable\SynthiaCode\SynthiaCode.App.exe
 ```
 
-Testing and zip sharing should use `portable\NativeCodexAssistant\` directly instead of digging through `src\...\bin\Release\...` publish folders. The generated `portable\` folder is ignored by source control.
+Testing and zip sharing should use `portable\SynthiaCode\` directly instead of digging through `src\...\bin\Release\...` publish folders. The generated `portable\` folder is ignored by source control.
 
 ### Maintenance sweep
 
@@ -1141,7 +1155,7 @@ Use the guarded maintenance wrapper to remove reproducible build output after de
 .\scripts\maintenance-sweep.cmd
 ```
 
-The default sweep removes project `bin\`/`obj\` output, test results, the root Visual Studio cache and app log, and noncanonical portable copies. It preserves `portable\NativeCodexAssistant\` so the latest runnable build remains available. `-WhatIf` previews exact targets, while `-RemovePortable` explicitly opts into a source-only folder. Every deletion target must resolve beneath the repository root.
+The default sweep removes project `bin\`/`obj\` output, test results, the root Visual Studio cache and app log, and noncanonical portable copies. It preserves `portable\SynthiaCode\` so the latest runnable build remains available. `-WhatIf` previews exact targets, while `-RemovePortable` explicitly opts into a source-only folder. Every deletion target must resolve beneath the repository root.
 
 ### Internal alpha
 
@@ -1366,7 +1380,7 @@ Mitigation:
 
 ## 25. Open Questions
 
-- Should the first app name be product-like or plain, such as `Native Codex Assistant`?
+- Should the first app name be product-like or plain, such as `SynthiaCode`?
 - Should v1 require an existing Codex CLI installation, or bundle a pinned Codex runtime?
 - Should the first release be framework-dependent or self-contained?
 - Should ChatGPT sign-in be the only primary login button, with API key under advanced settings?

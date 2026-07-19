@@ -15,16 +15,16 @@ If PowerShell script execution is disabled on the machine, use the command wrapp
 The output folder is always:
 
 ```text
-portable\NativeCodexAssistant\
+portable\SynthiaCode\
 ```
 
 Run the app from:
 
 ```text
-portable\NativeCodexAssistant\NativeCodexAssistant.App.exe
+portable\SynthiaCode\SynthiaCode.App.exe
 ```
 
-Zip `portable\NativeCodexAssistant\` directly when sharing or testing a build.
+Zip `portable\SynthiaCode\` directly when sharing or testing a build.
 
 By default, the script creates a Release, self-contained .NET 10 `win-x64` build so the folder can run without requiring a matching .NET runtime installation. To create a framework-dependent build instead, the target machine must have the .NET 10 Windows Desktop Runtime installed:
 

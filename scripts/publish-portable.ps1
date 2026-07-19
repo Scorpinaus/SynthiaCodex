@@ -12,8 +12,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$projectPath = Join-Path $repoRoot "src\NativeCodexAssistant.App\NativeCodexAssistant.App.csproj"
-$portableRoot = Join-Path $repoRoot "portable\NativeCodexAssistant"
+$projectPath = Join-Path $repoRoot "src\SynthiaCode.App\SynthiaCode.App.csproj"
+$portableRoot = Join-Path $repoRoot "portable\SynthiaCode"
 
 $repoFullPath = [System.IO.Path]::GetFullPath($repoRoot)
 $portableFullPath = [System.IO.Path]::GetFullPath($portableRoot)
@@ -48,7 +48,7 @@ if ($FrameworkDependent) {
     $publishArgs += @("--self-contained", "true")
 }
 
-Write-Host "Publishing Native Codex Assistant..."
+Write-Host "Publishing SynthiaCode..."
 Write-Host "Project: $projectPath"
 Write-Host "Output:  $portableFullPath"
 Write-Host "Runtime: $Runtime"
@@ -56,7 +56,7 @@ Write-Host "Mode:    $(if ($FrameworkDependent) { "framework-dependent" } else {
 
 dotnet @publishArgs
 
-$exePath = Join-Path $portableFullPath "NativeCodexAssistant.App.exe"
+$exePath = Join-Path $portableFullPath "SynthiaCode.App.exe"
 if (-not (Test-Path -LiteralPath $exePath)) {
     throw "Publish completed, but the runnable app was not found: $exePath"
 }

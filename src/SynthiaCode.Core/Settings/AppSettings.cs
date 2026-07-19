@@ -1,0 +1,201 @@
+using SynthiaCode.Core.Projects;
+using SynthiaCode.Core.Codex.AppServer;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+
+namespace SynthiaCode.Core.Settings;
+
+public sealed class AppSettings
+{
+    public string Theme { get; set; } = "System";
+
+    public string? PreferredCodexPath { get; set; }
+
+    public string? LastModelOverride { get; set; }
+
+    public string? LastReasoningEffortOverride { get; set; }
+
+    public string? LastServiceTierOverride { get; set; }
+
+    public string? SandboxModeOverride { get; set; } = "workspace-write";
+
+    public string? ApprovalPolicyOverride { get; set; } = "on-request";
+
+    public string? PermissionMode { get; set; }
+
+    public string? CustomPermissionProfileId { get; set; }
+
+    public int ExecutionPolicySchemaVersion { get; set; }
+
+    public bool IsProjectRailOpen { get; set; } = true;
+
+    public bool IsDetailsPaneOpen { get; set; }
+
+    public List<RecentProject> RecentProjects { get; set; } = [];
+
+    public List<PersistedProjectThread> ProjectThreads { get; set; } = [];
+}
+
+// Storage-only DTO. Keep property names stable so Phase 3-5A settings.json files
+// deserialize without a migration or schema rewrite.
+public sealed class PersistedProjectThread
+{
+    public string ProjectPath { get; set; } = string.Empty;
+    public string ThreadId { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Preview { get; set; } = string.Empty;
+    public bool IsArchived { get; set; }
+    public bool IsPinned { get; set; }
+    public bool IsActive { get; set; }
+    public bool IsRunning { get; set; }
+    public string TurnStatus { get; set; } = "Idle";
+    public string Mode { get; set; } = "local";
+    public string? WorkspacePath { get; set; }
+    public string? WorktreeBranch { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public string FinalResponse { get; set; } = string.Empty;
+    public List<CodexTimelineItem> TimelineItems { get; set; } = [];
+    public List<string> RawEvents { get; set; } = [];
+    public List<CodexConversationTurnSnapshot> ConversationTurns { get; set; } = [];
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class ProjectThreadState : INotifyPropertyChanged
+{
+    private bool isArchived;
+    private bool isRunning;
+    private string mode = "local";
+    private string? worktreeBranch;
+    private string turnStatus = "Idle";
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    public string ProjectPath { get; set; } = string.Empty;
+
+    public string ThreadId { get; set; } = string.Empty;
+
+    public string Title { get; set; } = string.Empty;
+
+    public string Preview { get; set; } = string.Empty;
+
+    public bool IsArchived
+    {
+        get => isArchived;
+        set
+        {
+            if (isArchived == value)
+            {
+                return;
+            }
+
+            isArchived = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ActivityLabel));
+            OnPropertyChanged(nameof(HasActionableStatus));
+        }
+    }
+
+    public bool IsPinned { get; set; }
+
+    public bool IsActive { get; set; }
+
+    public bool IsRunning
+    {
+        get => isRunning;
+        set
+        {
+            if (isRunning == value)
+            {
+                return;
+            }
+
+            isRunning = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ActivityLabel));
+            OnPropertyChanged(nameof(HasActionableStatus));
+        }
+    }
+
+    public string TurnStatus
+    {
+        get => turnStatus;
+        set
+        {
+            if (string.Equals(turnStatus, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            turnStatus = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ActivityLabel));
+            OnPropertyChanged(nameof(HasActionableStatus));
+        }
+    }
+
+    public string Mode
+    {
+        get => mode;
+        set
+        {
+            if (string.Equals(mode, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            mode = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(WorkspaceModeLabel));
+        }
+    }
+
+    public string? WorkspacePath { get; set; }
+
+    public string? WorktreeBranch
+    {
+        get => worktreeBranch;
+        set
+        {
+            if (string.Equals(worktreeBranch, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            worktreeBranch = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(WorkspaceModeLabel));
+        }
+    }
+
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public string FinalResponse { get; set; } = string.Empty;
+
+    public List<CodexTimelineItem> TimelineItems { get; set; } = [];
+
+    public List<string> RawEvents { get; set; } = [];
+
+    public List<CodexConversationTurnSnapshot> ConversationTurns { get; set; } = [];
+
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public string DisplayTitle => string.IsNullOrWhiteSpace(Title)
+        ? string.IsNullOrWhiteSpace(Preview) ? ThreadId : Preview
+        : Title;
+
+    public string ActivityLabel => IsArchived ? "Archived" : TurnStatus;
+
+    public bool HasActionableStatus =>
+        IsArchived ||
+        IsRunning ||
+        TurnStatus is "Failed" or "Cancelled" or "Canceled";
+
+    public string WorkspaceModeLabel => Mode.ToLowerInvariant() switch
+    {
+        "worktree" => string.IsNullOrWhiteSpace(WorktreeBranch) ? "Worktree" : $"Worktree · {WorktreeBranch}",
+        "worktree-removed" => "Worktree removed",
+        _ => "Current checkout"
+    };
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+}

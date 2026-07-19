@@ -368,8 +368,8 @@ Provide:
 ### Release gates
 
 ```powershell
-dotnet test NativeCodexAssistant.sln
-dotnet run --project src\NativeCodexAssistant.Tests\NativeCodexAssistant.Tests.csproj
+dotnet test SynthiaCode.sln
+dotnet run --project src\SynthiaCode.Tests\SynthiaCode.Tests.csproj
 .\scripts\publish-portable.cmd
 ```
 

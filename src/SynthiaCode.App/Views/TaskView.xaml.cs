@@ -214,7 +214,7 @@ public partial class TaskView : UserControl
         }
         var picker = new OpenFileDialog
         {
-            Title = "Attach files from the active workspace",
+            Title = "Attach files",
             Filter = "All files|*.*",
             Multiselect = true,
             CheckFileExists = true,
@@ -234,7 +234,7 @@ public partial class TaskView : UserControl
         }
         var picker = new OpenFolderDialog
         {
-            Title = "Attach a folder from the active workspace",
+            Title = "Attach a folder",
             Multiselect = false,
             InitialDirectory = Directory.Exists(main.ActiveWorkspacePath) ? main.ActiveWorkspacePath : null
         };

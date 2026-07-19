@@ -408,7 +408,7 @@
                                 MinHeight="32"
                                 Margin="8,0,0,0"
                                 Padding="10,4"
-                                ToolTip="Attach files from the active workspace."
+                                ToolTip="Attach files from the workspace or outside it. Outside files are saved as managed snapshots."
                                 AutomationProperties.Name="Attach files"/>
                         <Button x:Name="AttachFolderButton"
                                 Content="Attach folder"
@@ -417,7 +417,7 @@
                                 MinHeight="32"
                                 Margin="8,0,0,0"
                                 Padding="10,4"
-                                ToolTip="Attach one folder inside the active workspace."
+                                ToolTip="Attach a folder from the workspace or outside it. Outside folders are saved as managed snapshots."
                                 AutomationProperties.Name="Attach folder"/>
                     </WrapPanel>
 

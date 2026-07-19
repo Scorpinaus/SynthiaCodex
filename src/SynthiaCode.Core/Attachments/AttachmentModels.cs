@@ -9,7 +9,11 @@ public static class AttachmentLimits
     public const int MaximumFoldersPerInput = 5;
     public const int MaximumWorkspacePathBytes = 4 * 1024;
     public const long MaximumBytesPerImage = 20L * 1024 * 1024;
-    public const long MaximumBytesPerInput = 50L * 1024 * 1024;
+    public const long MaximumBytesPerExternalFile = 25L * 1024 * 1024;
+    public const long MaximumBytesPerFolderSnapshot = 100L * 1024 * 1024;
+    public const int MaximumFilesPerFolderSnapshot = 1_000;
+    public const int MaximumFolderDepth = 32;
+    public const long MaximumBytesPerInput = 150L * 1024 * 1024;
     public const long MaximumPixelCount = 50_000_000;
     public const int MaximumPixelEdge = 32_768;
     public const long MaximumStoreBytes = 1024L * 1024 * 1024;
@@ -40,6 +44,8 @@ public sealed class AttachmentReference
     public long ByteLength { get; set; }
     public int PixelWidth { get; set; }
     public int PixelHeight { get; set; }
+    public int SnapshotFileCount { get; set; }
+    public long SnapshotByteLength { get; set; }
     public string ContentSha256 { get; set; } = string.Empty;
 
     [JsonIgnore]
@@ -64,7 +70,7 @@ public sealed class AttachmentReference
     [JsonIgnore]
     public string LocationLabel => SourceKind == AttachmentSourceKind.WorkspaceReference
         ? WorkspaceRelativePath ?? DisplayName
-        : "Managed copy";
+        : Kind == AttachmentKind.Image ? "Managed copy" : "Managed snapshot";
 
     [JsonIgnore]
     public string DimensionsLabel => PixelWidth > 0 && PixelHeight > 0
@@ -88,6 +94,8 @@ public sealed class AttachmentReference
         ByteLength = ByteLength,
         PixelWidth = PixelWidth,
         PixelHeight = PixelHeight,
+        SnapshotFileCount = SnapshotFileCount,
+        SnapshotByteLength = SnapshotByteLength,
         ContentSha256 = ContentSha256,
         ManagedPath = ManagedPath
     };
@@ -102,6 +110,14 @@ public interface IAttachmentStore
     Task<AttachmentReference> ImportStreamAsync(
         Stream source,
         string displayName,
+        CancellationToken cancellationToken = default);
+
+    Task<AttachmentReference> ImportExternalFileAsync(
+        string sourcePath,
+        CancellationToken cancellationToken = default);
+
+    Task<AttachmentReference> ImportFolderAsync(
+        string sourcePath,
         CancellationToken cancellationToken = default);
 
     string ResolvePath(AttachmentReference attachment);

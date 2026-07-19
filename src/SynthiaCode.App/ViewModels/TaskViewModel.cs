@@ -249,7 +249,8 @@ public sealed class TaskViewModel : ObservableObject
                 string.Equals(left.WorkspaceRelativePath, right.WorkspaceRelativePath, StringComparison.OrdinalIgnoreCase);
         }
 
-        return !string.IsNullOrWhiteSpace(left.ContentSha256) &&
+        return left.Kind == right.Kind &&
+            !string.IsNullOrWhiteSpace(left.ContentSha256) &&
             string.Equals(left.ContentSha256, right.ContentSha256, StringComparison.OrdinalIgnoreCase);
     }
 

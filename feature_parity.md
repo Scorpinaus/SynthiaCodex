@@ -1,7 +1,7 @@
 # SynthiaCode and ChatGPT Desktop Feature Parity
 
 - **Audit date:** 19 July 2026
-- **SynthiaCode baseline:** commit `68f1f90` (`Move permissions`)
+- **SynthiaCode baseline:** commit `319b67d` (`Add file folder attachments`) plus the completed external managed-snapshot implementation recorded below
 - **Comparison surface:** ChatGPT desktop app with Codex/local-project capabilities
 - **Scope:** User-visible desktop functionality, local Codex workflows, and capabilities inherited through `codex app-server`
 
@@ -22,7 +22,7 @@
 | Safety and approvals | **Near full** | The three composer permission modes and server-request approvals now map closely to ChatGPT desktop. |
 | Git and worktree lifecycle | **Moderate** | Core isolation and file-level Git operations exist; chunk review, handoff, push, PR, snapshots, and setup actions do not. |
 | Agent orchestration | **Partial** | Parallel top-level chats and collaboration activity exist, but subagent thread inspection and management are absent. |
-| Context and multimodal input | **Near for local images** | Local image picker, paste/drop, previews, multimodal turns, queues, and managed persistence are implemented; generic documents and artifact workflows remain out of scope. |
+| Context and multimodal input | **Near for local attachments** | Image/file/folder picker, paste/drop, previews, queued lifecycle persistence, workspace mentions, and managed external snapshots are implemented; rich artifact viewing and remaining hardening are out of scope. |
 | Tools and integrations | **Low** | Configured MCP/web activity can flow through app-server, but Browser, Chrome, plugins, connectors, skills management, and Scheduled are not product surfaces. |
 | Desktop convenience | **Moderate** | Native Windows shell, themes, diagnostics, and core shortcuts exist; search, notifications, dictation, quick chat, deep links, and personalization do not. |
 
@@ -88,7 +88,7 @@
 | Built-in Browser | No shared in-app browser, website permissions, comments, downloads, or browser developer mode | **Missing** | Requires a browser surface plus Browser tool/plugin integration. |
 | Chrome integration | No Chrome extension or signed-in Chrome control | **Missing** | ChatGPT can operate existing Chrome sessions through its extension. |
 | Computer Use | No screen/desktop control surface | **Missing** | ChatGPT can control supported desktop apps and browser UI with explicit permissions. |
-| File attachments and image inputs | Image/file/folder pickers, clipboard file-list paste, Explorer drag/drop, ordered type-specific previews, image model-capability checks, attachment-only or mixed input, queued attachments, transcript previews, managed image persistence, and contained live workspace references | **Near** | External regular-file snapshots, recursive external folders, app-server history mention materialization, bounded thumbnail decoding, and installed-runtime folder-mention smoke coverage remain follow-up work. |
+| File attachments and image inputs | Image/file/folder pickers, clipboard file-list paste, Explorer drag/drop, ordered previews, image capability checks, attachment-only/mixed input, queue/transcript persistence, contained live workspace references, and immutable managed snapshots for external images/files/folders | **Near** | Interactive folder review/exclusions, optional live external roots, app-server history mention materialization, bounded thumbnail decoding, attachment-specific permission preflight, and installed-runtime managed-mention smoke coverage remain follow-up work. |
 | Artifact/file viewer | Markdown text and safe links render; no document/spreadsheet/slide/PDF artifact viewer | **Missing** | ChatGPT can create and preview files in conversation. |
 | Image generation, Sites, and visualizations | No dedicated generation or interactive artifact surfaces | **Missing** | These are broader ChatGPT capabilities rather than core local coding requirements. |
 | Scheduled tasks | No create/manage/run history or recurring local project tasks | **Missing** | ChatGPT Scheduled supports local/worktree runs, chat continuity, skills, plugins, and RRULE schedules. |
@@ -135,20 +135,24 @@ P0 attachments and image input moved from **Missing** to **Near**:
 2. Ordered image previews can be opened, moved, or removed; sent turns render their image previews in the transcript.
 3. `turn/start` and `turn/steer` now send typed ordered text/`localImage` parts and permit image-only requests.
 4. Model `inputModalities` blocks unsupported image submission without discarding the draft.
-5. Content-addressed managed copies survive source deletion, deduplicate, enforce format/size/dimension/store limits, and persist safely in drafts, queued follow-ups, and conversation snapshots.
-6. Startup rehydrates managed paths and performs reference-aware staging/orphan cleanup; unavailable files fail visibly.
+5. Content-addressed managed images and external file/folder snapshots survive source deletion, deduplicate, enforce type-specific size/dimension/depth/count/store limits, and persist safely in drafts, queued follow-ups, and conversation snapshots.
+6. Startup rehydrates managed paths and performs reference-aware staging/orphan cleanup, including files and empty directories beneath folder objects; unavailable objects fail visibly.
 7. Workspace files and folders now share the ordered attachment strip and can be added through dedicated pickers, clipboard file lists, or Explorer drag/drop.
 8. File/folder references are stored as workspace-relative live references, revalidated against the owning thread or queued workspace, and serialized as app-server `mention` inputs for start and steer.
-9. Containment rejects the workspace root, sibling-prefix escapes, wildcards, alternate data streams, missing paths, and reparse targets outside the workspace; external non-image files and external folders remain fail-closed.
-10. Generic attachment metadata persists through drafts, queues, turns, forks, and settings snapshots while legacy `Images`/`UserImages` settings continue to load.
+9. Containment rejects the workspace root, sibling-prefix escapes, wildcards, alternate data streams, missing paths, and reparse targets outside the workspace. External files/folders are classified separately and imported without weakening workspace containment.
+10. Generic attachment metadata, including folder file-count/byte summaries, persists through drafts, queues, turns, forks, and attachment schema v3 settings snapshots while legacy `Images`/`UserImages` settings continue to load.
 11. Text-only models continue to accept file/folder mentions; image capability gating applies only when an image is present.
+12. External regular files stream into immutable managed objects with a 25 MiB per-file limit; external folder trees use deterministic snapshots capped at 32 levels, 1,000 entries, and 100 MiB.
+13. Folder snapshots reject reparse entries, preserve empty directories, detect file mutation during copy, clean failed staging trees, and never retain the original external source path.
+14. Managed images remain `localImage` inputs while managed files/folders use `mention` inputs across start, steer, queue, retry, and background dispatch paths.
+15. Existing exact permission-request approval remains the Codex access boundary for managed mention paths; SynthiaCode does not add writable roots, switch profiles, or edit `config.toml`.
 
 ## Recommended parity backlog
 
 ### P0 — Complete the core local coding experience
 
 1. **Queued follow-ups hardening (core implemented):** refresh and re-resolve model availability and managed permission policy immediately before background dispatch, then add live disconnect/reconnect smoke coverage.
-2. **Attachments and image input (workspace core implemented):** add installed-runtime folder-mention smoke coverage, bounded thumbnail decoding, app-server history attachment materialization, and permission-gated external regular-file snapshots as follow-up hardening. Recursive external-folder snapshotting remains intentionally out of scope.
+2. **Attachments and image input (managed external core implemented):** add installed-runtime managed file/folder mention smoke coverage, attachment-specific permission preflight/narrowing, interactive folder review/exclusions, bounded thumbnail decoding, and app-server history attachment materialization. Optional live external roots remain deferred.
 3. **Structured Git review:** add hunk staging/revert, inline diff comments, and a dedicated review target flow.
 4. **Push and pull requests:** add native branch push and GitHub PR creation/status.
 5. **Worktree lifecycle:** add starting-branch selection, setup scripts/actions, Local/Worktree handoff, snapshots/restore, and retention settings.

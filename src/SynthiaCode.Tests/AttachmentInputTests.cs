@@ -22,6 +22,8 @@ internal static class AttachmentInputTests
         ("attachment protocol serializes file and folder mentions", ProtocolSerializesMentionsAsync),
         ("model catalog advertises image input capability", ModelCatalogAdvertisesImageCapabilityAsync),
         ("managed attachment store copies validates and deduplicates images", StoreCopiesValidatesAndDeduplicatesAsync),
+        ("managed attachment store snapshots external files and folders", StoreSnapshotsExternalFilesAndFoldersAsync),
+        ("external snapshots build file folder and image prompt parts", ExternalSnapshotsBuildPromptPartsAsync),
         ("workspace attachment resolver contains files and folders", WorkspaceResolverContainsReferencesAsync),
         ("attachment references survive queue and settings snapshots", ReferencesSurviveQueueAndSettingsSnapshotsAsync),
         ("composer attachment state validates model capability", ComposerAttachmentStateValidatesCapabilityAsync),
@@ -151,6 +153,93 @@ internal static class AttachmentInputTests
         await AssertThrowsAsync<InvalidDataException>(() => store.ImportFileAsync(invalid), "invalid image rejected");
     }
 
+    private static async Task StoreSnapshotsExternalFilesAndFoldersAsync()
+    {
+        using var temp = TempWorkspace.Create();
+        var sourceFile = Path.Combine(temp.Root, "article.md");
+        await File.WriteAllTextAsync(sourceFile, "# External attachment\n");
+        var renamedSourceFile = Path.Combine(temp.Root, "renamed.data");
+        File.Copy(sourceFile, renamedSourceFile);
+        var sourceFolder = Path.Combine(temp.Root, "reference-folder");
+        Directory.CreateDirectory(Path.Combine(sourceFolder, "nested"));
+        Directory.CreateDirectory(Path.Combine(sourceFolder, "empty"));
+        await File.WriteAllTextAsync(Path.Combine(sourceFolder, "alpha.txt"), "alpha");
+        await File.WriteAllTextAsync(Path.Combine(sourceFolder, "nested", "beta.md"), "beta");
+        var store = new LocalAttachmentStore(Path.Combine(temp.Root, "managed"), new TestLogger());
+
+        var firstFile = await store.ImportExternalFileAsync(sourceFile);
+        var duplicateFile = await store.ImportExternalFileAsync(sourceFile);
+        var renamedFile = await store.ImportExternalFileAsync(renamedSourceFile);
+        var firstFolder = await store.ImportFolderAsync(sourceFolder);
+        var duplicateFolder = await store.ImportFolderAsync(sourceFolder);
+        File.Delete(sourceFile);
+        Directory.Delete(sourceFolder, recursive: true);
+
+        Assert(firstFile.Kind == AttachmentKind.File, "external file becomes managed file");
+        Assert(firstFile.SourceKind == AttachmentSourceKind.ManagedCopy, "external file source is managed");
+        Assert(firstFile.StorageKey == duplicateFile.StorageKey, "external file content deduplicates");
+        Assert(firstFile.StorageKey == renamedFile.StorageKey, "external file deduplication ignores name and extension");
+        Assert(File.Exists(store.ResolvePath(firstFile)), "managed file survives source deletion");
+        Assert(firstFolder.Kind == AttachmentKind.Folder, "external folder becomes managed folder");
+        Assert(firstFolder.SourceKind == AttachmentSourceKind.ManagedCopy, "external folder source is managed");
+        Assert(firstFolder.StorageKey == duplicateFolder.StorageKey, "external folder content deduplicates");
+        Assert(firstFolder.SnapshotFileCount == 2, "folder snapshot records file count");
+        Assert(firstFolder.SnapshotByteLength == 9, "folder snapshot records total bytes");
+        var folderPath = store.ResolvePath(firstFolder);
+        Assert(File.Exists(Path.Combine(folderPath, "alpha.txt")), "folder snapshot retains root file");
+        Assert(File.Exists(Path.Combine(folderPath, "nested", "beta.md")), "folder snapshot retains nested file");
+        Assert(Directory.Exists(Path.Combine(folderPath, "empty")), "folder snapshot retains empty directories");
+
+        var oversized = Path.Combine(temp.Root, "oversized.bin");
+        await using (var oversizedStream = File.Create(oversized))
+        {
+            oversizedStream.SetLength(AttachmentLimits.MaximumBytesPerExternalFile + 1);
+        }
+        await AssertThrowsAsync<InvalidDataException>(
+            () => store.ImportExternalFileAsync(oversized),
+            "oversized external file is rejected before import");
+
+        var orphanSource = Path.Combine(temp.Root, "orphan.txt");
+        await File.WriteAllTextAsync(orphanSource, "orphan");
+        var orphan = await store.ImportExternalFileAsync(orphanSource);
+        var orphanPath = store.ResolvePath(orphan);
+        File.SetLastWriteTimeUtc(orphanPath, DateTime.UtcNow.AddDays(-8));
+        await store.CleanupAsync([firstFile.StorageKey, firstFolder.StorageKey]);
+        Assert(File.Exists(store.ResolvePath(firstFile)), "cleanup keeps referenced managed file");
+        Assert(File.Exists(Path.Combine(folderPath, "nested", "beta.md")), "cleanup keeps referenced folder contents");
+        Assert(Directory.Exists(Path.Combine(folderPath, "empty")), "cleanup keeps referenced empty directories");
+        Assert(!File.Exists(orphanPath), "cleanup removes expired unreferenced managed file");
+
+        var queue = new CodexFollowUpQueue();
+        var queued = queue.Enqueue("Review snapshots", Options(temp.Root), [firstFile, firstFolder]);
+        Assert(queued.Attachments.Count == 2, "queue accepts managed file and folder snapshots");
+        Assert(queued.Attachments[1].SnapshotFileCount == 2, "queue preserves folder metadata");
+    }
+
+    private static async Task ExternalSnapshotsBuildPromptPartsAsync()
+    {
+        using var temp = TempWorkspace.Create();
+        var sourceFile = Path.Combine(temp.Root, "outside.txt");
+        var sourceFolder = Path.Combine(temp.Root, "outside-folder");
+        var sourceImage = Path.Combine(temp.Root, "outside.png");
+        await File.WriteAllTextAsync(sourceFile, "outside");
+        Directory.CreateDirectory(sourceFolder);
+        await File.WriteAllTextAsync(Path.Combine(sourceFolder, "nested.txt"), "nested");
+        await File.WriteAllBytesAsync(sourceImage, TinyPng);
+        var store = new LocalAttachmentStore(Path.Combine(temp.Root, "managed"), new TestLogger());
+        var file = await store.ImportExternalFileAsync(sourceFile);
+        var folder = await store.ImportFolderAsync(sourceFolder);
+        var image = await store.ImportFileAsync(sourceImage);
+        var builder = new AttachmentPromptInputBuilder(store, new WorkspaceAttachmentResolver());
+
+        var inputs = builder.Build("Review external inputs", [file, folder, image], temp.Root);
+
+        Assert(inputs[0] is CodexTextInput, "prompt text remains first");
+        Assert(inputs[1] is CodexMentionInput fileMention && fileMention.Path == store.ResolvePath(file), "managed file becomes mention");
+        Assert(inputs[2] is CodexMentionInput folderMention && folderMention.Path == store.ResolvePath(folder), "managed folder becomes mention");
+        Assert(inputs[3] is CodexLocalImageInput imageInput && imageInput.Path == store.ResolvePath(image), "managed image remains local image");
+    }
+
     private static Task WorkspaceResolverContainsReferencesAsync()
     {
         using var workspace = TempWorkspace.Create();
@@ -166,6 +255,8 @@ internal static class AttachmentInputTests
         try
         {
             var resolver = new WorkspaceAttachmentResolver();
+            Assert(resolver.IsWithinWorkspace(workspace.Root, sourceFile), "inside file is classified as workspace content");
+            Assert(!resolver.IsWithinWorkspace(workspace.Root, outsideFile), "outside file is classified for managed snapshot import");
             var file = resolver.Resolve(workspace.Root, sourceFile, AttachmentKind.File);
             var folder = resolver.Resolve(workspace.Root, sourceFolder, AttachmentKind.Folder);
             Assert(file.Kind == AttachmentKind.File && file.SourceKind == AttachmentSourceKind.WorkspaceReference, "file reference kind");
@@ -285,6 +376,21 @@ internal static class AttachmentInputTests
         };
         viewModel.AddAttachment(file);
         Assert(viewModel.CanSubmitAttachments, "text-only model permits workspace file mentions");
+        viewModel.ClearAttachments();
+        viewModel.AddAttachment(image);
+        viewModel.AddAttachment(new AttachmentReference
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Kind = AttachmentKind.File,
+            SourceKind = AttachmentSourceKind.ManagedCopy,
+            StorageKey = "objects/files/aa/file.png",
+            DisplayName = "file.png",
+            ByteLength = image.ByteLength,
+            SnapshotFileCount = 1,
+            SnapshotByteLength = image.ByteLength,
+            ContentSha256 = image.ContentSha256
+        });
+        Assert(viewModel.Attachments.Count == 2, "different attachment kinds are not deduplicated by hash alone");
         return Task.CompletedTask;
     }
 
@@ -309,8 +415,12 @@ internal static class AttachmentInputTests
         resources["ConversationActivityDetailText"] = new Style(typeof(TextBlock));
         var view = new TaskView();
         Assert(view.FindName("AttachImagesButton") is FrameworkElement, "attach button exists");
-        Assert(view.FindName("AttachFilesButton") is FrameworkElement, "attach files button exists");
-        Assert(view.FindName("AttachFolderButton") is FrameworkElement, "attach folder button exists");
+        var fileButton = view.FindName("AttachFilesButton") as FrameworkElement;
+        Assert(fileButton is not null, "attach files button exists");
+        Assert(fileButton!.ToolTip?.ToString()?.Contains("outside", StringComparison.OrdinalIgnoreCase) == true, "file picker explains external snapshots");
+        var folderButton = view.FindName("AttachFolderButton") as FrameworkElement;
+        Assert(folderButton is not null, "attach folder button exists");
+        Assert(folderButton!.ToolTip?.ToString()?.Contains("outside", StringComparison.OrdinalIgnoreCase) == true, "folder picker explains external snapshots");
         Assert(view.FindName("AttachmentPreviewList") is FrameworkElement, "attachment preview list exists");
         Assert(view.FindName("ComposerDropTarget") is FrameworkElement { AllowDrop: true }, "composer accepts drops");
     });

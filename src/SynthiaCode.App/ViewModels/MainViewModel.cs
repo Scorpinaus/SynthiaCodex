@@ -284,9 +284,21 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             try
             {
                 AttachmentReference attachment;
+                var isWithinWorkspace = workspaceAttachmentResolver.IsWithinWorkspace(workspacePath, path);
                 if (Directory.Exists(path))
                 {
-                    attachment = workspaceAttachmentResolver.Resolve(workspacePath, path, AttachmentKind.Folder);
+                    if (isWithinWorkspace)
+                    {
+                        attachment = workspaceAttachmentResolver.Resolve(workspacePath, path, AttachmentKind.Folder);
+                    }
+                    else
+                    {
+                        if (attachmentStore is null)
+                        {
+                            throw new InvalidOperationException("Attachment storage is unavailable.");
+                        }
+                        attachment = await attachmentStore.ImportFolderAsync(path, cancellationToken).ConfigureAwait(true);
+                    }
                 }
                 else if (IsSupportedImagePath(path))
                 {
@@ -298,7 +310,18 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 }
                 else
                 {
-                    attachment = workspaceAttachmentResolver.Resolve(workspacePath, path, AttachmentKind.File);
+                    if (isWithinWorkspace)
+                    {
+                        attachment = workspaceAttachmentResolver.Resolve(workspacePath, path, AttachmentKind.File);
+                    }
+                    else
+                    {
+                        if (attachmentStore is null)
+                        {
+                            throw new InvalidOperationException("Attachment storage is unavailable.");
+                        }
+                        attachment = await attachmentStore.ImportExternalFileAsync(path, cancellationToken).ConfigureAwait(true);
+                    }
                 }
 
                 TaskWorkspace.AddAttachment(attachment);
@@ -2004,38 +2027,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 $"{selectedModel.DisplayName} does not accept image input. Remove the images or choose an image-capable model.");
         }
 
-        var inputs = new List<CodexUserInput>();
-        if (!string.IsNullOrWhiteSpace(text))
-        {
-            inputs.Add(new CodexTextInput(text));
-        }
-
-        foreach (var attachment in attachments)
-        {
-            if (attachment.SourceKind == AttachmentSourceKind.WorkspaceReference)
-            {
-                var resolved = workspaceAttachmentResolver.Revalidate(workspacePath, attachment);
-                attachment.ManagedPath = resolved.ManagedPath;
-                inputs.Add(new CodexMentionInput(resolved.WorkspaceRelativePath!, resolved.ManagedPath!));
-                continue;
-            }
-
-            var path = attachmentStore is not null
-                ? attachmentStore.ResolvePath(attachment)
-                : attachment.ManagedPath;
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-            {
-                throw new FileNotFoundException($"Attachment '{attachment.DisplayName}' is unavailable.", path);
-            }
-            attachment.ManagedPath = path;
-            inputs.Add(new CodexLocalImageInput(path));
-        }
-
-        if (inputs.Count == 0)
-        {
-            throw new InvalidOperationException("Enter a prompt or attach a file, folder, or image before sending.");
-        }
-        return inputs;
+        return new AttachmentPromptInputBuilder(attachmentStore, workspaceAttachmentResolver)
+            .Build(text, attachments, workspacePath);
     }
 
     private CodexTurnStartRequest CreateTurnStartRequest(

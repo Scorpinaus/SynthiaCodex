@@ -31,7 +31,7 @@ public sealed class AppSettings
 
     public int ExecutionPolicySchemaVersion { get; set; }
 
-    public int AttachmentSchemaVersion { get; set; } = 2;
+    public int AttachmentSchemaVersion { get; set; } = 3;
 
     public bool IsProjectRailOpen { get; set; } = true;
 

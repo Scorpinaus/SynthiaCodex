@@ -5,6 +5,15 @@ namespace SynthiaCode.Infrastructure.Attachments;
 
 public sealed class WorkspaceAttachmentResolver
 {
+    public bool IsWithinWorkspace(string workspaceRoot, string candidatePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(candidatePath);
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workspaceRoot));
+        var candidate = Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidatePath));
+        return string.Equals(root, candidate, StringComparison.OrdinalIgnoreCase) || IsContained(root, candidate);
+    }
+
     public AttachmentReference Resolve(
         string workspaceRoot,
         string candidatePath,

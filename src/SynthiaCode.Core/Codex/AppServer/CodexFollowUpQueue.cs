@@ -440,9 +440,21 @@ public sealed class CodexFollowUpQueue
     {
         if (attachment.SourceKind == AttachmentSourceKind.ManagedCopy)
         {
-            return attachment.IsImage
-                && !string.IsNullOrWhiteSpace(attachment.StorageKey)
-                && attachment.ByteLength > 0;
+            if (string.IsNullOrWhiteSpace(attachment.StorageKey) ||
+                string.IsNullOrWhiteSpace(attachment.ContentSha256) ||
+                attachment.ByteLength < 0)
+            {
+                return false;
+            }
+
+            return attachment.Kind switch
+            {
+                AttachmentKind.Image => attachment.ByteLength > 0,
+                AttachmentKind.File => attachment.ByteLength > 0 && attachment.SnapshotFileCount is 0 or 1,
+                AttachmentKind.Folder => attachment.SnapshotFileCount >= 0 &&
+                    attachment.SnapshotByteLength == attachment.ByteLength,
+                _ => false
+            };
         }
 
         if (attachment.SourceKind != AttachmentSourceKind.WorkspaceReference

@@ -414,13 +414,24 @@ internal static class AttachmentInputTests
         resources["ConversationActivityTitleText"] = new Style(typeof(TextBlock));
         resources["ConversationActivityDetailText"] = new Style(typeof(TextBlock));
         var view = new TaskView();
-        Assert(view.FindName("AttachImagesButton") is FrameworkElement, "attach button exists");
-        var fileButton = view.FindName("AttachFilesButton") as FrameworkElement;
-        Assert(fileButton is not null, "attach files button exists");
-        Assert(fileButton!.ToolTip?.ToString()?.Contains("outside", StringComparison.OrdinalIgnoreCase) == true, "file picker explains external snapshots");
-        var folderButton = view.FindName("AttachFolderButton") as FrameworkElement;
-        Assert(folderButton is not null, "attach folder button exists");
-        Assert(folderButton!.ToolTip?.ToString()?.Contains("outside", StringComparison.OrdinalIgnoreCase) == true, "folder picker explains external snapshots");
+        var attachButton = view.FindName("AttachButton") as Button;
+        Assert(attachButton is not null, "combined attach button exists");
+        Assert(attachButton!.ContextMenu?.Items.Count == 3, "combined attach menu offers three attachment kinds");
+        var attachOptions = attachButton.ContextMenu!.Items
+            .OfType<MenuItem>()
+            .Select(item => item.Header?.ToString())
+            .ToArray();
+        Assert(attachOptions.SequenceEqual(["Images...", "Files...", "Folder..."]), "attach menu labels are ordered and actionable");
+        attachButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert(attachButton.ContextMenu.IsOpen, "combined attach button opens its menu");
+        attachButton.ContextMenu.IsOpen = false;
+        Assert(view.FindName("AttachImagesButton") is null, "separate image button is removed");
+        Assert(view.FindName("AttachFilesButton") is null, "separate file button is removed");
+        Assert(view.FindName("AttachFolderButton") is null, "separate folder button is removed");
+        var attachmentPanel = view.FindName("AttachmentPreviewPanel") as FrameworkElement;
+        var promptPanel = view.FindName("PromptInputPanel") as FrameworkElement;
+        Assert(attachmentPanel is not null && promptPanel is not null, "composer layout elements exist");
+        Assert(Grid.GetRow(attachmentPanel!) < Grid.GetRow(promptPanel!), "attachment previews appear above the prompt field");
         Assert(view.FindName("AttachmentPreviewList") is FrameworkElement, "attachment preview list exists");
         Assert(view.FindName("ComposerDropTarget") is FrameworkElement { AllowDrop: true }, "composer accepts drops");
     });

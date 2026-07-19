@@ -188,6 +188,17 @@ public partial class TaskView : UserControl
         FollowLatest();
     }
 
+    private void OnAttachClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { ContextMenu: { } menu } button)
+        {
+            return;
+        }
+
+        menu.PlacementTarget = button;
+        menu.IsOpen = true;
+    }
+
     private async void OnAttachImagesClick(object sender, RoutedEventArgs e)
     {
         var picker = new OpenFileDialog

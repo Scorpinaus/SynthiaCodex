@@ -237,7 +237,7 @@
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <Grid>
+                <Grid x:Name="PromptInputPanel" Grid.Row="1">
                     <TextBox x:Name="PromptBox"
                              Text="{Binding TaskWorkspace.Prompt, UpdateSourceTrigger=PropertyChanged}"
                              AcceptsReturn="True"
@@ -264,8 +264,9 @@
                              AutomationProperties.Name="Active task guidance"/>
                 </Grid>
 
-                <StackPanel Grid.Row="1"
-                            Margin="0,8,0,0"
+                <StackPanel x:Name="AttachmentPreviewPanel"
+                            Grid.Row="0"
+                            Margin="0,0,0,8"
                             Visibility="{Binding TaskWorkspace.HasAttachments, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
                         <ItemsControl x:Name="AttachmentPreviewList"
@@ -392,33 +393,30 @@
                                 </DataTemplate>
                             </ComboBox.ItemTemplate>
                         </ComboBox>
-                        <Button x:Name="AttachImagesButton"
-                                Content="Attach images"
-                                Click="OnAttachImagesClick"
+                        <Button x:Name="AttachButton"
+                                Content="＋"
+                                Click="OnAttachClick"
                                 Style="{StaticResource CompactButton}"
                                 MinHeight="32"
+                                MinWidth="36"
                                 Margin="8,0,0,0"
-                                Padding="10,4"
-                                ToolTip="Choose PNG, JPEG, GIF, or WebP images. You can also paste or drop images."
-                                AutomationProperties.Name="Attach images"/>
-                        <Button x:Name="AttachFilesButton"
-                                Content="Attach files"
-                                Click="OnAttachFilesClick"
-                                Style="{StaticResource CompactButton}"
-                                MinHeight="32"
-                                Margin="8,0,0,0"
-                                Padding="10,4"
-                                ToolTip="Attach files from the workspace or outside it. Outside files are saved as managed snapshots."
-                                AutomationProperties.Name="Attach files"/>
-                        <Button x:Name="AttachFolderButton"
-                                Content="Attach folder"
-                                Click="OnAttachFolderClick"
-                                Style="{StaticResource CompactButton}"
-                                MinHeight="32"
-                                Margin="8,0,0,0"
-                                Padding="10,4"
-                                ToolTip="Attach a folder from the workspace or outside it. Outside folders are saved as managed snapshots."
-                                AutomationProperties.Name="Attach folder"/>
+                                Padding="8,4"
+                                ToolTip="Attach images, files, or folders. Outside files and folders are saved as managed snapshots."
+                                AutomationProperties.Name="Attach">
+                            <Button.ContextMenu>
+                                <ContextMenu Placement="Top">
+                                    <MenuItem Header="Images..."
+                                              Click="OnAttachImagesClick"
+                                              AutomationProperties.Name="Attach images"/>
+                                    <MenuItem Header="Files..."
+                                              Click="OnAttachFilesClick"
+                                              AutomationProperties.Name="Attach files"/>
+                                    <MenuItem Header="Folder..."
+                                              Click="OnAttachFolderClick"
+                                              AutomationProperties.Name="Attach folder"/>
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                        </Button>
                     </WrapPanel>
 
                     <Popup x:Name="ModelOptionsPopup"

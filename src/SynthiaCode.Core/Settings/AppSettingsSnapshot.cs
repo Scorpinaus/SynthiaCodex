@@ -15,6 +15,7 @@ public static class AppSettingsSnapshot
             LastModelOverride = source.LastModelOverride,
             LastReasoningEffortOverride = source.LastReasoningEffortOverride,
             LastServiceTierOverride = source.LastServiceTierOverride,
+            FollowUpBehavior = source.FollowUpBehavior,
             SandboxModeOverride = source.SandboxModeOverride,
             ApprovalPolicyOverride = source.ApprovalPolicyOverride,
             PermissionMode = source.PermissionMode,
@@ -46,6 +47,7 @@ public static class AppSettingsSnapshot
         TimelineItems = [.. source.TimelineItems],
         RawEvents = [.. source.RawEvents],
         ConversationTurns = [.. source.ConversationTurns.Select(CloneTurn)],
+        QueuedFollowUps = [.. source.QueuedFollowUps.Select(item => item.Clone())],
         UpdatedAt = source.UpdatedAt
     };
 

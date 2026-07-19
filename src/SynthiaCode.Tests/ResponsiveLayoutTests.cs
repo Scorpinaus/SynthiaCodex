@@ -32,6 +32,7 @@ internal static class ResponsiveLayoutTests
         VerifyWindowCloseIsDeferred();
         VerifyProjectNavigationWraps();
         VerifyTranscriptWrapsAndScrolls();
+        VerifyQueuedFollowUpControls();
     });
 
     private static void ApplyDarkThemeForTest(ResourceDictionary resources)
@@ -70,6 +71,7 @@ internal static class ResponsiveLayoutTests
         resources["ConversationMetadataText"] = TextStyle(fontSize: 11);
         resources["ConversationActivityTitleText"] = TextStyle(fontSize: 12);
         resources["ConversationActivityDetailText"] = TextStyle(fontSize: 12, lineHeight: 18, wraps: true);
+        resources["ValueText"] = TextStyle(fontSize: 11, wraps: true);
     }
 
     private static Style BorderStyle(Thickness padding)
@@ -306,6 +308,25 @@ internal static class ResponsiveLayoutTests
         Assert(row.MaxHeight <= 48, "model rows remain short enough to expose the complete supported catalog");
         Assert(labels.Count == 2, "model rows contain only a name and concise description");
         Assert(labels.All(label => label.TextWrapping == TextWrapping.NoWrap), "model row text stays on one line");
+    }
+
+    private static void VerifyQueuedFollowUpControls()
+    {
+        var taskView = new TaskView();
+        var queuePanel = taskView.FindName("QueuedFollowUpPanel") as FrameworkElement
+            ?? throw new InvalidOperationException("queued follow-up panel was not found");
+        var queueList = taskView.FindName("QueuedFollowUpList") as ItemsControl
+            ?? throw new InvalidOperationException("queued follow-up list was not found");
+        var alternateButton = taskView.FindName("AlternateFollowUpButton") as Button
+            ?? throw new InvalidOperationException("alternate follow-up action was not found");
+        Assert(AutomationProperties.GetName(queuePanel) == "Queued follow-ups", "queue panel has an accessible name");
+        Assert(AutomationProperties.GetName(queueList) == "Queued follow-up messages", "queue list has an accessible name");
+        Assert(alternateButton.MinHeight >= 32, "alternate follow-up action has an accessible target size");
+
+        var details = new DetailsView();
+        var selector = details.FindName("FollowUpBehaviorSelector") as ComboBox
+            ?? throw new InvalidOperationException("follow-up behavior setting was not found");
+        Assert(AutomationProperties.GetName(selector) == "Follow-up behavior", "follow-up behavior setting has an accessible name");
     }
 
     private static void VerifyWindowCloseIsDeferred()

@@ -51,6 +51,7 @@ public sealed class ThreadStore
         existing.TimelineItems = state.TimelineItems;
         existing.RawEvents = state.RawEvents;
         existing.ConversationTurns = CloneTurns(state.ConversationTurns);
+        existing.QueuedFollowUps = CloneQueuedFollowUps(state.QueuedFollowUps);
         existing.CreatedAt = state.CreatedAt;
         existing.UpdatedAt = state.UpdatedAt;
         return ToPresentation(existing);
@@ -109,6 +110,7 @@ public sealed class ThreadStore
         TimelineItems = [.. source.TimelineItems],
         RawEvents = [.. source.RawEvents],
         ConversationTurns = CloneTurns(source.ConversationTurns),
+        QueuedFollowUps = CloneQueuedFollowUps(source.QueuedFollowUps),
         UpdatedAt = source.UpdatedAt
     };
 
@@ -131,6 +133,7 @@ public sealed class ThreadStore
         TimelineItems = [.. source.TimelineItems],
         RawEvents = [.. source.RawEvents],
         ConversationTurns = CloneTurns(source.ConversationTurns),
+        QueuedFollowUps = CloneQueuedFollowUps(source.QueuedFollowUps),
         UpdatedAt = source.UpdatedAt
     };
 
@@ -146,4 +149,8 @@ public sealed class ThreadStore
             CompletedAt = turn.CompletedAt,
             Activity = [.. turn.Activity]
         }).ToList();
+
+    private static List<QueuedFollowUpSnapshot> CloneQueuedFollowUps(
+        IEnumerable<QueuedFollowUpSnapshot> queuedFollowUps) =>
+        queuedFollowUps.Select(item => item.Clone()).ToList();
 }

@@ -9,15 +9,25 @@ namespace SynthiaCode.App.ViewModels;
 public sealed class TaskViewModel : ObservableObject
 {
     private readonly AsyncRelayCommand submitCommand;
+    private readonly AsyncRelayCommand composerSendCommand;
     private readonly AsyncRelayCommand cancelCommand;
     private readonly AsyncRelayCommand loadModelsCommand;
     private readonly AsyncRelayCommand steerCommand;
+    private readonly AsyncRelayCommand alternateFollowUpCommand;
+    private readonly RelayCommand beginQueuedFollowUpEditCommand;
+    private readonly RelayCommand cancelQueuedFollowUpEditCommand;
+    private readonly AsyncRelayCommand saveQueuedFollowUpEditCommand;
+    private readonly AsyncRelayCommand moveQueuedFollowUpUpCommand;
+    private readonly AsyncRelayCommand moveQueuedFollowUpDownCommand;
+    private readonly AsyncRelayCommand deleteQueuedFollowUpCommand;
+    private readonly AsyncRelayCommand sendQueuedFollowUpCommand;
     private readonly RelayCommand openExternalUriCommand;
     private readonly RelayCommand openOptionsCommand;
     private readonly RelayCommand showOptionsMainCommand;
     private readonly RelayCommand showModelsCommand;
     private readonly RelayCommand showReasoningCommand;
     private CodexThreadService threadService = new();
+    private CodexFollowUpQueue followUpQueue = new();
     private string prompt = string.Empty;
     private string submittedPrompt = string.Empty;
     private string modelOverride = string.Empty;
@@ -29,6 +39,7 @@ public sealed class TaskViewModel : ObservableObject
     private CodexModelOption? selectedModel;
     private CodexReasoningOption? selectedReasoning;
     private CodexServiceTierSelection serviceTierSelection;
+    private FollowUpBehavior followUpBehavior = FollowUpBehavior.Queue;
     private ComposerOptionsPage optionsPage;
     private bool isTurnRunning;
     private bool isOptionsFlyoutOpen;
@@ -42,12 +53,56 @@ public sealed class TaskViewModel : ObservableObject
         Func<Task> steer,
         Func<bool> canCancel,
         Func<bool> canSteer,
-        Action<Uri>? openExternalUri = null)
+        Action<Uri>? openExternalUri = null,
+        Func<Task>? alternateFollowUp = null,
+        Func<Task>? persistFollowUpQueue = null,
+        Func<QueuedFollowUp, Task>? sendQueuedFollowUp = null)
     {
         SubmitCommand = submitCommand = new AsyncRelayCommand(submit);
+        ComposerSendCommand = composerSendCommand = new AsyncRelayCommand(
+            () => IsTurnRunning ? steer() : submit());
         CancelCommand = cancelCommand = new AsyncRelayCommand(cancel, canCancel);
         LoadModelsCommand = loadModelsCommand = new AsyncRelayCommand(loadModels);
         SteerCommand = steerCommand = new AsyncRelayCommand(steer, canSteer);
+        AlternateFollowUpCommand = alternateFollowUpCommand = new AsyncRelayCommand(
+            alternateFollowUp ?? (() => Task.CompletedTask),
+            canSteer);
+        beginQueuedFollowUpEditCommand = new RelayCommand(
+            parameter => MutateQueuedFollowUp(parameter, item => followUpQueue.BeginEdit(item.Id)),
+            parameter => parameter is QueuedFollowUp { IsStarting: false, IsEditing: false });
+        cancelQueuedFollowUpEditCommand = new RelayCommand(
+            parameter => MutateQueuedFollowUp(parameter, item => followUpQueue.CancelEdit(item.Id)),
+            parameter => parameter is QueuedFollowUp { IsEditing: true });
+        saveQueuedFollowUpEditCommand = new AsyncRelayCommand(
+            parameter => PersistQueuedMutationAsync(
+                parameter,
+                item => followUpQueue.CommitEdit(item.Id),
+                persistFollowUpQueue),
+            parameter => parameter is QueuedFollowUp { IsEditing: true, IsStarting: false });
+        moveQueuedFollowUpUpCommand = new AsyncRelayCommand(
+            parameter => PersistQueuedMutationAsync(
+                parameter,
+                item => followUpQueue.MoveUp(item.Id),
+                persistFollowUpQueue),
+            parameter => parameter is QueuedFollowUp item && item.IsPending && followUpQueue.IndexOf(item.Id) > 0);
+        moveQueuedFollowUpDownCommand = new AsyncRelayCommand(
+            parameter => PersistQueuedMutationAsync(
+                parameter,
+                item => followUpQueue.MoveDown(item.Id),
+                persistFollowUpQueue),
+            parameter => parameter is QueuedFollowUp item && item.IsPending &&
+                followUpQueue.IndexOf(item.Id) >= 0 && followUpQueue.IndexOf(item.Id) < followUpQueue.Items.Count - 1);
+        deleteQueuedFollowUpCommand = new AsyncRelayCommand(
+            parameter => PersistQueuedMutationAsync(
+                parameter,
+                item => followUpQueue.Remove(item.Id),
+                persistFollowUpQueue),
+            parameter => parameter is QueuedFollowUp { IsStarting: false });
+        sendQueuedFollowUpCommand = new AsyncRelayCommand(
+            parameter => parameter is QueuedFollowUp item && sendQueuedFollowUp is not null
+                ? sendQueuedFollowUp(item)
+                : Task.CompletedTask,
+            parameter => parameter is QueuedFollowUp { IsStarting: false });
         OpenExternalUriCommand = openExternalUriCommand = new RelayCommand(
             parameter =>
             {
@@ -84,6 +139,8 @@ public sealed class TaskViewModel : ObservableObject
 
     public ObservableCollection<string> RawEvents => threadService.RawEvents;
 
+    public ObservableCollection<QueuedFollowUp> QueuedFollowUps => followUpQueue.Items;
+
     public ObservableCollection<string> ModelOptions { get; } = [];
 
     public ObservableCollection<CodexModelOption> ModelCatalog { get; } = [];
@@ -92,10 +149,22 @@ public sealed class TaskViewModel : ObservableObject
 
     public ObservableCollection<string> ReasoningEffortOptions { get; } = [];
 
+    public IReadOnlyList<FollowUpBehavior> FollowUpBehaviorOptions { get; } =
+        [FollowUpBehavior.Queue, FollowUpBehavior.Steer];
+
     public ICommand SubmitCommand { get; }
+    public ICommand ComposerSendCommand { get; }
     public ICommand CancelCommand { get; }
     public ICommand LoadModelsCommand { get; }
     public ICommand SteerCommand { get; }
+    public ICommand AlternateFollowUpCommand { get; }
+    public ICommand BeginQueuedFollowUpEditCommand => beginQueuedFollowUpEditCommand;
+    public ICommand CancelQueuedFollowUpEditCommand => cancelQueuedFollowUpEditCommand;
+    public ICommand SaveQueuedFollowUpEditCommand => saveQueuedFollowUpEditCommand;
+    public ICommand MoveQueuedFollowUpUpCommand => moveQueuedFollowUpUpCommand;
+    public ICommand MoveQueuedFollowUpDownCommand => moveQueuedFollowUpDownCommand;
+    public ICommand DeleteQueuedFollowUpCommand => deleteQueuedFollowUpCommand;
+    public ICommand SendQueuedFollowUpCommand => sendQueuedFollowUpCommand;
     public ICommand OpenExternalUriCommand { get; }
     public ICommand OpenOptionsCommand { get; }
     public ICommand ShowOptionsMainCommand { get; }
@@ -331,7 +400,26 @@ public sealed class TaskViewModel : ObservableObject
             ? "No final response yet"
             : threadService.FinalResponse;
 
-    public string ComposerActionLabel => ConversationTurns.Count == 0 ? "Run task" : "Send follow-up";
+    public string ComposerActionLabel => IsTurnRunning
+        ? FollowUpBehavior == FollowUpBehavior.Queue ? "Queue follow-up" : "Steer task"
+        : ConversationTurns.Count == 0 ? "Run task" : "Send follow-up";
+
+    public string AlternateFollowUpActionLabel => FollowUpBehavior == FollowUpBehavior.Queue
+        ? "Steer current turn"
+        : "Queue for next turn";
+
+    public FollowUpBehavior FollowUpBehavior
+    {
+        get => followUpBehavior;
+        set
+        {
+            if (SetProperty(ref followUpBehavior, value))
+            {
+                OnPropertyChanged(nameof(ComposerActionLabel));
+                OnPropertyChanged(nameof(AlternateFollowUpActionLabel));
+            }
+        }
+    }
 
     public bool HasConversation => ConversationTurns.Count > 0;
 
@@ -342,6 +430,7 @@ public sealed class TaskViewModel : ObservableObject
         {
             if (SetProperty(ref isTurnRunning, value))
             {
+                OnPropertyChanged(nameof(ComposerActionLabel));
                 if (!value)
                 {
                     SteeringText = string.Empty;
@@ -365,6 +454,62 @@ public sealed class TaskViewModel : ObservableObject
         OnPropertyChanged(nameof(FinalResponse));
         OnPropertyChanged(nameof(ComposerActionLabel));
         OnPropertyChanged(nameof(HasConversation));
+    }
+
+    public void UseFollowUpQueue(CodexFollowUpQueue queue)
+    {
+        followUpQueue = queue ?? throw new ArgumentNullException(nameof(queue));
+        OnPropertyChanged(nameof(QueuedFollowUps));
+        OnPropertyChanged(nameof(HasQueuedFollowUps));
+    }
+
+    public bool HasQueuedFollowUps => QueuedFollowUps.Count > 0;
+
+    public void NotifyQueuedFollowUpsChanged()
+    {
+        OnPropertyChanged(nameof(QueuedFollowUps));
+        OnPropertyChanged(nameof(HasQueuedFollowUps));
+        RaiseQueuedFollowUpCommandStates();
+    }
+
+    private void MutateQueuedFollowUp(object? parameter, Action<QueuedFollowUp> mutation)
+    {
+        if (parameter is not QueuedFollowUp item)
+        {
+            return;
+        }
+
+        mutation(item);
+        NotifyQueuedFollowUpsChanged();
+    }
+
+    private async Task PersistQueuedMutationAsync(
+        object? parameter,
+        Action<QueuedFollowUp> mutation,
+        Func<Task>? persist)
+    {
+        if (parameter is not QueuedFollowUp item)
+        {
+            return;
+        }
+
+        mutation(item);
+        NotifyQueuedFollowUpsChanged();
+        if (persist is not null)
+        {
+            await persist().ConfigureAwait(true);
+        }
+    }
+
+    private void RaiseQueuedFollowUpCommandStates()
+    {
+        beginQueuedFollowUpEditCommand.RaiseCanExecuteChanged();
+        cancelQueuedFollowUpEditCommand.RaiseCanExecuteChanged();
+        saveQueuedFollowUpEditCommand.RaiseCanExecuteChanged();
+        moveQueuedFollowUpUpCommand.RaiseCanExecuteChanged();
+        moveQueuedFollowUpDownCommand.RaiseCanExecuteChanged();
+        deleteQueuedFollowUpCommand.RaiseCanExecuteChanged();
+        sendQueuedFollowUpCommand.RaiseCanExecuteChanged();
     }
 
     public void NotifyResponseChanged()
@@ -441,9 +586,12 @@ public sealed class TaskViewModel : ObservableObject
     public void RaiseCommandStates()
     {
         submitCommand.RaiseCanExecuteChanged();
+        composerSendCommand.RaiseCanExecuteChanged();
         cancelCommand.RaiseCanExecuteChanged();
         loadModelsCommand.RaiseCanExecuteChanged();
         steerCommand.RaiseCanExecuteChanged();
+        alternateFollowUpCommand.RaiseCanExecuteChanged();
+        RaiseQueuedFollowUpCommandStates();
         openExternalUriCommand.RaiseCanExecuteChanged();
         openOptionsCommand.RaiseCanExecuteChanged();
         showOptionsMainCommand.RaiseCanExecuteChanged();

@@ -8,7 +8,8 @@
         MinHeight="640" MinWidth="800" Height="800" Width="1320">
     <Window.InputBindings>
         <KeyBinding Key="O" Modifiers="Control" Command="{Binding ProjectWorkspace.BrowseProjectCommand}"/>
-        <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding TaskWorkspace.SubmitCommand}"/>
+        <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding TaskWorkspace.ComposerSendCommand}"/>
+        <KeyBinding Key="Enter" Modifiers="Control+Shift" Command="{Binding TaskWorkspace.AlternateFollowUpCommand}"/>
         <KeyBinding Key="B" Modifiers="Control" Command="{Binding ToggleProjectRailCommand}"/>
         <KeyBinding Key="D" Modifiers="Control+Shift" Command="{Binding ToggleDetailsPaneCommand}"/>
         <KeyBinding Key="T" Modifiers="Control+Shift" Command="{Binding Terminal.ToggleCommand}"/>

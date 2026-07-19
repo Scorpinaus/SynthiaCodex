@@ -1,7 +1,7 @@
 # SynthiaCode: Current Architecture through Permission Modes
 
 **Recorded:** 19 July 2026
-**Phase:** Server-request approvals and permission modes after Phase 5G
+**Phase:** Server-request approvals, permission modes, and queued follow-ups after Phase 5G
 **Purpose:** Describe the current architecture while retaining the Phase 5B performance baseline.
 
 ## System shape
@@ -118,6 +118,28 @@ Thread selection and resume use typed `thread/read`/resume results with `include
 `TaskView` presents the collection as a recycling-virtualized chronological transcript. Each turn has a distinct outer boundary and separate user, activity, and assistant surfaces, so adjacent turns remain visually independent while scrolling. The app-server stream is retained in bounded raw-event and diagnostic collections, while visible turn activity is an allowlisted projection of commentary, commands, file changes, tools, searches, plans, collaboration, guidance, and actionable errors. Stable item keys consolidate start, progress, and completion into one row; lifecycle, token, output-delta, reasoning, final-answer, and unknown notifications remain diagnostics-only. It follows live output while the viewport is near the bottom, exposes a Jump to latest action after manual scrolling, hides empty activity, collapses historical activity, and keeps the composer fixed. The first action is labelled Run task; subsequent submissions are labelled Send follow-up. During an active turn, the same composer becomes the guidance input.
 
 The composer footer owns one compact model summary instead of a permanent Run settings expander. Its anchored flyout drills into the authenticated model catalog and filters reasoning efforts from the selected model's advertised capabilities. Fast is a catalog-provided service tier rather than a model alias and is enabled only when the selected model advertises `fast`. `account/read.planType` is presentation context only; the visible `model/list` result is the effective capability source for ChatGPT and API-key sessions. Model, reasoning, and inherit/standard/fast preferences persist independently of account entitlements, are revalidated after catalog refresh, and are disabled while the selected turn is active.
+
+### Queued follow-ups
+
+`CodexFollowUpQueueWorkspace` owns one `CodexFollowUpQueue` per app-server thread, parallel to `CodexThreadWorkspace`. The selected `TaskViewModel` binds to that thread's observable queue, while completion handling accesses queues by routed thread ID so thread A can dispatch safely while thread B remains selected and running.
+
+During an active turn, the application-wide `FollowUpBehavior` setting chooses Queue or Steer as the primary composer action. Queue is the default; `Ctrl+Shift+Enter` and the adjacent alternate button invert the behavior for one message without changing the setting. Queue insertion is local and clears the composer only after the item is persisted. Steer continues to use `turn/steer` with the captured thread and expected turn IDs and clears text only after acknowledgement.
+
+Each queue item has a stable ID, text, timestamps, a `Pending`, `Starting`, or `NeedsAttention` state, and a deep-copied turn-options snapshot. Queues enforce 50 items, 64 KiB per item, and 256 KiB aggregate text per thread. `AppSettingsSnapshot` and `ThreadStore` deep-copy the queue and nested options, and every enqueue, edit, reorder, delete, state transition, and acknowledgement is persisted through the coalescing settings store. A persisted `Starting` item restores as `NeedsAttention`; restored pending work is presented but never dispatched solely because startup found an idle thread.
+
+Successful `turn/completed` reduction saves the owning transcript and calls the per-thread drain path. A semaphore serializes dispatch for that thread, then running state, head identity, and item state are checked again. The head is persisted as `Starting` before `turn/start`; it is removed only after the response acknowledges the new turn. A failed/cancelled completion does not drain, and start failures leave the head as `NeedsAttention` without automatic retry. Archive and assistant-owned worktree removal remain disabled until the queue is empty.
+
+```text
+active composer -> Queue -> per-thread queue -> immediate settings snapshot
+turn/completed (Completed only)
+  -> routed thread service save
+  -> per-thread dispatch gate
+  -> persist head as Starting
+  -> turn/start with captured thread/workspace/options
+  -> acknowledge and remove, or retain as NeedsAttention
+```
+
+The first release validates that the captured workspace still exists and never reads the currently selected thread during background dispatch. Refreshing model availability and managed permission requirements immediately before queued dispatch remains a follow-up hardening item.
 
 ### Terminal
 

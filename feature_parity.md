@@ -18,7 +18,7 @@
 
 | Area | Current parity | Assessment |
 | --- | --- | --- |
-| Local coding loop | **Strong** | Projects, chats, multi-turn work, streaming, models, permissions, terminal, Git changes, and worktrees are usable end to end. |
+| Local coding loop | **Strong** | Projects, chats, multi-turn work, queued follow-ups, streaming, models, permissions, terminal, Git changes, and worktrees are usable end to end. |
 | Safety and approvals | **Near full** | The three composer permission modes and server-request approvals now map closely to ChatGPT desktop. |
 | Git and worktree lifecycle | **Moderate** | Core isolation and file-level Git operations exist; chunk review, handoff, push, PR, snapshots, and setup actions do not. |
 | Agent orchestration | **Partial** | Parallel top-level chats and collaboration activity exist, but subagent thread inspection and management are absent. |
@@ -38,7 +38,7 @@
 | Resume, fork, archive, unarchive | Typed app-server lifecycle flows and UI actions | **Full** | Permanent delete is not exposed. |
 | Pin, delete, and search chats | Archive state exists; no complete pin/delete/search UI | **Partial** | Add sidebar pin/delete, cross-chat search, and find-in-chat. |
 | Steer an active run | Active-turn guidance uses `turn/steer` | **Full** | None for steering itself. |
-| Queue and manage follow-up messages | No editable/reorderable next-turn queue or follow-up-behavior setting | **Missing** | ChatGPT supports Steer versus Queue defaults and queued-message editing. |
+| Queue and manage follow-up messages | Per-thread persisted queues support Queue/Steer defaults, one-shot inversion, inline edit, reorder, manual send/steer, delete, and completion-driven FIFO dispatch | **Near** | Dispatch validates the captured workspace but does not yet refresh and re-resolve model-catalog and managed-permission policy immediately before a background start. |
 | Parallel top-level chats | Multiple project threads can run and route notifications independently | **Near** | No dedicated global running-task manager or completion notification center. |
 | Long-running/background work | Runs continue while SynthiaCode remains open; reconnect and shutdown are handled | **Partial** | No prevent-sleep setting, background inbox, OS completion notifications, or cloud continuation. |
 | Local worktrees | Assistant-owned Git worktrees can be created, used per chat, listed, and safely removed | **Partial** | No branch picker, Local/Worktree handoff, managed snapshots/restore, permanent worktrees, `.worktreeinclude`, setup scripts, or configurable retention/root. |
@@ -121,11 +121,19 @@ The permissions area moved from **partial** to **full/near-full functional parit
 6. Unknown, stale, and disallowed selections fail closed.
 7. Human-required server requests retain the global approval queue and exact-once response behavior.
 
+P0 queued follow-ups moved from **Missing** to **Near**:
+
+1. Queue is the persisted default, Steer remains selectable, and `Ctrl+Shift+Enter` inverts the choice once.
+2. Each thread owns a persisted queue that is visible above the composer and supports inline edit, reorder, manual send/steer, and delete.
+3. Successful completions drain one FIFO item on the owning thread, even when another running thread is selected.
+4. Failed or cancelled turns pause the queue; interrupted `Starting` items restore as `NeedsAttention` and are never retried automatically.
+5. Queue mutations persist immediately, and archive/worktree removal is blocked while queued work remains.
+
 ## Recommended parity backlog
 
 ### P0 — Complete the core local coding experience
 
-1. **Queued follow-ups:** add Steer/Queue behavior, an editable next-turn queue, and a default preference.
+1. **Queued follow-ups hardening (core implemented):** refresh and re-resolve model availability and managed permission policy immediately before background dispatch, then add live disconnect/reconnect smoke coverage.
 2. **Attachments and image input:** support file/image picker, paste/drag-drop, prompt input parts, previews, and safe persistence.
 3. **Structured Git review:** add hunk staging/revert, inline diff comments, and a dedicated review target flow.
 4. **Push and pull requests:** add native branch push and GitHub PR creation/status.
@@ -150,7 +158,7 @@ The permissions area moved from **partial** to **full/near-full functional parit
 
 ## Product recommendation
 
-Keep SynthiaCode's parity target focused on the **local coding loop**, not every ChatGPT feature. The best next release is the P0 set: queued follow-ups, attachments, structured review/PR workflows, and complete worktree lifecycle. Those close the largest everyday workflow gaps without requiring SynthiaCode to become a browser, connector marketplace, automation platform, or general artifact suite.
+Keep SynthiaCode's parity target focused on the **local coding loop**, not every ChatGPT feature. With the core queued-follow-up workflow implemented, the best next release is the remaining P0 set: attachments, structured review/PR workflows, complete worktree lifecycle, and the smaller queued-dispatch policy-revalidation hardening item. Those close the largest everyday workflow gaps without requiring SynthiaCode to become a browser, connector marketplace, automation platform, or general artifact suite.
 
 ## Audit sources
 

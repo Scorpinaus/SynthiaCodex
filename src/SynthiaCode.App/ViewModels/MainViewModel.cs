@@ -27,6 +27,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly IThemeService themeService;
     private readonly ThreadStore threadStore;
     private readonly CodexThreadWorkspace threadWorkspace;
+    private readonly CodexFollowUpQueueWorkspace followUpQueueWorkspace = new();
     private readonly IAppLogger logger;
     private readonly CancellationTokenSource appServerWarmUpCancellation = new();
     private CodexThreadService threadService
@@ -71,6 +72,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly HashSet<string> loadedThreadIds = new(StringComparer.Ordinal);
     private readonly HashSet<string> runningThreadIds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> activeTurnIds = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SemaphoreSlim> followUpDispatchGates = new(StringComparer.Ordinal);
 
     public MainViewModel(
         ISettingsStore settingsStore,
@@ -140,7 +142,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             SteerTurnAsync,
             CanCancelTurn,
             CanSteerTurn,
-            userInteractionService.OpenExternalUri);
+            userInteractionService.OpenExternalUri,
+            SendAlternateFollowUpAsync,
+            PersistSelectedFollowUpQueueAsync,
+            SendQueuedFollowUpNowAsync);
         TaskWorkspace.PropertyChanged += (_, args) => RelayTaskPropertyChanged(args.PropertyName);
 
         ApprovalQueue = new ApprovalQueueViewModel(appServerSessionCoordinator.RespondToServerRequestAsync);
@@ -558,6 +563,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ModelOverride = settings.LastModelOverride ?? string.Empty;
         ReasoningEffortOverride = settings.LastReasoningEffortOverride ?? string.Empty;
         TaskWorkspace.ServiceTierSelection = ParseServiceTierSelection(settings.LastServiceTierOverride);
+        TaskWorkspace.FollowUpBehavior = settings.FollowUpBehavior.ParseFollowUpBehavior();
         var permissionSettingsMigrated = AppSettingsPermissionMigration.Migrate(settings);
         ExecutionPolicy.Initialize(
             settings.PermissionMode,
@@ -833,19 +839,135 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task SteerTurnAsync()
     {
+        if (TaskWorkspace.FollowUpBehavior == FollowUpBehavior.Queue)
+        {
+            await QueueActiveFollowUpAsync().ConfigureAwait(true);
+            return;
+        }
+
+        await SendSteerAsync().ConfigureAwait(true);
+    }
+
+    private Task SendAlternateFollowUpAsync() =>
+        TaskWorkspace.FollowUpBehavior == FollowUpBehavior.Queue
+            ? SendSteerAsync()
+            : QueueActiveFollowUpAsync();
+
+    private async Task QueueActiveFollowUpAsync()
+    {
+        if (!CanSteerTurn() || activeThreadId is null)
+        {
+            return;
+        }
+
+        var threadId = activeThreadId;
+        try
+        {
+            var guidance = SteeringText.Trim();
+            var queue = followUpQueueWorkspace.GetOrCreate(threadId);
+            queue.Enqueue(guidance, CaptureQueuedTurnOptions(GetWorkspacePathForThread(threadId)));
+            TaskWorkspace.NotifyQueuedFollowUpsChanged();
+            await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
+            SteeringText = string.Empty;
+            StatusMessage = "Follow-up queued for the next turn";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Error, "follow_up_queue_failed", "Could not queue the follow-up.", exception: ex);
+        }
+    }
+
+    private async Task PersistSelectedFollowUpQueueAsync()
+    {
+        if (string.IsNullOrWhiteSpace(activeThreadId))
+        {
+            return;
+        }
+
+        await PersistFollowUpQueueAsync(activeThreadId).ConfigureAwait(true);
+        RaiseThreadCommandStates();
+    }
+
+    private async Task SendQueuedFollowUpNowAsync(QueuedFollowUp item)
+    {
+        if (IsShuttingDown || string.IsNullOrWhiteSpace(activeThreadId) ||
+            !followUpQueueWorkspace.ThreadIds.Contains(activeThreadId))
+        {
+            return;
+        }
+
+        var threadId = activeThreadId;
+        var queue = followUpQueueWorkspace.GetRequired(threadId);
+        if (queue.IndexOf(item.Id) < 0)
+        {
+            return;
+        }
+
+        if (IsTurnRunning)
+        {
+            if (appServerSessionCoordinator.State != AppServerSessionState.Connected || string.IsNullOrWhiteSpace(activeTurnId))
+            {
+                StatusMessage = "The active turn is not ready for steering";
+                return;
+            }
+
+            try
+            {
+                var turnId = activeTurnId;
+                await appServerSessionCoordinator.SteerTurnAsync(new CodexTurnSteerRequest(
+                    threadId,
+                    turnId,
+                    item.Text)).ConfigureAwait(true);
+                threadWorkspace.GetRequired(threadId).AddGuidance(item.Text);
+                queue.Remove(item.Id);
+                await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
+                TaskWorkspace.NotifyQueuedFollowUpsChanged();
+                TaskWorkspace.NotifyResponseChanged();
+                StatusMessage = "Queued follow-up steered into the active turn";
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"Could not steer this message. It remains queued. {ex.Message}";
+                logger.Log(AppLogLevel.Warning, "queued_follow_up_steer_failed", "A queued item could not steer the active turn.", exception: ex);
+            }
+            return;
+        }
+
+        if (!ReferenceEquals(queue.Items.FirstOrDefault(), item))
+        {
+            StatusMessage = "Move this follow-up to the top before sending it";
+            return;
+        }
+
+        if (item.State == QueuedFollowUpState.NeedsAttention)
+        {
+            queue.MarkPending(item.Id);
+            await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
+        }
+        await TryDrainFollowUpQueueAsync(threadId).ConfigureAwait(true);
+    }
+
+    private async Task SendSteerAsync()
+    {
         if (!CanSteerTurn() || appServerSessionCoordinator.State != AppServerSessionState.Connected || activeThreadId is null || activeTurnId is null)
         {
             return;
         }
 
+        var threadId = activeThreadId;
+        var turnId = activeTurnId;
         try
         {
             var guidance = SteeringText.Trim();
             await appServerSessionCoordinator.SteerTurnAsync(new CodexTurnSteerRequest(
-                activeThreadId,
-                activeTurnId,
+                threadId,
+                turnId,
                 guidance)).ConfigureAwait(true);
-            threadService.AddGuidance(guidance);
+            var service = threadWorkspace.ThreadIds.Contains(threadId)
+                ? threadWorkspace.GetRequired(threadId)
+                : threadService;
+            service.AddGuidance(guidance);
             TaskWorkspace.NotifyResponseChanged();
             SteeringText = string.Empty;
             StatusMessage = "Steering sent to active turn";
@@ -880,6 +1002,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         threadStore.Upsert(settings, state);
         threadStore.SetActive(settings, projectPath, threadId);
         threadWorkspace.Restore(state);
+        followUpQueueWorkspace.Restore(threadId, state.QueuedFollowUps);
         return state;
     }
 
@@ -1450,7 +1573,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool CanUseSelectedThread() => CanManageThreads() && SelectedThread is not null;
 
     private bool CanArchiveSelectedThread() =>
-        CanUseSelectedThread() && SelectedThread?.IsArchived == false && !IsTurnRunning;
+        CanUseSelectedThread() &&
+        SelectedThread?.IsArchived == false &&
+        !IsTurnRunning &&
+        !SelectedThreadHasQueuedFollowUps();
 
     private bool CanUnarchiveSelectedThread() =>
         CanUseSelectedThread() && SelectedThread?.IsArchived == true;
@@ -1459,7 +1585,21 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         CanUseSelectedThread() &&
         SelectedThread?.IsRunning == false &&
         string.Equals(SelectedThread.Mode, "worktree", StringComparison.OrdinalIgnoreCase) &&
-        !string.IsNullOrWhiteSpace(SelectedThread.WorkspacePath);
+        !string.IsNullOrWhiteSpace(SelectedThread.WorkspacePath) &&
+        !SelectedThreadHasQueuedFollowUps();
+
+    private bool SelectedThreadHasQueuedFollowUps()
+    {
+        var threadId = SelectedThread?.ThreadId;
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            return false;
+        }
+
+        return followUpQueueWorkspace.ThreadIds.Contains(threadId)
+            ? followUpQueueWorkspace.GetRequired(threadId).Items.Count > 0
+            : SelectedThread?.QueuedFollowUps.Count > 0;
+    }
 
     private bool CanSteerTurn() =>
         !IsShuttingDown &&
@@ -1551,6 +1691,209 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             permissions.ApprovalPolicy,
             permissions.ApprovalsReviewer,
             permissions.PermissionProfileId);
+    }
+
+    private QueuedTurnOptionsSnapshot CaptureQueuedTurnOptions(string workspacePath)
+    {
+        var permissions = ResolvePermissionPolicy();
+        return new QueuedTurnOptionsSnapshot
+        {
+            WorkspacePath = workspacePath,
+            Model = NormalizeOverride(ModelOverride),
+            ReasoningEffort = ParseReasoningEffort(ReasoningEffortOverride),
+            ServiceTier = TaskWorkspace.ServiceTierSelection,
+            Sandbox = permissions.Sandbox,
+            ApprovalPolicy = permissions.ApprovalPolicy,
+            ApprovalsReviewer = permissions.ApprovalsReviewer,
+            PermissionProfileId = permissions.PermissionProfileId
+        };
+    }
+
+    private string GetWorkspacePathForThread(string threadId)
+    {
+        var state = settings.ProjectThreads.FirstOrDefault(thread =>
+            string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException($"Thread '{threadId}' is no longer available.");
+        var path = Path.GetFullPath(state.WorkspacePath ?? state.ProjectPath);
+        if (!Directory.Exists(path))
+        {
+            throw new InvalidOperationException($"The queued follow-up workspace is unavailable: {path}");
+        }
+
+        return path;
+    }
+
+    private SemaphoreSlim GetFollowUpDispatchGate(string threadId)
+    {
+        if (!followUpDispatchGates.TryGetValue(threadId, out var gate))
+        {
+            gate = new SemaphoreSlim(1, 1);
+            followUpDispatchGates.Add(threadId, gate);
+        }
+
+        return gate;
+    }
+
+    private async Task TryDrainFollowUpQueueAsync(string threadId)
+    {
+        if (IsShuttingDown ||
+            runningThreadIds.Contains(threadId) ||
+            !followUpQueueWorkspace.ThreadIds.Contains(threadId))
+        {
+            return;
+        }
+
+        var queue = followUpQueueWorkspace.GetRequired(threadId);
+        if (queue.Items.FirstOrDefault() is not { State: QueuedFollowUpState.Pending } item)
+        {
+            return;
+        }
+
+        var gate = GetFollowUpDispatchGate(threadId);
+        await gate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            if (IsShuttingDown || runningThreadIds.Contains(threadId) ||
+                queue.Items.FirstOrDefault() is not { State: QueuedFollowUpState.Pending } head ||
+                !string.Equals(head.Id, item.Id, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            await StartQueuedFollowUpAsync(threadId, queue, head).ConfigureAwait(true);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task StartQueuedFollowUpAsync(
+        string threadId,
+        CodexFollowUpQueue queue,
+        QueuedFollowUp item)
+    {
+        var service = threadWorkspace.GetRequired(threadId);
+        queue.MarkStarting(item.Id);
+        TaskWorkspace.NotifyQueuedFollowUpsChanged();
+        await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
+
+        try
+        {
+            var options = item.Options;
+            var workspacePath = Path.GetFullPath(options.WorkspacePath);
+            if (!Directory.Exists(workspacePath))
+            {
+                throw new InvalidOperationException($"The queued follow-up workspace is unavailable: {workspacePath}");
+            }
+
+            await EnsureAppServerSessionAsync().ConfigureAwait(true);
+            service.BeginTurn(item.Text);
+            if (string.Equals(threadId, activeThreadId, StringComparison.Ordinal))
+            {
+                TaskWorkspace.NotifyResponseChanged();
+            }
+
+            var persisted = settings.ProjectThreads.First(thread =>
+                string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
+            persisted.Preview = item.Text;
+            var turn = await appServerSessionCoordinator.StartTurnAsync(new CodexTurnStartRequest(
+                threadId,
+                item.Text,
+                workspacePath,
+                options.Sandbox,
+                options.Model,
+                options.ReasoningEffort,
+                options.ServiceTier,
+                options.ApprovalPolicy,
+                options.ApprovalsReviewer,
+                options.PermissionProfileId)).ConfigureAwait(true);
+
+            var boundTurn = service.BindPendingTurn(turn.TurnId);
+            threadWorkspace.RegisterTurn(threadId, turn.TurnId);
+            queue.Remove(item.Id);
+            await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
+            if (boundTurn.Status == CodexTurnStatus.Running)
+            {
+                runningThreadIds.Add(threadId);
+                activeTurnIds[threadId] = turn.TurnId;
+                UpdateThreadActivity(threadId, isRunning: true, "Running");
+                if (string.Equals(threadId, activeThreadId, StringComparison.Ordinal))
+                {
+                    activeTurnId = turn.TurnId;
+                    IsTurnRunning = true;
+                    StatusMessage = "Queued follow-up running";
+                }
+            }
+            else
+            {
+                runningThreadIds.Remove(threadId);
+                activeTurnIds.Remove(threadId);
+                if (string.Equals(threadId, activeThreadId, StringComparison.Ordinal))
+                {
+                    activeTurnId = null;
+                    IsTurnRunning = false;
+                }
+                _ = TryDrainFollowUpQueueAsync(threadId);
+            }
+
+            TaskWorkspace.NotifyQueuedFollowUpsChanged();
+            RaiseThreadCommandStates();
+        }
+        catch (Exception ex)
+        {
+            service.FailPendingTurn(ex.Message);
+            queue.MarkNeedsAttention(item.Id, ex.Message);
+            await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
+            TaskWorkspace.NotifyQueuedFollowUpsChanged();
+            StatusMessage = ex.Message;
+            logger.Log(
+                AppLogLevel.Error,
+                "queued_follow_up_start_failed",
+                "A queued follow-up could not be started and requires attention.",
+                new Dictionary<string, string?> { ["threadId"] = threadId, ["itemId"] = item.Id },
+                ex);
+        }
+    }
+
+    private async Task PersistFollowUpQueueAsync(string threadId)
+    {
+        if (!followUpQueueWorkspace.ThreadIds.Contains(threadId))
+        {
+            return;
+        }
+
+        var snapshots = followUpQueueWorkspace.GetRequired(threadId).Snapshot().Select(item => item.Clone()).ToList();
+        var persisted = settings.ProjectThreads.FirstOrDefault(thread =>
+            string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
+        if (persisted is null)
+        {
+            return;
+        }
+
+        persisted.QueuedFollowUps = snapshots;
+        persisted.UpdatedAt = DateTimeOffset.UtcNow;
+        var presentation = ProjectThreads.FirstOrDefault(thread =>
+            string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
+        if (presentation is not null)
+        {
+            presentation.QueuedFollowUps = snapshots.Select(item => item.Clone()).ToList();
+            presentation.UpdatedAt = persisted.UpdatedAt;
+        }
+
+        await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+    }
+
+    private async Task SaveThreadStateAndMaybeDrainAsync(
+        string threadId,
+        CodexThreadService service,
+        bool shouldDrain)
+    {
+        await SaveThreadStateAsync(threadId, service).ConfigureAwait(true);
+        if (shouldDrain)
+        {
+            await TryDrainFollowUpQueueAsync(threadId).ConfigureAwait(true);
+        }
     }
 
     private async Task EnsureAppServerSessionAsync(CancellationToken cancellationToken = default)
@@ -1806,7 +2149,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
             if (!string.IsNullOrWhiteSpace(routedThreadId))
             {
-                _ = SaveThreadStateAsync(routedThreadId, routedService);
+                _ = SaveThreadStateAndMaybeDrainAsync(
+                    routedThreadId,
+                    routedService,
+                    routedService.ActiveTurnStatus == CodexTurnStatus.Completed);
             }
             _ = Git.RefreshAsync();
         }
@@ -1922,6 +2268,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             ProjectThreads.Add(persisted);
             threadWorkspace.Restore(persisted);
+            followUpQueueWorkspace.Restore(persisted.ThreadId, persisted.QueuedFollowUps);
         }
 
         SelectedThread = threadStore.GetActive(settings, SelectedProjectPath);
@@ -1996,12 +2343,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             threadService = new CodexThreadService();
             threadService.Reset();
+            TaskWorkspace.UseFollowUpQueue(new CodexFollowUpQueue());
         }
         else
         {
             threadService = threadWorkspace.ThreadIds.Contains(state.ThreadId)
                 ? threadWorkspace.GetRequired(state.ThreadId)
                 : threadWorkspace.Restore(state);
+            TaskWorkspace.UseFollowUpQueue(followUpQueueWorkspace.ThreadIds.Contains(state.ThreadId)
+                ? followUpQueueWorkspace.GetRequired(state.ThreadId)
+                : followUpQueueWorkspace.Restore(state.ThreadId, state.QueuedFollowUps));
             if (!state.IsArchived && !string.IsNullOrWhiteSpace(SelectedProjectPath))
             {
                 threadStore.SetActive(settings, SelectedProjectPath, state.ThreadId);
@@ -2186,6 +2537,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             _ = SaveModelPreferencesAsync();
         }
 
+        if (propertyName == nameof(TaskViewModel.FollowUpBehavior))
+        {
+            settings.FollowUpBehavior = TaskWorkspace.FollowUpBehavior.ToSettingsValue();
+            _ = SaveFollowUpPreferenceAsync();
+        }
+
         var mainProperty = propertyName switch
         {
             nameof(TaskViewModel.Prompt) => nameof(PromptText),
@@ -2221,6 +2578,22 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 AppLogLevel.Warning,
                 "model_preferences_save_failed",
                 "Could not save model preferences.",
+                exception: ex);
+        }
+    }
+
+    private async Task SaveFollowUpPreferenceAsync()
+    {
+        try
+        {
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            logger.Log(
+                AppLogLevel.Warning,
+                "follow_up_preference_save_failed",
+                "Could not save the follow-up behavior preference.",
                 exception: ex);
         }
     }

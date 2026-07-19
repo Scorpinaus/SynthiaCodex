@@ -32,6 +32,26 @@
                 <StackPanel>
                     <Border Style="{StaticResource Card}" Margin="0,0,0,10">
                         <StackPanel>
+                            <TextBlock Text="General" FontWeight="SemiBold"/>
+                            <TextBlock Text="Follow-up behavior"
+                                       Foreground="{DynamicResource MutedInkBrush}"
+                                       FontSize="11"
+                                       Margin="0,6,0,4"/>
+                            <ComboBox x:Name="FollowUpBehaviorSelector"
+                                      ItemsSource="{Binding TaskWorkspace.FollowUpBehaviorOptions}"
+                                      SelectedItem="{Binding TaskWorkspace.FollowUpBehavior, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      HorizontalAlignment="Stretch"
+                                      AutomationProperties.Name="Follow-up behavior"/>
+                            <TextBlock Text="Queue waits for the next turn; Steer changes the current run. Ctrl+Shift+Enter uses the other behavior once."
+                                       Foreground="{DynamicResource MutedInkBrush}"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       Margin="0,6,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,10">
+                        <StackPanel>
                             <TextBlock Text="Appearance" FontWeight="SemiBold"/>
                             <TextBlock Text="Theme"
                                        Foreground="{DynamicResource MutedInkBrush}"

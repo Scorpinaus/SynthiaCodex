@@ -17,6 +17,8 @@ public sealed class AppSettings
 
     public string? LastServiceTierOverride { get; set; }
 
+    public string? FollowUpBehavior { get; set; }
+
     public string? SandboxModeOverride { get; set; } = "workspace-write";
 
     public string? ApprovalPolicyOverride { get; set; } = "on-request";
@@ -57,6 +59,7 @@ public sealed class PersistedProjectThread
     public List<CodexTimelineItem> TimelineItems { get; set; } = [];
     public List<string> RawEvents { get; set; } = [];
     public List<CodexConversationTurnSnapshot> ConversationTurns { get; set; } = [];
+    public List<QueuedFollowUpSnapshot> QueuedFollowUps { get; set; } = [];
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -175,6 +178,8 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
     public List<string> RawEvents { get; set; } = [];
 
     public List<CodexConversationTurnSnapshot> ConversationTurns { get; set; } = [];
+
+    public List<QueuedFollowUpSnapshot> QueuedFollowUps { get; set; } = [];
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 

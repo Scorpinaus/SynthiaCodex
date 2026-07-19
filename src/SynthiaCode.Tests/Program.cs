@@ -71,6 +71,10 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("thread workspace routes parallel notifications", TestThreadWorkspaceRoutesParallelNotificationsAsync),
     ("view model preserves prompt after auth failed turn", TestViewModelPreservesPromptAfterAuthFailedTurnAsync),
     ("view model runs follow-up turns on the same thread", TestViewModelRunsFollowUpOnSameThreadAsync),
+    ("view model queues active follow-up and drains after completion", TestViewModelQueuesAndDrainsFollowUpAsync),
+    ("view model alternate follow-up inverts behavior once", TestViewModelAlternateFollowUpInvertsOnceAsync),
+    ("view model pauses queued follow-ups after failed turn", TestViewModelPausesQueuedFollowUpsAfterFailedTurnAsync),
+    ("view model drains queued follow-up on background thread", TestViewModelDrainsQueuedFollowUpOnBackgroundThreadAsync),
     ("view model cancellation sends active thread and turn", TestViewModelCancellationSendsActiveThreadAndTurnAsync),
     ("view model restores persisted thread and resumes it", TestViewModelRestoresPersistedThreadAndResumesItAsync),
     ("view model sends selected model and reasoning", TestViewModelSendsSelectedModelAndReasoningAsync),
@@ -103,6 +107,7 @@ tests.AddRange(Phase5BBoundaryTests.All);
 tests.AddRange(Phase5CMultiTurnTests.All);
 tests.AddRange(Phase5DNavigationTests.All);
 tests.AddRange(Phase5GModelControlsTests.All);
+tests.AddRange(QueuedFollowUpTests.All);
 tests.AddRange(ApprovalProtocolTests.All);
 tests.AddRange(PermissionModeTests.All);
 tests.AddRange(ApprovalPresentationTests.All);
@@ -732,7 +737,8 @@ static async Task TestViewModelSteersActiveTurnAsync()
 {
     using var temp = TempWorkspace.Create();
     await using var transport = new FakeAppServerTransport();
-    var viewModel = CreateMainViewModel(transport, temp.Root, AuthReadiness.LikelySignedIn);
+    var settingsStore = new FakeSettingsStore(new AppSettings { FollowUpBehavior = "steer" });
+    var viewModel = CreateMainViewModel(transport, temp.Root, AuthReadiness.LikelySignedIn, settingsStore);
     await viewModel.InitializeAsync();
     viewModel.BrowseProjectCommand.Execute(null);
     await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "steering project selected");
@@ -1431,6 +1437,179 @@ static async Task TestViewModelRunsFollowUpOnSameThreadAsync()
     AssertEqual("Follow-up question", viewModel.TaskWorkspace.ConversationTurns[1].UserPrompt, "follow-up retained");
     AssertEqual("Second answer", viewModel.TaskWorkspace.ConversationTurns[1].AssistantResponse, "follow-up answer retained");
 
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelQueuesAndDrainsFollowUpAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var projectPath = temp.CreateDirectory("QueueRepo");
+    var settingsStore = new FakeSettingsStore(new AppSettings { FollowUpBehavior = "queue" });
+    var viewModel = CreateMainViewModel(transport, projectPath, AuthReadiness.LikelySignedIn, settingsStore);
+
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => string.Equals(viewModel.SelectedProjectPath, projectPath, StringComparison.OrdinalIgnoreCase), "queue project selection");
+
+    viewModel.PromptText = "Initial queued-follow-up task";
+    viewModel.SubmitPromptCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend("""{"id":0,"result":{"userAgent":"test"}}""");
+    await transport.WaitForClientMessageCountAsync(3);
+    transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thread-queue"}}}""");
+    await transport.WaitForClientMessageCountAsync(4);
+    transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-queue-1"}}}""");
+    await WaitUntilAsync(() => viewModel.IsTurnRunning, "queue initial turn running");
+
+    viewModel.SteeringText = "Run the focused queue tests next";
+    viewModel.SteerTurnCommand.Execute(null);
+    await WaitUntilAsync(() => viewModel.TaskWorkspace.QueuedFollowUps.Count == 1, "active message queued");
+    AssertEqual(4, transport.ClientMessages.Count, "queueing makes no app-server request");
+    AssertTrue(string.IsNullOrWhiteSpace(viewModel.SteeringText), "queueing clears active composer");
+    AssertEqual("Run the focused queue tests next", settingsStore.SavedSettings.ProjectThreads.Single().QueuedFollowUps.Single().Text, "queue persists immediately");
+
+    transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-queue","turn":{"id":"turn-queue-1","status":"completed","items":[]}}}""");
+    await transport.WaitForClientMessageCountAsync(5);
+    var queuedTurn = ParseMessage(transport.ClientMessages[4]);
+    AssertJsonString("turn/start", queuedTurn, "method", "queued follow-up starts a new turn");
+    AssertJsonString("thread-queue", queuedTurn, "params.threadId", "queued follow-up stays on its thread");
+    AssertJsonString("Run the focused queue tests next", queuedTurn, "params.input.0.text", "queued follow-up prompt");
+    transport.ServerSend("""{"id":3,"result":{"turn":{"id":"turn-queue-2"}}}""");
+
+    await WaitUntilAsync(() => viewModel.IsTurnRunning && viewModel.TaskWorkspace.QueuedFollowUps.Count == 0, "queued follow-up acknowledged");
+    AssertEqual(2, viewModel.TaskWorkspace.ConversationTurns.Count, "queued follow-up creates a separate conversation turn");
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelAlternateFollowUpInvertsOnceAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var projectPath = temp.CreateDirectory("AlternateRepo");
+    var settingsStore = new FakeSettingsStore(new AppSettings { FollowUpBehavior = "queue" });
+    var viewModel = CreateMainViewModel(transport, projectPath, AuthReadiness.LikelySignedIn, settingsStore);
+
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => string.Equals(viewModel.SelectedProjectPath, projectPath, StringComparison.OrdinalIgnoreCase), "alternate project selection");
+    viewModel.PromptText = "Initial alternate task";
+    viewModel.SubmitPromptCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend("""{"id":0,"result":{"userAgent":"test"}}""");
+    await transport.WaitForClientMessageCountAsync(3);
+    transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thread-alternate"}}}""");
+    await transport.WaitForClientMessageCountAsync(4);
+    transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-alternate"}}}""");
+    await WaitUntilAsync(() => viewModel.IsTurnRunning, "alternate initial turn running");
+
+    viewModel.SteeringText = "Steer this once";
+    viewModel.TaskWorkspace.AlternateFollowUpCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(5);
+    var steer = ParseMessage(transport.ClientMessages[4]);
+    AssertJsonString("turn/steer", steer, "method", "alternate queue action steers once");
+    transport.ServerSend("""{"id":3,"result":{"turnId":"turn-alternate"}}""");
+    await WaitUntilAsync(() => string.IsNullOrWhiteSpace(viewModel.SteeringText), "alternate steer acknowledged");
+
+    AssertEqual(FollowUpBehavior.Queue, viewModel.TaskWorkspace.FollowUpBehavior, "alternate action does not change preference");
+    AssertEqual("queue", settingsStore.SavedSettings.FollowUpBehavior, "alternate action does not rewrite setting");
+    AssertEqual(0, viewModel.TaskWorkspace.QueuedFollowUps.Count, "alternate steer does not enqueue");
+    transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-alternate","turn":{"id":"turn-alternate","status":"completed","items":[]}}}""");
+    await WaitUntilAsync(() => !viewModel.IsTurnRunning, "alternate turn completed");
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelPausesQueuedFollowUpsAfterFailedTurnAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var projectPath = temp.CreateDirectory("FailedQueueRepo");
+    var settingsStore = new FakeSettingsStore(new AppSettings { FollowUpBehavior = "queue" });
+    var viewModel = CreateMainViewModel(transport, projectPath, AuthReadiness.LikelySignedIn, settingsStore);
+
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => string.Equals(viewModel.SelectedProjectPath, projectPath, StringComparison.OrdinalIgnoreCase), "failed queue project selection");
+    viewModel.PromptText = "Initial task that will fail";
+    viewModel.SubmitPromptCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend("""{"id":0,"result":{"userAgent":"test"}}""");
+    await transport.WaitForClientMessageCountAsync(3);
+    transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thread-failed-queue"}}}""");
+    await transport.WaitForClientMessageCountAsync(4);
+    transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-failed-queue"}}}""");
+    await WaitUntilAsync(() => viewModel.IsTurnRunning, "failed queue initial turn running");
+
+    viewModel.SteeringText = "Do not auto-run after failure";
+    viewModel.SteerTurnCommand.Execute(null);
+    await WaitUntilAsync(() => viewModel.TaskWorkspace.QueuedFollowUps.Count == 1, "failed turn follow-up queued");
+    transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-failed-queue","turn":{"id":"turn-failed-queue","status":"failed","error":{"message":"Expected test failure"},"items":[]}}}""");
+    await WaitUntilAsync(() => !viewModel.IsTurnRunning, "failed turn completed");
+    await Task.Delay(100);
+
+    AssertEqual(4, transport.ClientMessages.Count, "failed turn does not auto-start queued work");
+    AssertEqual(1, viewModel.TaskWorkspace.QueuedFollowUps.Count, "failed turn retains queued work");
+    AssertEqual(QueuedFollowUpState.Pending, viewModel.TaskWorkspace.QueuedFollowUps[0].State, "failed turn leaves queued work pending for explicit retry");
+    AssertTrue(!viewModel.ArchiveThreadCommand.CanExecute(null), "thread with queued work cannot be archived");
+    viewModel.TaskWorkspace.DeleteQueuedFollowUpCommand.Execute(viewModel.TaskWorkspace.QueuedFollowUps[0]);
+    await WaitUntilAsync(() => viewModel.TaskWorkspace.QueuedFollowUps.Count == 0, "failed queue item deleted");
+    await WaitUntilAsync(() => viewModel.ArchiveThreadCommand.CanExecute(null), "archive re-enabled after queue deletion");
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelDrainsQueuedFollowUpOnBackgroundThreadAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var projectPath = temp.CreateDirectory("BackgroundQueueRepo");
+    var settingsStore = new FakeSettingsStore(new AppSettings { FollowUpBehavior = "queue" });
+    var viewModel = CreateMainViewModel(transport, projectPath, AuthReadiness.LikelySignedIn, settingsStore);
+
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => string.Equals(viewModel.SelectedProjectPath, projectPath, StringComparison.OrdinalIgnoreCase), "background queue project selection");
+    viewModel.PromptText = "First thread task";
+    viewModel.SubmitPromptCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend("""{"id":0,"result":{"userAgent":"test"}}""");
+    await transport.WaitForClientMessageCountAsync(3);
+    transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thread-background-a"}}}""");
+    await transport.WaitForClientMessageCountAsync(4);
+    transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-background-a-1"}}}""");
+    await WaitUntilAsync(() => viewModel.IsTurnRunning, "background first turn running");
+
+    viewModel.SteeringText = "Queued work for the first thread";
+    viewModel.SteerTurnCommand.Execute(null);
+    await WaitUntilAsync(() => viewModel.TaskWorkspace.QueuedFollowUps.Count == 1, "background follow-up queued");
+
+    viewModel.NewThreadCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(5);
+    transport.ServerSend("""{"id":3,"result":{"thread":{"id":"thread-background-b"}}}""");
+    await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "thread-background-b", "background second thread selected");
+    viewModel.PromptText = "Second thread task";
+    viewModel.SubmitPromptCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(6);
+    transport.ServerSend("""{"id":4,"result":{"turn":{"id":"turn-background-b-1"}}}""");
+    await WaitUntilAsync(() => viewModel.IsTurnRunning, "background second turn running");
+
+    transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-background-a","turn":{"id":"turn-background-a-1","status":"completed","items":[]}}}""");
+    await transport.WaitForClientMessageCountAsync(7);
+    var queuedTurn = ParseMessage(transport.ClientMessages[6]);
+    AssertJsonString("turn/start", queuedTurn, "method", "background queued follow-up starts a turn");
+    AssertJsonString("thread-background-a", queuedTurn, "params.threadId", "background queued follow-up stays on its owning thread");
+    AssertJsonString("Queued work for the first thread", queuedTurn, "params.input.0.text", "background queued prompt");
+    transport.ServerSend("""{"id":5,"result":{"turn":{"id":"turn-background-a-2"}}}""");
+
+    await WaitUntilAsync(
+        () => settingsStore.SavedSettings.ProjectThreads.Single(thread => thread.ThreadId == "thread-background-a").QueuedFollowUps.Count == 0,
+        "background queued follow-up acknowledged and persisted");
+    AssertEqual("thread-background-b", viewModel.SelectedThread?.ThreadId, "background drain does not change selection");
+    AssertTrue(viewModel.IsTurnRunning, "selected second thread remains running");
+    AssertTrue(viewModel.ProjectThreads.Single(thread => thread.ThreadId == "thread-background-a").IsRunning, "background queued turn has running indicator");
+
+    transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-background-a","turn":{"id":"turn-background-a-2","status":"completed","items":[]}}}""");
+    transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-background-b","turn":{"id":"turn-background-b-1","status":"completed","items":[]}}}""");
+    await WaitUntilAsync(() => viewModel.ProjectThreads.All(thread => !thread.IsRunning), "background turns completed");
     await viewModel.DisposeAsync();
 }
 

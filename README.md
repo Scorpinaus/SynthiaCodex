@@ -10,6 +10,15 @@ The current build also includes a Git-aware Changes workspace for repository sta
 
 See the current [SynthiaCode and ChatGPT desktop feature-parity audit](feature_parity.md) for the implemented matrix and prioritized gaps.
 
+## Queued follow-ups
+
+While a Codex turn is running, the composer can either **Queue follow-up** for the next turn or **Steer task** to add guidance to the current turn. Queue is the default and can be changed under Settings -> General -> Follow-up behavior.
+
+Queued messages belong to their Codex thread and appear above the composer. They can be edited, reordered, sent or steered manually, and deleted. A successful turn completion starts the first queued message as a separate turn; failed or cancelled turns leave the queue paused. Pending queues survive restart but never auto-send merely because the app starts.
+
+- `Ctrl+Enter` uses the configured follow-up behavior.
+- `Ctrl+Shift+Enter` uses the other behavior once without changing the preference.
+
 ## Execution permissions
 
 SynthiaCode handles Codex app-server approval requests for command execution, file changes, and additional permissions. Requests appear in a global modal queue and can be allowed once, allowed for the current session, declined, or cancelled. Permission requests expose the requested permission groups so the response grants only the selected subset.

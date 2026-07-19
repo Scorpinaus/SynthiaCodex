@@ -742,6 +742,22 @@ Replace the permanent Run settings expander with a compact composer selector for
 - Keyboard, screen-reader, light/dark/System theme, high-DPI, text-scale, and compact-window verification passes.
 - Protocol, view-model, persistence, recovery, complete behavioral suite, Release build, and portable publish gates pass.
 
+## 12F. Server-Request Approvals and Execution Policies
+
+**Status:** Complete - 19 July 2026. The research and detailed design record is maintained in `server_request_approvals_implementation_plan.md`.
+
+### Delivered scope
+
+- Bidirectional app-server request classification with integer/string request-ID preservation and exact-once responses.
+- Typed command-execution, file-change, and permission approvals; malformed and unsupported requests fail closed.
+- A connection-aware coordinator and global modal queue with resolved-notification, reconnect, and shutdown invalidation.
+- Once/session/decline/cancel decisions plus selectable permission subsets constrained to the original request.
+- Persisted sandbox and approval-policy overrides with workspace-write/on-request defaults and explicit inheritance.
+- Effective config and managed-requirement reads, dangerous-setting confirmations, and consistent policy application across thread and turn lifecycle calls.
+- Focus-safe WPF approval controls, execution-policy settings, protocol/policy/queue/persistence/presentation tests, and updated user/architecture documentation.
+
+This slice does not make SynthiaCode an editor for `config.toml` and does not expose persistent command or network policy amendments. Those remain advanced follow-up work after their live wire contracts are validated.
+
 ## 13. Phase 6: Skills, Plugins, MCP, and Settings
 
 ### Goals

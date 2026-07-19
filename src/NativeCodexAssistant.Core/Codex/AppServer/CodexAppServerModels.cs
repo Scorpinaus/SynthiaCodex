@@ -15,7 +15,11 @@ public sealed record CodexInitializeOptions(
         OptOutNotificationMethods: ["thread/tokenUsage/updated"]);
 }
 
-public sealed record CodexThreadStartOptions(string? Model = null, CodexSandbox? Sandbox = null)
+public sealed record CodexThreadStartOptions(
+    string? Model = null,
+    CodexSandbox? Sandbox = null,
+    CodexApprovalPolicy? ApprovalPolicy = null,
+    CodexApprovalsReviewer? ApprovalsReviewer = null)
 {
     public static CodexThreadStartOptions Default { get; } = new();
 }
@@ -25,8 +29,10 @@ public sealed record CodexThreadStartResult(string ThreadId);
 public sealed record CodexThreadResumeRequest(
     string ThreadId,
     string Cwd,
-    CodexSandbox Sandbox,
-    string? Model = null);
+    CodexSandbox? Sandbox,
+    string? Model = null,
+    CodexApprovalPolicy? ApprovalPolicy = null,
+    CodexApprovalsReviewer? ApprovalsReviewer = null);
 
 public sealed record CodexThreadResumeResult(
     string ThreadId,
@@ -60,8 +66,10 @@ public sealed record CodexThreadListResult(
 public sealed record CodexThreadForkRequest(
     string ThreadId,
     string Cwd,
-    CodexSandbox Sandbox,
-    string? Model = null);
+    CodexSandbox? Sandbox,
+    string? Model = null,
+    CodexApprovalPolicy? ApprovalPolicy = null,
+    CodexApprovalsReviewer? ApprovalsReviewer = null);
 
 public sealed record CodexThreadForkResult(string ThreadId);
 
@@ -69,10 +77,12 @@ public sealed record CodexTurnStartRequest(
     string ThreadId,
     string Prompt,
     string Cwd,
-    CodexSandbox Sandbox,
+    CodexSandbox? Sandbox,
     string? Model = null,
     CodexReasoningEffort? ReasoningEffort = null,
-    CodexServiceTierSelection ServiceTier = CodexServiceTierSelection.Inherit);
+    CodexServiceTierSelection ServiceTier = CodexServiceTierSelection.Inherit,
+    CodexApprovalPolicy? ApprovalPolicy = null,
+    CodexApprovalsReviewer? ApprovalsReviewer = null);
 
 public sealed record CodexTurnStartResult(string TurnId);
 

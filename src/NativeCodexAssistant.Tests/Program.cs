@@ -103,6 +103,8 @@ tests.AddRange(Phase5BBoundaryTests.All);
 tests.AddRange(Phase5CMultiTurnTests.All);
 tests.AddRange(Phase5DNavigationTests.All);
 tests.AddRange(Phase5GModelControlsTests.All);
+tests.AddRange(ApprovalProtocolTests.All);
+tests.AddRange(ApprovalPresentationTests.All);
 tests.AddRange(AccountFeatureTests.All);
 tests.AddRange(ResponsiveLayoutTests.All);
 tests.AddRange(MarkdownLinkTests.All);

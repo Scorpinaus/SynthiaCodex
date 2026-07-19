@@ -63,6 +63,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private double viewportWidth = 1240;
     private int selectedWorkspaceTabIndex;
     private bool activeThreadLoaded;
+    private bool executionPolicyLoaded;
+    private string? executionPolicyCwd;
     private bool isShuttingDown;
     private Task? shutdownTask;
     private Task? appServerWarmUpTask;
@@ -100,6 +102,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         this.logger = logger;
         synchronizationContext = SynchronizationContext.Current;
         appServerSessionCoordinator.NotificationReceived += OnAppServerNotificationReceived;
+        appServerSessionCoordinator.ServerRequestReceived += OnServerRequestReceived;
         appServerSessionCoordinator.ConnectionFailed += OnAppServerConnectionFailed;
         appServerSessionCoordinator.StateChanged += OnAppServerStateChanged;
 
@@ -139,6 +142,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             CanSteerTurn,
             userInteractionService.OpenExternalUri);
         TaskWorkspace.PropertyChanged += (_, args) => RelayTaskPropertyChanged(args.PropertyName);
+
+        ApprovalQueue = new ApprovalQueueViewModel(appServerSessionCoordinator.RespondToServerRequestAsync);
+        ExecutionPolicy = new ExecutionPolicyViewModel(
+            userInteractionService.ConfirmDestructiveAction,
+            OnExecutionPolicyChanged);
 
         ProjectWorkspace = new ProjectThreadViewModel(
             BrowseProjectAsync,
@@ -230,6 +238,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public DiagnosticsViewModel DiagnosticsViewModel { get; }
 
     public AccountViewModel Account { get; }
+
+    public ApprovalQueueViewModel ApprovalQueue { get; }
+
+    public ExecutionPolicyViewModel ExecutionPolicy { get; }
 
     public GitViewModel Git { get; }
 
@@ -543,6 +555,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ModelOverride = settings.LastModelOverride ?? string.Empty;
         ReasoningEffortOverride = settings.LastReasoningEffortOverride ?? string.Empty;
         TaskWorkspace.ServiceTierSelection = ParseServiceTierSelection(settings.LastServiceTierOverride);
+        ExecutionPolicy.Initialize(settings.SandboxModeOverride, settings.ApprovalPolicyOverride);
         RefreshRecentProjects();
         await DiagnosticsViewModel.RefreshAsync().ConfigureAwait(true);
         StatusMessage = "Ready";
@@ -643,7 +656,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
             var result = await appServerSessionCoordinator.StartThreadAsync(new CodexThreadStartOptions(
-                NormalizeOverride(ModelOverride))).ConfigureAwait(true);
+                NormalizeOverride(ModelOverride),
+                ExecutionPolicy.SandboxOverride,
+                ExecutionPolicy.ApprovalPolicyOverride,
+                CodexApprovalsReviewer.User)).ConfigureAwait(true);
             AssistantWorktree? worktree = null;
             if (string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal))
             {
@@ -692,8 +708,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var result = await appServerSessionCoordinator.ResumeThreadAsync(new CodexThreadResumeRequest(
                 SelectedThread.ThreadId,
                 workspacePath,
-                CodexSandbox.WorkspaceWrite,
-                NormalizeOverride(ModelOverride))).ConfigureAwait(true);
+                ExecutionPolicy.SandboxOverride,
+                NormalizeOverride(ModelOverride),
+                ExecutionPolicy.ApprovalPolicyOverride,
+                CodexApprovalsReviewer.User)).ConfigureAwait(true);
             threadService.ReconcileHistory(result.Turns ?? []);
             TaskWorkspace.NotifyResponseChanged();
             loadedThreadIds.Add(result.ThreadId);
@@ -722,8 +740,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var result = await appServerSessionCoordinator.ForkThreadAsync(new CodexThreadForkRequest(
                 sourceThread.ThreadId,
                 sourceWorkspace,
-                CodexSandbox.WorkspaceWrite,
-                NormalizeOverride(ModelOverride))).ConfigureAwait(true);
+                ExecutionPolicy.SandboxOverride,
+                NormalizeOverride(ModelOverride),
+                ExecutionPolicy.ApprovalPolicyOverride,
+                CodexApprovalsReviewer.User)).ConfigureAwait(true);
             AssistantWorktree? worktree = null;
             if (string.Equals(sourceThread.Mode, "worktree", StringComparison.OrdinalIgnoreCase))
             {
@@ -959,6 +979,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         settings.IsProjectRailOpen = IsProjectRailOpen;
         settings.IsDetailsPaneOpen = true;
         _ = SaveLayoutSelectionAsync();
+        if (appServerSessionCoordinator.State == AppServerSessionState.Connected)
+        {
+            var policyCwd = SelectedProjectPath is null ? null : Path.GetFullPath(SelectedProjectPath);
+            if (!executionPolicyLoaded || !string.Equals(executionPolicyCwd, policyCwd, StringComparison.OrdinalIgnoreCase))
+            {
+                _ = RefreshExecutionPolicyAsync(policyCwd, appServerWarmUpCancellation.Token);
+            }
+        }
     }
 
     private async Task SaveLayoutSelectionAsync()
@@ -1085,10 +1113,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 activeThreadId,
                 submittedPrompt,
                 workspacePath,
-                CodexSandbox.WorkspaceWrite,
+                ExecutionPolicy.SandboxOverride,
                 NormalizeOverride(ModelOverride),
                 ParseReasoningEffort(ReasoningEffortOverride),
-                TaskWorkspace.ServiceTierSelection)).ConfigureAwait(true);
+                TaskWorkspace.ServiceTierSelection,
+                ExecutionPolicy.ApprovalPolicyOverride,
+                CodexApprovalsReviewer.User)).ConfigureAwait(true);
 
             var boundTurn = threadService.BindPendingTurn(turn.TurnId);
             threadWorkspace.RegisterTurn(activeThreadId, turn.TurnId);
@@ -1137,7 +1167,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (string.IsNullOrWhiteSpace(activeThreadId))
         {
             var thread = await appServerSessionCoordinator.StartThreadAsync(new CodexThreadStartOptions(
-                NormalizeOverride(ModelOverride))).ConfigureAwait(true);
+                NormalizeOverride(ModelOverride),
+                ExecutionPolicy.SandboxOverride,
+                ExecutionPolicy.ApprovalPolicyOverride,
+                CodexApprovalsReviewer.User)).ConfigureAwait(true);
             AssistantWorktree? worktree = null;
             if (string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal))
             {
@@ -1174,8 +1207,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var resumed = await appServerSessionCoordinator.ResumeThreadAsync(new CodexThreadResumeRequest(
                 activeThreadId,
                 GetActiveWorkspacePath(),
-                CodexSandbox.WorkspaceWrite,
-                NormalizeOverride(ModelOverride))).ConfigureAwait(true);
+                ExecutionPolicy.SandboxOverride,
+                NormalizeOverride(ModelOverride),
+                ExecutionPolicy.ApprovalPolicyOverride,
+                CodexApprovalsReviewer.User)).ConfigureAwait(true);
             threadService.ReconcileHistory(resumed.Turns ?? []);
             TaskWorkspace.NotifyResponseChanged();
             activeThreadLoaded = true;
@@ -1193,7 +1228,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 ex);
 
             var thread = await appServerSessionCoordinator.StartThreadAsync(new CodexThreadStartOptions(
-                NormalizeOverride(ModelOverride))).ConfigureAwait(true);
+                NormalizeOverride(ModelOverride),
+                ExecutionPolicy.SandboxOverride,
+                ExecutionPolicy.ApprovalPolicyOverride,
+                CodexApprovalsReviewer.User)).ConfigureAwait(true);
             CreateThreadState(thread.ThreadId, $"Thread {ProjectThreads.Count + 1}");
             RefreshProjectThreads(thread.ThreadId);
             loadedThreadIds.Add(thread.ThreadId);
@@ -1271,6 +1309,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         await TryCancelRunningTurnForShutdownAsync(cancellationToken).ConfigureAwait(true);
         await Terminal.ShutdownAsync().ConfigureAwait(true);
+        ApprovalQueue.Clear();
+        appServerSessionCoordinator.ServerRequestReceived -= OnServerRequestReceived;
         appServerSessionCoordinator.FlushNotifications();
         await appServerSessionCoordinator.DisposeAsync().ConfigureAwait(true);
         await SaveActiveThreadStateAsync().ConfigureAwait(true);
@@ -1466,6 +1506,61 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         await appServerSessionCoordinator.EnsureConnectedAsync(currentCodex, cancellationToken).ConfigureAwait(true);
     }
 
+    private async Task RefreshExecutionPolicyAsync(string? cwd, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var requirements = await appServerSessionCoordinator
+                .ReadExecutionPolicyRequirementsAsync(cancellationToken)
+                .ConfigureAwait(true);
+            var config = await appServerSessionCoordinator
+                .ReadExecutionPolicyConfigAsync(cwd, cancellationToken)
+                .ConfigureAwait(true);
+            ExecutionPolicy.ApplyRequirements(requirements);
+            ExecutionPolicy.ApplyEffectiveConfig(config);
+            executionPolicyLoaded = true;
+            executionPolicyCwd = cwd;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            executionPolicyLoaded = true;
+            executionPolicyCwd = cwd;
+            logger.Log(
+                AppLogLevel.Warning,
+                "execution_policy_read_failed",
+                "Codex execution-policy configuration could not be read; saved overrides remain active.",
+                exception: ex);
+        }
+    }
+
+    private void OnExecutionPolicyChanged()
+    {
+        settings.SandboxModeOverride = ExecutionPolicy.SandboxSettingsValue;
+        settings.ApprovalPolicyOverride = ExecutionPolicy.ApprovalSettingsValue;
+        executionPolicyLoaded = false;
+        _ = SaveExecutionPolicySettingsAsync();
+    }
+
+    private async Task SaveExecutionPolicySettingsAsync()
+    {
+        try
+        {
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            logger.Log(
+                AppLogLevel.Warning,
+                "execution_policy_save_failed",
+                "Execution-policy settings could not be saved.",
+                exception: ex);
+        }
+    }
+
     private void OnAppServerConnectionFailed(object? sender, AppServerConnectionFailedEventArgs args)
     {
         void ApplyFailure()
@@ -1479,9 +1574,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             activeTurnIds.Clear();
             loadedThreadIds.Clear();
             activeThreadLoaded = false;
+            executionPolicyLoaded = false;
             activeTurnId = null;
             IsTurnRunning = false;
             Account.MarkDisconnected();
+            ApprovalQueue.Clear();
             AppServerHealth = "Codex reconnecting";
             StatusMessage = $"Codex app-server stopped: {args.Exception.Message}. The next action will restart it.";
         }
@@ -1499,6 +1596,24 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void OnAppServerNotificationReceived(object? sender, AppServerNotification notification)
     {
         DispatchAppServerNotification(notification);
+    }
+
+    private void OnServerRequestReceived(object? sender, CodexServerRequest request)
+    {
+        void ApplyRequest()
+        {
+            ApprovalQueue.Enqueue(request);
+            StatusMessage = $"Approval required: {ApprovalQueue.ActivePrompt?.Kind}";
+        }
+
+        if (synchronizationContext is null || ReferenceEquals(SynchronizationContext.Current, synchronizationContext))
+        {
+            ApplyRequest();
+        }
+        else
+        {
+            synchronizationContext.Post(_ => ApplyRequest(), null);
+        }
     }
 
     private void OnAppServerStateChanged(object? sender, AppServerSessionStateChangedEventArgs args)
@@ -1548,6 +1663,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void ApplyNotification(AppServerNotification notification)
     {
+        if (notification.Method == "serverRequest/resolved" && TryReadRequestId(notification.Params, out var requestId))
+        {
+            if (ApprovalQueue.Resolve(requestId))
+            {
+                StatusMessage = ApprovalQueue.HasPendingApproval
+                    ? $"Approval required: {ApprovalQueue.ActivePrompt?.Kind}"
+                    : "Approval request resolved";
+            }
+            return;
+        }
+
         if (Account.TryApplyNotification(notification))
         {
             if (notification.Method is "account/updated" or "account/login/completed")
@@ -1636,6 +1762,28 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         TaskWorkspace.NotifyResponseChanged();
         OnPropertyChanged(nameof(FinalResponse));
         RaiseThreadCommandStates();
+    }
+
+    private static bool TryReadRequestId(System.Text.Json.Nodes.JsonObject parameters, out CodexRequestId requestId)
+    {
+        var node = parameters["requestId"] ?? parameters["id"];
+        if (node is System.Text.Json.Nodes.JsonValue value)
+        {
+            if (value.TryGetValue<long>(out var integerId))
+            {
+                requestId = CodexRequestId.FromInteger(integerId);
+                return true;
+            }
+
+            if (value.TryGetValue<string>(out var stringId) && !string.IsNullOrEmpty(stringId))
+            {
+                requestId = CodexRequestId.FromString(stringId);
+                return true;
+            }
+        }
+
+        requestId = default;
+        return false;
     }
 
     private void UpdateThreadActivity(string threadId, bool isRunning, string status)

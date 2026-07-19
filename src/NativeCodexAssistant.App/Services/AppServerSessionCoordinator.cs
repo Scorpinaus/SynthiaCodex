@@ -13,6 +13,8 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
     private readonly CodexAppServerClientMetadata metadata;
     private readonly AppServerNotificationBatcher notificationBatcher;
     private readonly SemaphoreSlim lifecycleGate = new(1, 1);
+    private readonly object requestGate = new();
+    private readonly Dictionary<CodexRequestId, CodexAppServerClient> requestClients = [];
     private CodexAppServerClient? client;
     private AppServerSessionState state;
     private long recoveryStartedTimestamp;
@@ -31,6 +33,8 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
     }
 
     public event EventHandler<AppServerNotification>? NotificationReceived;
+
+    public event EventHandler<CodexServerRequest>? ServerRequestReceived;
 
     public event EventHandler<AppServerConnectionFailedEventArgs>? ConnectionFailed;
 
@@ -68,6 +72,7 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
                     .ConfigureAwait(false);
                 candidate = new CodexAppServerClient(transport, metadata);
                 candidate.NotificationReceived += OnNotificationReceived;
+                candidate.ServerRequestReceived += OnServerRequestReceived;
                 candidate.ConnectionFailed += OnConnectionFailed;
                 await candidate.InitializeAsync(CodexInitializeOptions.Default, cancellationToken).ConfigureAwait(false);
                 client = candidate;
@@ -91,6 +96,7 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
                 if (candidate is not null)
                 {
                     candidate.NotificationReceived -= OnNotificationReceived;
+                    candidate.ServerRequestReceived -= OnServerRequestReceived;
                     candidate.ConnectionFailed -= OnConnectionFailed;
                     await candidate.DisposeAsync().ConfigureAwait(false);
                 }
@@ -144,6 +150,37 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
         CancellationToken cancellationToken = default) =>
         GetConnectedClient().ReadAccountRateLimitsAsync(cancellationToken);
 
+    public Task<CodexExecutionPolicyConfig> ReadExecutionPolicyConfigAsync(
+        string? cwd = null,
+        CancellationToken cancellationToken = default) =>
+        GetConnectedClient().ReadExecutionPolicyConfigAsync(cwd, cancellationToken);
+
+    public Task<CodexExecutionPolicyRequirements> ReadExecutionPolicyRequirementsAsync(
+        CancellationToken cancellationToken = default) =>
+        GetConnectedClient().ReadExecutionPolicyRequirementsAsync(cancellationToken);
+
+    public async Task RespondToServerRequestAsync(
+        CodexServerRequest request,
+        CodexServerRequestResponse response,
+        CancellationToken cancellationToken = default)
+    {
+        CodexAppServerClient requestClient;
+        lock (requestGate)
+        {
+            if (!requestClients.TryGetValue(request.RequestId, out requestClient!) ||
+                !ReferenceEquals(requestClient, client))
+            {
+                throw new InvalidOperationException("The approval request belongs to a stale app-server connection.");
+            }
+        }
+
+        await requestClient.RespondToServerRequestAsync(request, response, cancellationToken).ConfigureAwait(false);
+        lock (requestGate)
+        {
+            requestClients.Remove(request.RequestId);
+        }
+    }
+
     public void FlushNotifications() => notificationBatcher.Flush();
 
     public async ValueTask DisposeAsync()
@@ -177,6 +214,33 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
     private void OnNotificationReceived(object? sender, AppServerNotification notification) =>
         notificationBatcher.Enqueue(notification);
 
+    private void OnServerRequestReceived(object? sender, CodexServerRequest request)
+    {
+        if (sender is not CodexAppServerClient requestClient)
+        {
+            return;
+        }
+
+        lock (requestGate)
+        {
+            requestClients[request.RequestId] = requestClient;
+        }
+
+        try
+        {
+            ServerRequestReceived?.Invoke(this, request);
+        }
+        catch (Exception ex)
+        {
+            logger.Log(
+                AppLogLevel.Error,
+                "approval_request_dispatch_failed",
+                "An approval request could not be routed to the application.",
+                exception: ex);
+            _ = RespondWithDispatchFailureAsync(request);
+        }
+    }
+
     private void OnConnectionFailed(object? sender, AppServerConnectionFailedEventArgs args)
     {
         notificationBatcher.Flush();
@@ -192,10 +256,46 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
             return;
         }
 
+        lock (requestGate)
+        {
+            requestClients.Clear();
+        }
+
         client.NotificationReceived -= OnNotificationReceived;
+        client.ServerRequestReceived -= OnServerRequestReceived;
         client.ConnectionFailed -= OnConnectionFailed;
         await client.DisposeAsync().ConfigureAwait(false);
         client = null;
+    }
+
+    private async Task RespondWithDispatchFailureAsync(CodexServerRequest request)
+    {
+        try
+        {
+            var response = request.Payload switch
+            {
+                CodexCommandApprovalRequest => CodexServerRequestResponse.Command(CodexApprovalDecision.Decline),
+                CodexFileChangeApprovalRequest => CodexServerRequestResponse.FileChange(CodexApprovalDecision.Decline),
+                CodexPermissionApprovalRequest => CodexServerRequestResponse.Permissions(new System.Text.Json.Nodes.JsonObject()),
+                _ => null
+            };
+            if (response is not null && client?.IsHealthy == true)
+            {
+                await client.RespondToServerRequestAsync(request, response).ConfigureAwait(false);
+                lock (requestGate)
+                {
+                    requestClients.Remove(request.RequestId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.Log(
+                AppLogLevel.Warning,
+                "approval_request_fail_closed_failed",
+                "The application could not decline an unroutable approval request.",
+                exception: ex);
+        }
     }
 
     private void SetState(AppServerSessionState value)

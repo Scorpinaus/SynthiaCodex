@@ -1,8 +1,8 @@
-# Native Codex Assistant: Current Architecture through Phase 5D
+# Native Codex Assistant: Current Architecture through Server-Request Approvals
 
-**Recorded:** 15 July 2026  
-**Phase:** 5D - Project and Thread Navigation Consolidation
-**Purpose:** Describe the current post-Phase-5D architecture while retaining the Phase 5B performance baseline.
+**Recorded:** 19 July 2026
+**Phase:** Server-request approvals and configurable execution policies after Phase 5G
+**Purpose:** Describe the current architecture while retaining the Phase 5B performance baseline.
 
 ## System shape
 
@@ -83,6 +83,25 @@ Composer command
 ```
 
 Protocol request construction, response correlation, parsing, and transport failure handling remain inside Infrastructure. Core owns app-server request/result records and notification-derived thread state.
+
+### Server-request approvals and execution policy
+
+`CodexAppServerClient` classifies app-server messages as outgoing responses, notifications, or incoming server requests. Incoming request IDs retain their integer or string representation. Command-execution, file-change, and permission requests are parsed to typed Core models; malformed and unsupported requests receive deterministic JSON-RPC errors so the server is never left waiting. The client maintains separate outgoing and incoming registries and permits exactly one successful response for each incoming request.
+
+`AppServerSessionCoordinator` attaches request handlers to the active client generation and rejects responses from a replaced connection. `MainViewModel` marshals requests to the captured UI context and owns `ApprovalQueueViewModel`, which serializes prompts globally. `serverRequest/resolved`, reconnect, and shutdown events invalidate stale prompts. Permission responses are constructed by intersecting the selected top-level permission groups with the immutable original request.
+
+`ExecutionPolicyViewModel` owns the sandbox and approval-policy selectors. Defaults are `workspace-write` and `on-request`; either override can be omitted to inherit Codex configuration. Settings persist through `AppSettings`, while `config/read` and `configRequirements/read` supply effective and managed context when the Settings pane is opened. Full access and `never` approvals require confirmation. Managed restrictions reset an invalid saved override to inheritance and reject later disallowed selections. The resolved overrides are passed consistently to thread start, resume, fork, replacement-thread, and turn-start requests.
+
+```text
+app-server request (method + id)
+  -> CodexAppServerClient typed parser and incoming registry
+  -> AppServerSessionCoordinator active-generation check
+  -> MainViewModel UI-context dispatch
+  -> ApprovalQueueViewModel / ApprovalPromptView
+  -> selected decision or permission subset
+  -> coordinator generation check
+  -> client exact-once JSON response with original id type
+```
 
 High-frequency agent-message deltas are grouped by thread, turn, and item before UI dispatch. Any non-delta event first flushes pending text, which preserves ordering for completion, error, tool, and lifecycle notifications. Idle deltas flush on the batching timer so streaming remains visibly progressive.
 

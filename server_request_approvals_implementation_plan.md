@@ -1,6 +1,6 @@
 # Server-Request Approvals and Execution Policy Implementation Plan
 
-- **Status:** Proposed for review
+- **Status:** Implemented 19 July 2026
 - **Date:** 19 July 2026
 - **Target:** Native Codex Assistant / SynthiaCode
 - **Scope:** Bidirectional app-server request handling, interactive approvals, and configurable sandbox/approval policies

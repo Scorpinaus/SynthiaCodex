@@ -17,6 +17,10 @@ public sealed class AppSettings
 
     public string? LastServiceTierOverride { get; set; }
 
+    public string? SandboxModeOverride { get; set; } = "workspace-write";
+
+    public string? ApprovalPolicyOverride { get; set; } = "on-request";
+
     public bool IsProjectRailOpen { get; set; } = true;
 
     public bool IsDetailsPaneOpen { get; set; }

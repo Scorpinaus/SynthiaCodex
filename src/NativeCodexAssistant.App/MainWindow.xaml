@@ -43,5 +43,8 @@
             <views:DetailsView Grid.Column="2" Visibility="{Binding IsDetailsPaneOpen, Converter={StaticResource BooleanToVisibilityConverter}}"/>
         </Grid>
         <Border Grid.Row="2" Background="{DynamicResource StatusBarBrush}"><Grid Margin="12,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center" FontSize="11"/><TextBlock Grid.Column="1" Text="Ctrl+O project  ·  Ctrl+Enter run  ·  Ctrl+B navigation  ·  Ctrl+Shift+D settings" VerticalAlignment="Center" Foreground="{DynamicResource MutedInkBrush}" FontSize="10"/></Grid></Border>
+        <views:ApprovalPromptView Grid.RowSpan="3"
+                                  Panel.ZIndex="100"
+                                  Visibility="{Binding ApprovalQueue.HasPendingApproval, Converter={StaticResource BooleanToVisibilityConverter}}"/>
     </Grid>
 </Window>

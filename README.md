@@ -6,6 +6,12 @@ The app is intended to launch and communicate with `codex app-server` while keep
 
 The current build also includes a Git-aware Changes workspace for repository status, working and staged diffs, staging, unstaging, confirmed discard, commits, and editor/Explorer shortcuts.
 
+## Execution permissions
+
+SynthiaCode handles Codex app-server approval requests for command execution, file changes, and additional permissions. Requests appear in a global modal queue and can be allowed once, allowed for the current session, declined, or cancelled. Permission requests expose the requested permission groups so the response grants only the selected subset.
+
+Open **Settings > Execution policy** to choose the filesystem sandbox and approval behavior used for new threads and turns. New installations default to `workspace-write` with `on-request` approvals. Choose **Use Codex configuration** to omit an app override. Full filesystem access and disabling approval prompts require confirmation, and managed Codex requirements prevent disallowed choices from being sent.
+
 ## Solution
 
 ```text

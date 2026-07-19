@@ -45,6 +45,40 @@
 
                     <Border Style="{StaticResource Card}" Margin="0,0,0,10">
                         <StackPanel>
+                            <TextBlock Text="Execution policy" FontWeight="SemiBold"/>
+                            <TextBlock Text="Filesystem sandbox"
+                                       Foreground="{DynamicResource MutedInkBrush}"
+                                       FontSize="11"
+                                       Margin="0,6,0,4"/>
+                            <ComboBox ItemsSource="{Binding ExecutionPolicy.SandboxModeOptions}"
+                                      SelectedItem="{Binding ExecutionPolicy.SelectedSandboxMode, UpdateSourceTrigger=PropertyChanged}"
+                                      HorizontalAlignment="Stretch"/>
+                            <TextBlock Text="Server-request approvals"
+                                       Foreground="{DynamicResource MutedInkBrush}"
+                                       FontSize="11"
+                                       Margin="0,10,0,4"/>
+                            <ComboBox ItemsSource="{Binding ExecutionPolicy.ApprovalPolicyOptions}"
+                                      SelectedItem="{Binding ExecutionPolicy.SelectedApprovalPolicy, UpdateSourceTrigger=PropertyChanged}"
+                                      HorizontalAlignment="Stretch"/>
+                            <TextBlock Text="{Binding ExecutionPolicy.EffectiveSummary}"
+                                       Margin="0,10,0,0"
+                                       Foreground="{DynamicResource MutedInkBrush}"
+                                       TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding ExecutionPolicy.ManagedSummary}"
+                                       Margin="0,5,0,0"
+                                       Foreground="{DynamicResource MutedInkBrush}"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding ExecutionPolicy.ConfigurationWarning}"
+                                       Margin="0,5,0,0"
+                                       Foreground="{DynamicResource DangerBrush}"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,10">
+                        <StackPanel>
                             <TextBlock Text="Account" FontWeight="SemiBold"/>
                             <TextBlock Text="{Binding Account.DisplayName}"
                                        FontWeight="SemiBold"

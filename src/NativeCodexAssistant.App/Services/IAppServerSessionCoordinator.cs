@@ -27,6 +27,8 @@ public interface IAppServerSessionCoordinator : IAsyncDisposable
 {
     event EventHandler<AppServerNotification>? NotificationReceived;
 
+    event EventHandler<CodexServerRequest>? ServerRequestReceived;
+
     event EventHandler<AppServerConnectionFailedEventArgs>? ConnectionFailed;
 
     event EventHandler<AppServerSessionStateChangedEventArgs>? StateChanged;
@@ -60,6 +62,18 @@ public interface IAppServerSessionCoordinator : IAsyncDisposable
     Task<CodexAccountReadResult> ReadAccountAsync(bool refreshToken = false, CancellationToken cancellationToken = default);
 
     Task<CodexAccountRateLimitsResult> ReadAccountRateLimitsAsync(CancellationToken cancellationToken = default);
+
+    Task<CodexExecutionPolicyConfig> ReadExecutionPolicyConfigAsync(
+        string? cwd = null,
+        CancellationToken cancellationToken = default);
+
+    Task<CodexExecutionPolicyRequirements> ReadExecutionPolicyRequirementsAsync(
+        CancellationToken cancellationToken = default);
+
+    Task RespondToServerRequestAsync(
+        CodexServerRequest request,
+        CodexServerRequestResponse response,
+        CancellationToken cancellationToken = default);
 
     void FlushNotifications();
 }

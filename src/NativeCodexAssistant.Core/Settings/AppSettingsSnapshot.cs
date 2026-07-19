@@ -15,6 +15,8 @@ public static class AppSettingsSnapshot
             LastModelOverride = source.LastModelOverride,
             LastReasoningEffortOverride = source.LastReasoningEffortOverride,
             LastServiceTierOverride = source.LastServiceTierOverride,
+            SandboxModeOverride = source.SandboxModeOverride,
+            ApprovalPolicyOverride = source.ApprovalPolicyOverride,
             IsProjectRailOpen = source.IsProjectRailOpen,
             IsDetailsPaneOpen = source.IsDetailsPaneOpen,
             RecentProjects = [.. source.RecentProjects],

@@ -11,6 +11,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     private readonly CancellationTokenSource readLoopCancellation = new();
     private readonly SemaphoreSlim writeGate = new(1, 1);
     private readonly Dictionary<int, TaskCompletionSource<JsonNode?>> pendingRequests = [];
+    private readonly HashSet<CodexRequestId> pendingIncomingRequests = [];
+    private readonly HashSet<CodexRequestId> respondingIncomingRequests = [];
     private readonly object gate = new();
     private Task? readLoop;
     private bool started;
@@ -24,6 +26,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     }
 
     public event EventHandler<AppServerNotification>? NotificationReceived;
+
+    public event EventHandler<CodexServerRequest>? ServerRequestReceived;
 
     public event EventHandler<AppServerConnectionFailedEventArgs>? ConnectionFailed;
 
@@ -86,6 +90,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             parameters["sandbox"] = options.Sandbox.Value.ToProtocolValue();
         }
 
+        AddApprovalPolicyOverrides(parameters, options.ApprovalPolicy, options.ApprovalsReviewer);
+
         var result = await SendRequestAsync("thread/start", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
         var threadId = ReadString(result, "thread.id");
         if (string.IsNullOrWhiteSpace(threadId))
@@ -111,14 +117,20 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         var parameters = new JsonObject
         {
             ["threadId"] = request.ThreadId,
-            ["cwd"] = request.Cwd,
-            ["sandbox"] = request.Sandbox.ToProtocolValue()
+            ["cwd"] = request.Cwd
         };
+
+        if (request.Sandbox is not null)
+        {
+            parameters["sandbox"] = request.Sandbox.Value.ToProtocolValue();
+        }
 
         if (!string.IsNullOrWhiteSpace(request.Model))
         {
             parameters["model"] = request.Model;
         }
+
+        AddApprovalPolicyOverrides(parameters, request.ApprovalPolicy, request.ApprovalsReviewer);
 
         var result = await SendRequestAsync("thread/resume", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
         var threadId = ReadString(result, "thread.id");
@@ -244,6 +256,57 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         return CodexAccountProtocolParser.ParseRateLimits(result);
     }
 
+    public async Task<CodexExecutionPolicyConfig> ReadExecutionPolicyConfigAsync(
+        string? cwd,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var result = await SendRequestAsync(
+            "config/read",
+            new JsonObject
+            {
+                ["cwd"] = string.IsNullOrWhiteSpace(cwd) ? null : cwd,
+                ["includeLayers"] = false
+            },
+            cancellationToken).ConfigureAwait(false) as JsonObject;
+        var config = result?["config"] as JsonObject;
+        var origins = new Dictionary<string, string?>(StringComparer.Ordinal);
+        if (result?["origins"] is JsonObject originValues)
+        {
+            foreach (var (key, value) in originValues)
+            {
+                var origin = value as JsonObject;
+                origins[key] = ReadString(origin, "path") ?? ReadString(origin, "name");
+            }
+        }
+
+        return new CodexExecutionPolicyConfig(
+            ParseSandbox(ReadString(config, "sandbox_mode")),
+            ParseApprovalPolicy(config?["approval_policy"]),
+            ParseApprovalsReviewer(ReadString(config, "approvals_reviewer")),
+            ReadBool(config, "sandbox_workspace_write.network_access"),
+            origins);
+    }
+
+    public async Task<CodexExecutionPolicyRequirements> ReadExecutionPolicyRequirementsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var result = await SendRequestAsync(
+            "configRequirements/read",
+            new JsonObject(),
+            cancellationToken).ConfigureAwait(false) as JsonObject;
+        var requirements = result?["requirements"] as JsonObject;
+        if (requirements is null)
+        {
+            return CodexExecutionPolicyRequirements.Unrestricted;
+        }
+
+        return new CodexExecutionPolicyRequirements(
+            ParseSandboxArray(requirements["allowedSandboxModes"] as JsonArray),
+            ParseApprovalPolicyArray(requirements["allowedApprovalPolicies"] as JsonArray));
+    }
+
     public async Task<CodexThreadListResult> ListThreadsAsync(
         CodexThreadListRequest request,
         CancellationToken cancellationToken = default)
@@ -308,13 +371,18 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         var parameters = new JsonObject
         {
             ["threadId"] = request.ThreadId,
-            ["cwd"] = request.Cwd,
-            ["sandbox"] = request.Sandbox.ToProtocolValue()
+            ["cwd"] = request.Cwd
         };
+        if (request.Sandbox is not null)
+        {
+            parameters["sandbox"] = request.Sandbox.Value.ToProtocolValue();
+        }
         if (!string.IsNullOrWhiteSpace(request.Model))
         {
             parameters["model"] = request.Model;
         }
+
+        AddApprovalPolicyOverrides(parameters, request.ApprovalPolicy, request.ApprovalsReviewer);
 
         var result = await SendRequestAsync("thread/fork", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
         var threadId = ReadString(result, "thread.id");
@@ -396,9 +464,13 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                     ["text"] = request.Prompt
                 }
             },
-            ["cwd"] = request.Cwd,
-            ["sandboxPolicy"] = request.Sandbox.ToTurnSandboxPolicy()
+            ["cwd"] = request.Cwd
         };
+
+        if (request.Sandbox is not null)
+        {
+            parameters["sandboxPolicy"] = request.Sandbox.Value.ToTurnSandboxPolicy();
+        }
 
         if (!string.IsNullOrWhiteSpace(request.Model))
         {
@@ -409,6 +481,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         {
             parameters["effort"] = request.ReasoningEffort.Value.ToProtocolValue();
         }
+
+        AddApprovalPolicyOverrides(parameters, request.ApprovalPolicy, request.ApprovalsReviewer);
 
         switch (request.ServiceTier)
         {
@@ -455,6 +529,23 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                 ["turnId"] = turnId
             },
             cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task RespondToServerRequestAsync(
+        CodexServerRequest request,
+        CodexServerRequestResponse response,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(response);
+        return RespondToServerRequestCoreAsync(
+            request.RequestId,
+            new JsonObject
+            {
+                ["id"] = request.RequestId.ToJsonNode(),
+                ["result"] = response.Result.DeepClone()
+            },
+            cancellationToken);
     }
 
     private async Task SendThreadIdRequestAsync(
@@ -567,7 +658,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         {
             await foreach (var line in transport.ReadLinesAsync(cancellationToken).ConfigureAwait(false))
             {
-                ProcessLine(line);
+                await ProcessLineAsync(line, cancellationToken).ConfigureAwait(false);
             }
 
             if (!cancellationToken.IsCancellationRequested)
@@ -594,7 +685,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
     }
 
-    private void ProcessLine(string line)
+    private async Task ProcessLineAsync(string line, CancellationToken cancellationToken)
     {
         JsonObject message;
         try
@@ -608,19 +699,61 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             return;
         }
 
+        var method = ReadString(message, "method");
+        if (message["id"] is not null && !string.IsNullOrWhiteSpace(method))
+        {
+            if (!TryReadRequestId(message["id"], out var requestId))
+            {
+                return;
+            }
+
+            var serverParams = message["params"] as JsonObject;
+            RegisterIncomingRequest(requestId);
+            string? parseError = null;
+            if (serverParams is null || !TryParseServerRequest(method, serverParams, requestId, out var request, out parseError))
+            {
+                await RespondToServerRequestErrorAsync(
+                    requestId,
+                    -32602,
+                    parseError ?? $"Invalid parameters for {method}.",
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (request.Payload is CodexUnsupportedServerRequest)
+            {
+                await RespondToServerRequestErrorAsync(
+                    requestId,
+                    -32601,
+                    $"Server request method is not supported: {method}",
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            ServerRequestReceived?.Invoke(this, request);
+            return;
+        }
+
         if (message["id"] is not null)
         {
             CompletePendingRequest(message);
             return;
         }
 
-        var method = ReadString(message, "method");
         if (string.IsNullOrWhiteSpace(method))
         {
             return;
         }
 
         var parameters = message["params"] as JsonObject ?? new JsonObject();
+        if (method == "serverRequest/resolved" &&
+            TryReadRequestId(parameters["requestId"] ?? parameters["id"], out var resolvedRequestId))
+        {
+            lock (gate)
+            {
+                pendingIncomingRequests.Remove(resolvedRequestId);
+            }
+        }
         NotificationReceived?.Invoke(this, new AppServerNotification(method, parameters));
     }
 
@@ -647,6 +780,212 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         completion.TrySetResult(message["result"]?.DeepClone());
     }
 
+    private void RegisterIncomingRequest(CodexRequestId requestId)
+    {
+        lock (gate)
+        {
+            if (!pendingIncomingRequests.Add(requestId) || respondingIncomingRequests.Contains(requestId))
+            {
+                throw new CodexAppServerProtocolException($"Duplicate server request id {requestId}.");
+            }
+        }
+    }
+
+    private Task RespondToServerRequestErrorAsync(
+        CodexRequestId requestId,
+        int code,
+        string message,
+        CancellationToken cancellationToken) =>
+        RespondToServerRequestCoreAsync(
+            requestId,
+            new JsonObject
+            {
+                ["id"] = requestId.ToJsonNode(),
+                ["error"] = new JsonObject
+                {
+                    ["code"] = code,
+                    ["message"] = message
+                }
+            },
+            cancellationToken);
+
+    private async Task RespondToServerRequestCoreAsync(
+        CodexRequestId requestId,
+        JsonObject message,
+        CancellationToken cancellationToken)
+    {
+        lock (gate)
+        {
+            if (!pendingIncomingRequests.Remove(requestId) || !respondingIncomingRequests.Add(requestId))
+            {
+                throw new InvalidOperationException($"Server request {requestId} is no longer pending.");
+            }
+        }
+
+        try
+        {
+            await WriteMessageAsync(message, cancellationToken).ConfigureAwait(false);
+            lock (gate)
+            {
+                respondingIncomingRequests.Remove(requestId);
+            }
+        }
+        catch
+        {
+            lock (gate)
+            {
+                respondingIncomingRequests.Remove(requestId);
+                if (IsHealthy)
+                {
+                    pendingIncomingRequests.Add(requestId);
+                }
+            }
+
+            throw;
+        }
+    }
+
+    private static bool TryParseServerRequest(
+        string method,
+        JsonObject parameters,
+        CodexRequestId requestId,
+        out CodexServerRequest request,
+        out string? error)
+    {
+        error = null;
+        CodexServerRequestPayload payload;
+        switch (method)
+        {
+            case "item/commandExecution/requestApproval":
+                if (!TryReadApprovalCorrelation(parameters, out var commandThreadId, out var commandTurnId, out var commandItemId, out var commandStartedAt, out error))
+                {
+                    request = null!;
+                    return false;
+                }
+
+                CodexNetworkApprovalContext? networkContext = null;
+                if (parameters["networkApprovalContext"] is JsonObject network)
+                {
+                    var host = ReadString(network, "host");
+                    var protocol = ReadString(network, "protocol");
+                    if (!string.IsNullOrWhiteSpace(host) && !string.IsNullOrWhiteSpace(protocol))
+                    {
+                        networkContext = new CodexNetworkApprovalContext(host, protocol, ReadInt(network, "port"));
+                    }
+                }
+
+                payload = new CodexCommandApprovalRequest(
+                    commandThreadId,
+                    commandTurnId,
+                    commandItemId,
+                    commandStartedAt,
+                    ReadString(parameters, "command"),
+                    ReadString(parameters, "cwd"),
+                    ReadString(parameters, "reason"),
+                    networkContext,
+                    ReadStringArray(parameters, "proposedExecpolicyAmendment"),
+                    ReadStringArray(parameters, "availableDecisions"),
+                    ReadString(parameters, "approvalId"));
+                break;
+
+            case "item/fileChange/requestApproval":
+                if (!TryReadApprovalCorrelation(parameters, out var fileThreadId, out var fileTurnId, out var fileItemId, out var fileStartedAt, out error))
+                {
+                    request = null!;
+                    return false;
+                }
+
+                payload = new CodexFileChangeApprovalRequest(
+                    fileThreadId,
+                    fileTurnId,
+                    fileItemId,
+                    fileStartedAt,
+                    ReadString(parameters, "reason"),
+                    ReadString(parameters, "grantRoot"));
+                break;
+
+            case "item/permissions/requestApproval":
+                if (!TryReadApprovalCorrelation(parameters, out var permissionThreadId, out var permissionTurnId, out var permissionItemId, out var permissionStartedAt, out error))
+                {
+                    request = null!;
+                    return false;
+                }
+
+                var cwd = ReadString(parameters, "cwd");
+                var permissions = parameters["permissions"] as JsonObject;
+                if (string.IsNullOrWhiteSpace(cwd) || permissions is null)
+                {
+                    request = null!;
+                    error = "Permission approval requires cwd and permissions.";
+                    return false;
+                }
+
+                payload = new CodexPermissionApprovalRequest(
+                    permissionThreadId,
+                    permissionTurnId,
+                    permissionItemId,
+                    permissionStartedAt,
+                    cwd,
+                    ReadString(parameters, "reason"),
+                    (JsonObject)permissions.DeepClone());
+                break;
+
+            default:
+                payload = new CodexUnsupportedServerRequest(method);
+                break;
+        }
+
+        request = new CodexServerRequest(
+            requestId,
+            method,
+            (JsonObject)parameters.DeepClone(),
+            payload);
+        return true;
+    }
+
+    private static bool TryReadApprovalCorrelation(
+        JsonObject parameters,
+        out string threadId,
+        out string turnId,
+        out string itemId,
+        out long startedAtMs,
+        out string? error)
+    {
+        threadId = ReadString(parameters, "threadId") ?? string.Empty;
+        turnId = ReadString(parameters, "turnId") ?? string.Empty;
+        itemId = ReadString(parameters, "itemId") ?? string.Empty;
+        startedAtMs = ReadLong(parameters, "startedAtMs") ?? 0;
+        if (string.IsNullOrWhiteSpace(threadId) ||
+            string.IsNullOrWhiteSpace(turnId) ||
+            string.IsNullOrWhiteSpace(itemId) ||
+            ReadLong(parameters, "startedAtMs") is null)
+        {
+            error = "Approval request is missing threadId, turnId, itemId, or startedAtMs.";
+            return false;
+        }
+
+        error = null;
+        return true;
+    }
+
+    private static bool TryReadRequestId(JsonNode? value, out CodexRequestId requestId)
+    {
+        if (value is JsonValue jsonValue && jsonValue.TryGetValue<long>(out var integer))
+        {
+            requestId = CodexRequestId.FromInteger(integer);
+            return true;
+        }
+
+        if (value is JsonValue stringValue && stringValue.TryGetValue<string>(out var text) && !string.IsNullOrEmpty(text))
+        {
+            requestId = CodexRequestId.FromString(text);
+            return true;
+        }
+
+        requestId = default;
+        return false;
+    }
+
     private void CompleteAllPending(Exception exception)
     {
         List<TaskCompletionSource<JsonNode?>> completions;
@@ -654,6 +993,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         {
             completions = [.. pendingRequests.Values];
             pendingRequests.Clear();
+            pendingIncomingRequests.Clear();
+            respondingIncomingRequests.Clear();
         }
 
         foreach (var completion in completions)
@@ -679,6 +1020,32 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
         response.Completion.TrySetCanceled(cancellationToken);
     }
+
+    private static void AddApprovalPolicyOverrides(
+        JsonObject parameters,
+        CodexApprovalPolicy? approvalPolicy,
+        CodexApprovalsReviewer? approvalsReviewer)
+    {
+        if (approvalPolicy is not null)
+        {
+            parameters["approvalPolicy"] = approvalPolicy.Value.ToProtocolValue();
+        }
+
+        if (approvalsReviewer is not null)
+        {
+            parameters["approvalsReviewer"] = approvalsReviewer.Value.ToProtocolValue();
+        }
+    }
+
+    private static long? ReadLong(JsonObject source, string propertyName) =>
+        source[propertyName] is JsonValue value && value.TryGetValue<long>(out var result)
+            ? result
+            : null;
+
+    private static int? ReadInt(JsonObject source, string propertyName) =>
+        source[propertyName] is JsonValue value && value.TryGetValue<int>(out var result)
+            ? result
+            : null;
 
     private static string? ReadString(JsonObject? obj, string path)
     {
@@ -816,6 +1183,72 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
 
         return values;
+    }
+
+    private static CodexSandbox? ParseSandbox(string? value) => value?.ToLowerInvariant() switch
+    {
+        "read-only" or "readonly" => CodexSandbox.ReadOnly,
+        "workspace-write" or "workspacewrite" => CodexSandbox.WorkspaceWrite,
+        "danger-full-access" or "dangerfullaccess" => CodexSandbox.DangerFullAccess,
+        _ => null
+    };
+
+    private static CodexApprovalPolicy? ParseApprovalPolicy(JsonNode? value)
+    {
+        if (value is JsonObject)
+        {
+            return CodexApprovalPolicy.Granular;
+        }
+
+        if (value is not JsonValue jsonValue || !jsonValue.TryGetValue<string>(out var text))
+        {
+            return null;
+        }
+
+        return text.ToLowerInvariant() switch
+        {
+            "untrusted" or "unlesstrusted" => CodexApprovalPolicy.Untrusted,
+            "on-request" or "onrequest" => CodexApprovalPolicy.OnRequest,
+            "never" => CodexApprovalPolicy.Never,
+            "on-failure" or "onfailure" => CodexApprovalPolicy.OnFailureDeprecated,
+            _ => null
+        };
+    }
+
+    private static CodexApprovalsReviewer? ParseApprovalsReviewer(string? value) => value?.ToLowerInvariant() switch
+    {
+        "user" => CodexApprovalsReviewer.User,
+        "auto_review" or "autoreview" => CodexApprovalsReviewer.AutoReview,
+        "guardian_subagent" or "guardiansubagent" => CodexApprovalsReviewer.GuardianSubagentLegacy,
+        _ => null
+    };
+
+    private static IReadOnlyList<CodexSandbox> ParseSandboxArray(JsonArray? values)
+    {
+        if (values is null)
+        {
+            return [];
+        }
+
+        return values
+            .Select(value => value is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var text) ? ParseSandbox(text) : null)
+            .OfType<CodexSandbox>()
+            .Distinct()
+            .ToList();
+    }
+
+    private static IReadOnlyList<CodexApprovalPolicy> ParseApprovalPolicyArray(JsonArray? values)
+    {
+        if (values is null)
+        {
+            return [];
+        }
+
+        return values
+            .Select(ParseApprovalPolicy)
+            .OfType<CodexApprovalPolicy>()
+            .Distinct()
+            .ToList();
     }
 
     private static CodexReasoningEffort? ParseReasoningEffort(string? value) => value?.ToLowerInvariant() switch

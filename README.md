@@ -8,11 +8,13 @@ The app is intended to launch and communicate with `codex app-server` while keep
 
 The current build also includes a Git-aware Changes workspace for repository status, working and staged diffs, staging, unstaging, confirmed discard, commits, and editor/Explorer shortcuts.
 
+See the current [SynthiaCode and ChatGPT desktop feature-parity audit](feature_parity.md) for the implemented matrix and prioritized gaps.
+
 ## Execution permissions
 
 SynthiaCode handles Codex app-server approval requests for command execution, file changes, and additional permissions. Requests appear in a global modal queue and can be allowed once, allowed for the current session, declined, or cancelled. Permission requests expose the requested permission groups so the response grants only the selected subset.
 
-Open **Settings > How should ChatGPT actions be approved?** to choose one of three modes:
+Use the permission selector beneath the task composer to choose one of three modes:
 
 - **Ask for approval** uses the workspace permission boundary, `on-request` approvals, and the user reviewer.
 - **Approve for me** keeps the same workspace boundary and `on-request` policy, but uses Codex automatic review.

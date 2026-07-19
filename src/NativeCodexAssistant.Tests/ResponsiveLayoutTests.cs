@@ -1,10 +1,13 @@
 using System.Collections.ObjectModel;
 using System.Reflection;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Threading;
+using NativeCodexAssistant.App;
 using NativeCodexAssistant.App.Controls;
 using NativeCodexAssistant.App.Services;
 using NativeCodexAssistant.App.ViewModels;
@@ -26,6 +29,7 @@ internal static class ResponsiveLayoutTests
         ApplyDarkThemeForTest(Application.Current.Resources);
         VerifyDarkLinkToolTip(Application.Current.Resources);
         VerifyTextOnlyContextMenu(Application.Current.Resources);
+        VerifyWindowCloseIsDeferred();
         VerifyProjectNavigationWraps();
         VerifyTranscriptWrapsAndScrolls();
     });
@@ -261,21 +265,62 @@ internal static class ResponsiveLayoutTests
             VirtualizingPanel.GetScrollUnit(conversationList) == ScrollUnit.Pixel,
             "transcript uses pixel scrolling for variable-height turns");
 
-        var settings = FindVisualDescendants<Expander>(view)
-            .Single(expander => Equals(expander.Header, "Run settings"));
+        Assert(
+            !FindVisualDescendants<Expander>(view).Any(expander => Equals(expander.Header, "Run settings")),
+            "Run settings expander is removed");
+        var modelOptionsButton = (Button?)view.FindName("ModelOptionsButton")
+            ?? throw new InvalidOperationException("compact model options button was not found");
+        var modelOptionsPopup = (Popup?)view.FindName("ModelOptionsPopup")
+            ?? throw new InvalidOperationException("model options popup was not found");
+        Assert(modelOptionsButton.MinHeight >= 32, "compact model selector has an accessible target size");
+        Assert(modelOptionsPopup.Placement == PlacementMode.Top, "model options open above the composer");
+        Assert(!modelOptionsPopup.StaysOpen, "model options close when focus moves away");
+        VerifyModelPickerRowsStayCompact(modelOptionsPopup);
+
         scroller.ScrollToEnd();
         PumpLayout(view);
-        settings.IsExpanded = true;
-        PumpLayout(view);
-
-        Assert(scroller.ScrollableHeight > 0, "expanded settings leave an accessible vertical transcript range");
-        AssertNear(scroller.ScrollableHeight, scroller.VerticalOffset, "expanding settings preserves the latest response");
+        Assert(scroller.ScrollableHeight > 0, "compact composer leaves an accessible vertical transcript range");
+        AssertNear(scroller.ScrollableHeight, scroller.VerticalOffset, "compact composer preserves the latest response");
 
         scroller.ScrollToTop();
         PumpLayout(view);
-        settings.IsExpanded = false;
-        PumpLayout(view);
-        AssertNear(0, scroller.VerticalOffset, "viewport changes preserve a user-scrolled-up position");
+        AssertNear(0, scroller.VerticalOffset, "compact composer preserves a user-scrolled-up position");
+    }
+
+    private static void VerifyModelPickerRowsStayCompact(Popup popup)
+    {
+        var popupContent = popup.Child as FrameworkElement
+            ?? throw new InvalidOperationException("model options popup content was not created");
+        var modelList = FindVisualDescendants<ListBox>(popupContent)
+            .Single(list => AutomationProperties.GetName(list) == "Available models");
+        var row = modelList.ItemTemplate.LoadContent() as FrameworkElement
+            ?? throw new InvalidOperationException("model picker row template was not created");
+        var labels = FindVisualDescendants<TextBlock>(row).ToList();
+
+        Assert(row.MaxHeight <= 48, "model rows remain short enough to expose the complete supported catalog");
+        Assert(labels.Count == 2, "model rows contain only a name and concise description");
+        Assert(labels.All(label => label.TextWrapping == TextWrapping.NoWrap), "model row text stays on one line");
+    }
+
+    private static void VerifyWindowCloseIsDeferred()
+    {
+        var scheduleClose = typeof(MainWindow).GetMethod(
+            "ScheduleClose",
+            BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("window close scheduler was not found");
+        var invoked = false;
+        var operation = scheduleClose.Invoke(
+            null,
+            [Dispatcher.CurrentDispatcher, new Action(() => invoked = true)]) as DispatcherOperation
+            ?? throw new InvalidOperationException("window close scheduler did not return a dispatcher operation");
+
+        Assert(!invoked, "window close is not re-entered from inside the Closing handler");
+        var frame = new DispatcherFrame();
+        Dispatcher.CurrentDispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() => frame.Continue = false));
+        Dispatcher.PushFrame(frame);
+        Assert(operation.Status == DispatcherOperationStatus.Completed && invoked, "deferred window close runs on the dispatcher");
     }
 
     private static ProjectThreadViewModel CreateProjectViewModel() => new(

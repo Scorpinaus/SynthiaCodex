@@ -687,6 +687,61 @@ Replace the separate recent-project and thread lists with one project-scoped hie
 - Light/dark theme and keyboard focus states remain readable.
 - All behavioral tests, the Release build, and the self-contained portable publish gates pass.
 
+## 12E. Phase 5G: Compact Model, Reasoning, and Fast Controls
+
+**Status:** Complete - 18 July 2026. The detailed implementation and verification record is maintained in `phase_5g_compact_model_controls.md`.
+
+### Goals
+
+Replace the permanent Run settings expander with a compact composer selector for the model, reasoning effort, and Fast mode while making the authenticated app-server catalog the authority for selectable capabilities.
+
+### Recommended interaction
+
+- Keep one compact `Model - Reasoning - Fast` summary in the composer footer beside Run task/Send follow-up.
+- Open a transient flyout with Model and Reasoning drill-down pages plus an immediate Fast toggle.
+- Use catalog display names and descriptions rather than raw model slugs.
+- Filter reasoning choices from the selected model's `supportedReasoningEfforts` and fall back to its `defaultReasoningEffort`.
+- Enable Fast only when the selected model advertises a `fast` service tier; keep the unavailable row disabled with an explanation.
+- Disable the selector during an active turn so changes cannot be mistaken as affecting the in-flight request.
+
+### Account-aware catalog policy
+
+- Read `account.type` and ChatGPT `planType` for identity context and diagnostics.
+- Load `model/list` with `includeHidden: false` after authentication and treat the returned catalog as the effective selectable set.
+- Do not maintain a client-side plan-to-model or plan-to-reasoning matrix. Plan labels alone do not capture workspace policy, staged access, model retirement, client surface, or API organization/project permissions.
+- Omit a ChatGPT plan label for API-key accounts, whose availability follows their API organization and project.
+- Invalidate and reload catalog capabilities after sign-in, sign-out, account updates, app-server reconnection, Codex installation changes, and explicit refresh.
+- Never persist plan entitlements or the capability catalog; persist only user selections and revalidate them against the current identity.
+
+### Architecture
+
+- Extend the typed model record with display metadata, default and supported reasoning efforts, service tiers, and informational availability copy.
+- Preserve catalog ordering, support pagination, and defensively deduplicate/filter returned models.
+- Replace string-only picker state with selected typed model/reasoning records and derived Fast availability.
+- Add an internal inherit/standard/fast service-tier selection so `turn/start` can omit an untouched override, send `fast`, or explicitly clear a prior override with null.
+- Apply the selected model consistently to thread creation, resume, fork, initial turns, and follow-up turns. Keep reasoning and service tier at turn scope.
+- Preserve existing model/reasoning settings keys and add a backward-compatible service-tier preference.
+- Keep flyout placement and focus behavior in WPF while keeping filtering, fallback, and entitlement reconciliation testable in the view model.
+
+### Recovery and compatibility
+
+- Reconcile a stale saved model to the catalog default and a stale reasoning effort to the selected model's default.
+- Turn Fast off when the selected model does not advertise it.
+- Preserve the cached catalog and saved protocol values during a transient refresh failure.
+- If `turn/start` rejects a stale capability, preserve the prompt, refresh once, explain the changed selection, and require resubmission rather than silently switching models.
+- Keep legacy settings files, thread history, guidance, cancellation, recovery, themes, and keyboard shortcuts compatible.
+
+### Acceptance criteria
+
+- Run settings and the visible Load models button are removed.
+- The compact summary exactly represents what the next turn will send.
+- Models reflect the effective authenticated catalog rather than a hardcoded plan matrix.
+- Reasoning options and Fast availability follow per-model catalog metadata.
+- Account changes and reconnects invalidate stale capabilities safely.
+- Persisted selections reconcile predictably without persisting entitlements.
+- Keyboard, screen-reader, light/dark/System theme, high-DPI, text-scale, and compact-window verification passes.
+- Protocol, view-model, persistence, recovery, complete behavioral suite, Release build, and portable publish gates pass.
+
 ## 13. Phase 6: Skills, Plugins, MCP, and Settings
 
 ### Goals

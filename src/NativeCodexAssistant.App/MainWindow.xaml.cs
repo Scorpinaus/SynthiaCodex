@@ -70,8 +70,16 @@ public partial class MainWindow : Window
         finally
         {
             shutdownComplete = true;
-            IsEnabled = true;
-            Close();
+            _ = ScheduleClose(
+                Dispatcher,
+                () =>
+                {
+                    IsEnabled = true;
+                    Close();
+                });
         }
     }
+
+    private static DispatcherOperation ScheduleClose(Dispatcher dispatcher, Action close) =>
+        dispatcher.BeginInvoke(DispatcherPriority.Normal, close);
 }

@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using NativeCodexAssistant.App.ViewModels;
@@ -179,6 +180,29 @@ public partial class TaskView : UserControl
         followLatest = true;
         JumpLatestButton.Visibility = Visibility.Collapsed;
         FollowLatest();
+    }
+
+    private void OnModelOptionsPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (taskViewModel is null)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            taskViewModel.IsOptionsFlyoutOpen = false;
+            ModelOptionsButton.Focus();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key is Key.Back or Key.BrowserBack &&
+            taskViewModel.OptionsPage != ComposerOptionsPage.Main)
+        {
+            taskViewModel.OptionsPage = ComposerOptionsPage.Main;
+            e.Handled = true;
+        }
     }
 
     private static T? FindVisualDescendant<T>(DependencyObject root)

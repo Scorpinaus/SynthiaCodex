@@ -14,6 +14,7 @@ public static class AppSettingsSnapshot
             PreferredCodexPath = source.PreferredCodexPath,
             LastModelOverride = source.LastModelOverride,
             LastReasoningEffortOverride = source.LastReasoningEffortOverride,
+            LastServiceTierOverride = source.LastServiceTierOverride,
             IsProjectRailOpen = source.IsProjectRailOpen,
             IsDetailsPaneOpen = source.IsDetailsPaneOpen,
             RecentProjects = [.. source.RecentProjects],

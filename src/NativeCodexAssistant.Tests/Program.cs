@@ -102,6 +102,7 @@ var tests = new List<(string Name, Func<Task> Run)>
 tests.AddRange(Phase5BBoundaryTests.All);
 tests.AddRange(Phase5CMultiTurnTests.All);
 tests.AddRange(Phase5DNavigationTests.All);
+tests.AddRange(Phase5GModelControlsTests.All);
 tests.AddRange(AccountFeatureTests.All);
 tests.AddRange(ResponsiveLayoutTests.All);
 tests.AddRange(MarkdownLinkTests.All);
@@ -219,6 +220,7 @@ static async Task TestSettingsRoundTripAsync()
         PreferredCodexPath = @"C:\Tools\codex.exe",
         LastModelOverride = "gpt-test",
         LastReasoningEffortOverride = "high",
+        LastServiceTierOverride = "fast",
         IsProjectRailOpen = false,
         IsDetailsPaneOpen = true
     };
@@ -273,6 +275,7 @@ static async Task TestSettingsRoundTripAsync()
     AssertEqual(settings.PreferredCodexPath, loaded.PreferredCodexPath, "preferred codex path");
     AssertEqual(settings.LastModelOverride, loaded.LastModelOverride, "last model override");
     AssertEqual(settings.LastReasoningEffortOverride, loaded.LastReasoningEffortOverride, "last reasoning override");
+    AssertEqual(settings.LastServiceTierOverride, loaded.LastServiceTierOverride, "last service tier override");
     AssertEqual(settings.IsProjectRailOpen, loaded.IsProjectRailOpen, "project rail preference");
     AssertEqual(settings.IsDetailsPaneOpen, loaded.IsDetailsPaneOpen, "details pane preference");
     AssertEqual(1, loaded.RecentProjects.Count, "recent project count");
@@ -1130,7 +1133,7 @@ static async Task TestAppServerListsModelsAsync()
     AssertEqual("gpt-default", models[0].Model, "first model id");
     AssertEqual("GPT Default", models[0].DisplayName, "first model display");
     AssertTrue(models[0].IsDefault, "first model default");
-    AssertEqual("medium", models[0].SupportedReasoningEfforts[0], "first model effort");
+    AssertEqual(CodexReasoningEffort.Medium, models[0].SupportedReasoningEfforts[0].Effort, "first model effort");
 }
 
 static Task TestAppServerNotificationsUpdateThreadStateAsync()
@@ -1590,6 +1593,7 @@ static async Task TestViewModelSendsSelectedModelAndReasoningAsync()
 
     viewModel.ModelOverride = "gpt-test";
     viewModel.ReasoningEffortOverride = "xhigh";
+    viewModel.TaskWorkspace.ServiceTierSelection = CodexServiceTierSelection.Fast;
     viewModel.PromptText = "Use selected overrides.";
     viewModel.SubmitPromptCommand.Execute(null);
 
@@ -1600,6 +1604,8 @@ static async Task TestViewModelSendsSelectedModelAndReasoningAsync()
         """);
 
     await transport.WaitForClientMessageCountAsync(3);
+    var selectedModelThreadRequest = ParseMessage(transport.ClientMessages[2]);
+    AssertJsonString("gpt-test", selectedModelThreadRequest, "params.model", "new thread model override");
     transport.ServerSend(
         """
         {"id":1,"result":{"thread":{"id":"thr_123"}}}
@@ -1609,6 +1615,7 @@ static async Task TestViewModelSendsSelectedModelAndReasoningAsync()
     var turnRequest = ParseMessage(transport.ClientMessages[3]);
     AssertJsonString("gpt-test", turnRequest, "params.model", "view model model override");
     AssertJsonString("xhigh", turnRequest, "params.effort", "view model reasoning effort");
+    AssertJsonString("fast", turnRequest, "params.serviceTier", "view model service tier");
 
     transport.ServerSend(
         """
@@ -1620,7 +1627,8 @@ static async Task TestViewModelSendsSelectedModelAndReasoningAsync()
         """);
 
     await WaitUntilAsync(() => string.Equals(settingsStore.SavedSettings.LastModelOverride, "gpt-test", StringComparison.Ordinal) &&
-        string.Equals(settingsStore.SavedSettings.LastReasoningEffortOverride, "xhigh", StringComparison.Ordinal), "override save");
+        string.Equals(settingsStore.SavedSettings.LastReasoningEffortOverride, "xhigh", StringComparison.Ordinal) &&
+        string.Equals(settingsStore.SavedSettings.LastServiceTierOverride, "fast", StringComparison.Ordinal), "override save");
 
     await viewModel.DisposeAsync();
 }
@@ -1642,17 +1650,29 @@ static async Task TestViewModelLoadsModelOptionsAsync()
         """);
 
     await transport.WaitForClientMessageCountAsync(3);
-    var modelRequest = ParseMessage(transport.ClientMessages[2]);
+    var accountRequest = ParseMessage(transport.ClientMessages[2]);
+    AssertJsonString("account/read", accountRequest, "method", "view model account read method");
+    transport.ServerSend(
+        """
+        {"id":1,"result":{"account":{"type":"chatgpt","email":"developer@example.com","planType":"plus"},"requiresOpenaiAuth":true}}
+        """);
+
+    await transport.WaitForClientMessageCountAsync(4);
+    var modelRequest = ParseMessage(transport.ClientMessages[3]);
     AssertJsonString("model/list", modelRequest, "method", "view model model list method");
 
     transport.ServerSend(
         """
-        {"id":1,"result":{"data":[{"id":"default","model":"gpt-default","displayName":"GPT Default","isDefault":true,"supportedReasoningEfforts":[{"reasoningEffort":"medium","description":"Balanced"}]},{"id":"default-duplicate","model":"gpt-default","displayName":"GPT Default Duplicate","isDefault":false,"supportedReasoningEfforts":[]},{"id":"fast","model":"gpt-fast","displayName":"GPT Fast","isDefault":false,"supportedReasoningEfforts":[{"reasoningEffort":"minimal","description":"Fast"}]}]}}
+        {"id":2,"result":{"data":[{"id":"default","model":"gpt-default","displayName":"GPT Default","description":"Default model","isDefault":true,"hidden":false,"defaultReasoningEffort":"medium","supportedReasoningEfforts":[{"reasoningEffort":"medium","description":"Balanced"}],"serviceTiers":[{"id":"fast","name":"Fast","description":"Faster responses"}]},{"id":"default-duplicate","model":"gpt-default","displayName":"GPT Default Duplicate","description":"Duplicate","isDefault":false,"hidden":false,"defaultReasoningEffort":"medium","supportedReasoningEfforts":[]},{"id":"fast","model":"gpt-fast","displayName":"GPT Fast","description":"Fast model","isDefault":false,"hidden":false,"defaultReasoningEffort":"minimal","supportedReasoningEfforts":[{"reasoningEffort":"minimal","description":"Fast"}],"serviceTiers":[]}]}}
         """);
 
     await WaitUntilAsync(() => viewModel.ModelOptions.Count == 2, "model options load");
     AssertTrue(viewModel.ModelOptions.Contains("gpt-default"), "default model option");
     AssertTrue(viewModel.ModelOptions.Contains("gpt-fast"), "fast model option");
+    AssertEqual("GPT Default", viewModel.TaskWorkspace.SelectedModel?.DisplayName, "default display model selected");
+    AssertEqual(CodexReasoningEffort.Medium, viewModel.TaskWorkspace.SelectedReasoning?.Effort, "default reasoning selected");
+    AssertTrue(viewModel.TaskWorkspace.IsFastModeAvailable, "Fast availability comes from model catalog");
+    AssertEqual("ChatGPT Plus", viewModel.TaskWorkspace.AccountPlanLabel, "plan label is contextual");
 
     await viewModel.DisposeAsync();
 }

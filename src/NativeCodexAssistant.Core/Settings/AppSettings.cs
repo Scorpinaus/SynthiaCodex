@@ -15,6 +15,8 @@ public sealed class AppSettings
 
     public string? LastReasoningEffortOverride { get; set; }
 
+    public string? LastServiceTierOverride { get; set; }
+
     public bool IsProjectRailOpen { get; set; } = true;
 
     public bool IsDetailsPaneOpen { get; set; }

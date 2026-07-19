@@ -542,6 +542,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         themeService.ApplyTheme(selectedTheme);
         ModelOverride = settings.LastModelOverride ?? string.Empty;
         ReasoningEffortOverride = settings.LastReasoningEffortOverride ?? string.Empty;
+        TaskWorkspace.ServiceTierSelection = ParseServiceTierSelection(settings.LastServiceTierOverride);
         RefreshRecentProjects();
         await DiagnosticsViewModel.RefreshAsync().ConfigureAwait(true);
         StatusMessage = "Ready";
@@ -641,7 +642,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
-            var result = await appServerSessionCoordinator.StartThreadAsync(CodexThreadStartOptions.Default).ConfigureAwait(true);
+            var result = await appServerSessionCoordinator.StartThreadAsync(new CodexThreadStartOptions(
+                NormalizeOverride(ModelOverride))).ConfigureAwait(true);
             AssistantWorktree? worktree = null;
             if (string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal))
             {
@@ -1078,13 +1080,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var workspacePath = GetActiveWorkspacePath();
             settings.LastModelOverride = NormalizeOverride(ModelOverride);
             settings.LastReasoningEffortOverride = NormalizeOverride(ReasoningEffortOverride);
+            settings.LastServiceTierOverride = ToSettingsValue(TaskWorkspace.ServiceTierSelection);
             var turn = await appServerSessionCoordinator.StartTurnAsync(new CodexTurnStartRequest(
                 activeThreadId,
                 submittedPrompt,
                 workspacePath,
                 CodexSandbox.WorkspaceWrite,
                 NormalizeOverride(ModelOverride),
-                ParseReasoningEffort(ReasoningEffortOverride))).ConfigureAwait(true);
+                ParseReasoningEffort(ReasoningEffortOverride),
+                TaskWorkspace.ServiceTierSelection)).ConfigureAwait(true);
 
             var boundTurn = threadService.BindPendingTurn(turn.TurnId);
             threadWorkspace.RegisterTurn(activeThreadId, turn.TurnId);
@@ -1132,7 +1136,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         if (string.IsNullOrWhiteSpace(activeThreadId))
         {
-            var thread = await appServerSessionCoordinator.StartThreadAsync(CodexThreadStartOptions.Default).ConfigureAwait(true);
+            var thread = await appServerSessionCoordinator.StartThreadAsync(new CodexThreadStartOptions(
+                NormalizeOverride(ModelOverride))).ConfigureAwait(true);
             AssistantWorktree? worktree = null;
             if (string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal))
             {
@@ -1169,7 +1174,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var resumed = await appServerSessionCoordinator.ResumeThreadAsync(new CodexThreadResumeRequest(
                 activeThreadId,
                 GetActiveWorkspacePath(),
-                CodexSandbox.WorkspaceWrite)).ConfigureAwait(true);
+                CodexSandbox.WorkspaceWrite,
+                NormalizeOverride(ModelOverride))).ConfigureAwait(true);
             threadService.ReconcileHistory(resumed.Turns ?? []);
             TaskWorkspace.NotifyResponseChanged();
             activeThreadLoaded = true;
@@ -1186,7 +1192,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 new Dictionary<string, string?> { ["threadId"] = activeThreadId },
                 ex);
 
-            var thread = await appServerSessionCoordinator.StartThreadAsync(CodexThreadStartOptions.Default).ConfigureAwait(true);
+            var thread = await appServerSessionCoordinator.StartThreadAsync(new CodexThreadStartOptions(
+                NormalizeOverride(ModelOverride))).ConfigureAwait(true);
             CreateThreadState(thread.ThreadId, $"Thread {ProjectThreads.Count + 1}");
             RefreshProjectThreads(thread.ThreadId);
             loadedThreadIds.Add(thread.ThreadId);
@@ -1346,23 +1353,34 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         loadModelsCommand.RaiseCanExecuteChanged();
         StatusMessage = "Loading Codex models";
+        TaskWorkspace.SetModelCatalogLoading();
 
         try
         {
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
-            var models = await appServerSessionCoordinator.ListModelsAsync().ConfigureAwait(true);
-            ModelOptions.Clear();
-            foreach (var model in models.Select(model => model.Model).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(model => model))
+            CodexAccountInfo? account = null;
+            try
             {
-                ModelOptions.Add(model);
+                account = (await appServerSessionCoordinator.ReadAccountAsync().ConfigureAwait(true)).Account;
             }
+            catch (Exception ex)
+            {
+                logger.Log(
+                    AppLogLevel.Warning,
+                    "codex_model_account_read_failed",
+                    "Could not read account context while loading the model catalog.",
+                    exception: ex);
+            }
+            var models = await appServerSessionCoordinator.ListModelsAsync().ConfigureAwait(true);
+            TaskWorkspace.ApplyModelCatalog(models, account);
 
-            StatusMessage = ModelOptions.Count == 0
+            StatusMessage = TaskWorkspace.ModelCatalog.Count == 0
                 ? "No Codex models returned"
-                : $"Loaded {ModelOptions.Count} Codex models";
+                : $"Loaded {TaskWorkspace.ModelCatalog.Count} Codex models";
         }
         catch (Exception ex)
         {
+            TaskWorkspace.SetModelCatalogError(ex.Message);
             StatusMessage = ex.Message;
             logger.Log(AppLogLevel.Warning, "codex_model_list_failed", "Could not load Codex model list.", exception: ex);
         }
@@ -1500,6 +1518,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 _ = Account.RefreshAsync(appServerWarmUpCancellation.Token);
             }
+            if (args.State == AppServerSessionState.Connected &&
+                args.PreviousState is AppServerSessionState.Reconnecting or AppServerSessionState.Unavailable)
+            {
+                TaskWorkspace.InvalidateModelCatalog();
+            }
         }
 
         if (synchronizationContext is null || ReferenceEquals(SynchronizationContext.Current, synchronizationContext))
@@ -1527,6 +1550,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (Account.TryApplyNotification(notification))
         {
+            if (notification.Method is "account/updated" or "account/login/completed")
+            {
+                TaskWorkspace.InvalidateModelCatalog();
+            }
             return;
         }
 
@@ -1937,6 +1964,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void RelayTaskPropertyChanged(string? propertyName)
     {
+        if (propertyName is nameof(TaskViewModel.ModelOverride) or
+            nameof(TaskViewModel.ReasoningEffortOverride) or
+            nameof(TaskViewModel.ServiceTierSelection))
+        {
+            settings.LastModelOverride = NormalizeOverride(ModelOverride);
+            settings.LastReasoningEffortOverride = NormalizeOverride(ReasoningEffortOverride);
+            settings.LastServiceTierOverride = ToSettingsValue(TaskWorkspace.ServiceTierSelection);
+            _ = SaveModelPreferencesAsync();
+        }
+
         var mainProperty = propertyName switch
         {
             nameof(TaskViewModel.Prompt) => nameof(PromptText),
@@ -1955,4 +1992,36 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(mainProperty);
         }
     }
+
+    private async Task SaveModelPreferencesAsync()
+    {
+        try
+        {
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            logger.Log(
+                AppLogLevel.Warning,
+                "model_preferences_save_failed",
+                "Could not save model preferences.",
+                exception: ex);
+        }
+    }
+
+    private static CodexServiceTierSelection ParseServiceTierSelection(string? value) =>
+        NormalizeOverride(value)?.ToLowerInvariant() switch
+        {
+            "fast" => CodexServiceTierSelection.Fast,
+            "standard" => CodexServiceTierSelection.Standard,
+            _ => CodexServiceTierSelection.Inherit
+        };
+
+    private static string? ToSettingsValue(CodexServiceTierSelection selection) => selection switch
+    {
+        CodexServiceTierSelection.Inherit => null,
+        CodexServiceTierSelection.Standard => "standard",
+        CodexServiceTierSelection.Fast => "fast",
+        _ => throw new ArgumentOutOfRangeException(nameof(selection), selection, "Unknown service tier selection.")
+    };
 }

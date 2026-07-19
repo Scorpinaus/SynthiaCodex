@@ -71,7 +71,8 @@ public sealed record CodexTurnStartRequest(
     string Cwd,
     CodexSandbox Sandbox,
     string? Model = null,
-    CodexReasoningEffort? ReasoningEffort = null);
+    CodexReasoningEffort? ReasoningEffort = null,
+    CodexServiceTierSelection ServiceTier = CodexServiceTierSelection.Inherit);
 
 public sealed record CodexTurnStartResult(string TurnId);
 
@@ -83,8 +84,33 @@ public sealed record CodexModelOption(
     string Id,
     string Model,
     string DisplayName,
+    string Description,
     bool IsDefault,
-    IReadOnlyList<string> SupportedReasoningEfforts);
+    bool Hidden,
+    CodexReasoningEffort? DefaultReasoningEffort,
+    IReadOnlyList<CodexReasoningOption> SupportedReasoningEfforts,
+    IReadOnlyList<CodexServiceTierOption> ServiceTiers,
+    string? AvailabilityMessage,
+    IReadOnlyList<string>? AdditionalSpeedTiers = null)
+{
+    public CodexServiceTierOption? FastServiceTier => ServiceTiers.FirstOrDefault(tier =>
+        string.Equals(tier.Id, "fast", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(tier.Name, "Fast", StringComparison.OrdinalIgnoreCase));
+
+    public bool SupportsFastMode =>
+        AdditionalSpeedTiers?.Any(tier =>
+            string.Equals(tier, "fast", StringComparison.OrdinalIgnoreCase)) == true ||
+        FastServiceTier is not null;
+}
+
+public sealed record CodexReasoningOption(CodexReasoningEffort Effort, string Description)
+{
+    public string ProtocolValue => Effort.ToProtocolValue();
+
+    public string DisplayName => Effort.ToDisplayName();
+}
+
+public sealed record CodexServiceTierOption(string Id, string Name, string Description);
 
 public sealed record AppServerNotification(string Method, JsonObject Params);
 
@@ -108,6 +134,13 @@ public enum CodexReasoningEffort
     Medium,
     High,
     XHigh
+}
+
+public enum CodexServiceTierSelection
+{
+    Inherit,
+    Standard,
+    Fast
 }
 
 public static class CodexSandboxExtensions
@@ -150,6 +183,20 @@ public static class CodexReasoningEffortExtensions
             CodexReasoningEffort.Medium => "medium",
             CodexReasoningEffort.High => "high",
             CodexReasoningEffort.XHigh => "xhigh",
+            _ => throw new ArgumentOutOfRangeException(nameof(effort), effort, "Unknown reasoning effort value.")
+        };
+    }
+
+    public static string ToDisplayName(this CodexReasoningEffort effort)
+    {
+        return effort switch
+        {
+            CodexReasoningEffort.None => "None",
+            CodexReasoningEffort.Minimal => "Minimal",
+            CodexReasoningEffort.Low => "Low",
+            CodexReasoningEffort.Medium => "Medium",
+            CodexReasoningEffort.High => "High",
+            CodexReasoningEffort.XHigh => "Extra high",
             _ => throw new ArgumentOutOfRangeException(nameof(effort), effort, "Unknown reasoning effort value.")
         };
     }

@@ -96,6 +96,8 @@ Thread selection and resume use typed `thread/read`/resume results with `include
 
 `TaskView` presents the collection as a recycling-virtualized chronological transcript. Each turn has a distinct outer boundary and separate user, activity, and assistant surfaces, so adjacent turns remain visually independent while scrolling. The app-server stream is retained in bounded raw-event and diagnostic collections, while visible turn activity is an allowlisted projection of commentary, commands, file changes, tools, searches, plans, collaboration, guidance, and actionable errors. Stable item keys consolidate start, progress, and completion into one row; lifecycle, token, output-delta, reasoning, final-answer, and unknown notifications remain diagnostics-only. It follows live output while the viewport is near the bottom, exposes a Jump to latest action after manual scrolling, hides empty activity, collapses historical activity, and keeps the composer fixed. The first action is labelled Run task; subsequent submissions are labelled Send follow-up. During an active turn, the same composer becomes the guidance input.
 
+The composer footer owns one compact model summary instead of a permanent Run settings expander. Its anchored flyout drills into the authenticated model catalog and filters reasoning efforts from the selected model's advertised capabilities. Fast is a catalog-provided service tier rather than a model alias and is enabled only when the selected model advertises `fast`. `account/read.planType` is presentation context only; the visible `model/list` result is the effective capability source for ChatGPT and API-key sessions. Model, reasoning, and inherit/standard/fast preferences persist independently of account entitlements, are revalidated after catalog refresh, and are disabled while the selected turn is active.
+
 ### Terminal
 
 ```text
@@ -115,7 +117,7 @@ Each terminal buffer is capped at 250,000 characters. Phase 5B replaced the orig
 
 ### Persistence
 
-The composition root exposes a `CoalescingSettingsStore` around `JsonSettingsStore`. The current application-level code still has 11 direct `SaveAsync` call sites in `MainViewModel`, but requests arriving within 75 ms are collapsed into a single physical write containing the latest immutable deep snapshot.
+The composition root exposes a `CoalescingSettingsStore` around `JsonSettingsStore`. The current application-level code has 12 direct `SaveAsync` call sites in `MainViewModel`, but requests arriving within 75 ms are collapsed into a single physical write containing the latest immutable deep snapshot.
 
 `JsonSettingsStore` serializes writes through a gate, flushes the complete settings graph to a write-through `settings.json.tmp`, and replaces `settings.json` with an overwrite move. Loading promotes a valid newer temporary file when an interrupted save left the primary missing or corrupt.
 

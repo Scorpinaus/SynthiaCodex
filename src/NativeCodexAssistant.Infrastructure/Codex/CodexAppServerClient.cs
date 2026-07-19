@@ -166,36 +166,54 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     {
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
 
-        var result = await SendRequestAsync(
-            "model/list",
-            new JsonObject
-            {
-                ["includeHidden"] = false
-            },
-            cancellationToken).ConfigureAwait(false) as JsonObject;
-
-        var data = result?["data"] as JsonArray;
-        if (data is null)
-        {
-            return [];
-        }
-
         var models = new List<CodexModelOption>();
-        foreach (var item in data.OfType<JsonObject>())
+        var seenModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string? cursor = null;
+        do
         {
-            var model = ReadString(item, "model") ?? ReadString(item, "id");
-            if (string.IsNullOrWhiteSpace(model))
+            var parameters = new JsonObject
             {
-                continue;
+                ["includeHidden"] = false,
+                ["limit"] = 100
+            };
+            if (!string.IsNullOrWhiteSpace(cursor))
+            {
+                parameters["cursor"] = cursor;
             }
 
-            models.Add(new CodexModelOption(
-                ReadString(item, "id") ?? model,
-                model,
-                ReadString(item, "displayName") ?? model,
-                ReadBool(item, "isDefault") ?? false,
-                ReadReasoningEfforts(item)));
+            var result = await SendRequestAsync(
+                "model/list",
+                parameters,
+                cancellationToken).ConfigureAwait(false) as JsonObject;
+
+            if (result?["data"] is JsonArray data)
+            {
+                foreach (var item in data.OfType<JsonObject>())
+                {
+                    var model = ReadString(item, "model") ?? ReadString(item, "id");
+                    if (string.IsNullOrWhiteSpace(model) || !seenModels.Add(model))
+                    {
+                        continue;
+                    }
+
+                    models.Add(new CodexModelOption(
+                        ReadString(item, "id") ?? model,
+                        model,
+                        ReadString(item, "displayName") ?? model,
+                        ReadString(item, "description") ?? string.Empty,
+                        ReadBool(item, "isDefault") ?? false,
+                        ReadBool(item, "hidden") ?? false,
+                        ParseReasoningEffort(ReadString(item, "defaultReasoningEffort")),
+                        ReadReasoningEfforts(item),
+                        ReadServiceTiers(item),
+                        ReadString(item, "availabilityNux.message"),
+                        ReadStringArray(item, "additionalSpeedTiers")));
+                }
+            }
+
+            cursor = ReadString(result, "nextCursor");
         }
+        while (!string.IsNullOrWhiteSpace(cursor));
 
         return models;
     }
@@ -390,6 +408,20 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         if (request.ReasoningEffort is not null)
         {
             parameters["effort"] = request.ReasoningEffort.Value.ToProtocolValue();
+        }
+
+        switch (request.ServiceTier)
+        {
+            case CodexServiceTierSelection.Inherit:
+                break;
+            case CodexServiceTierSelection.Standard:
+                parameters["serviceTier"] = null;
+                break;
+            case CodexServiceTierSelection.Fast:
+                parameters["serviceTier"] = "fast";
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(request), request.ServiceTier, "Unknown service tier selection.");
         }
 
         var result = await SendRequestAsync("turn/start", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
@@ -722,25 +754,80 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         return null;
     }
 
-    private static IReadOnlyList<string> ReadReasoningEfforts(JsonObject model)
+    private static IReadOnlyList<CodexReasoningOption> ReadReasoningEfforts(JsonObject model)
     {
         if (model["supportedReasoningEfforts"] is not JsonArray efforts)
         {
             return [];
         }
 
-        var values = new List<string>();
+        var values = new List<CodexReasoningOption>();
         foreach (var item in efforts.OfType<JsonObject>())
         {
-            var effort = ReadString(item, "reasoningEffort");
-            if (!string.IsNullOrWhiteSpace(effort))
+            var effort = ParseReasoningEffort(ReadString(item, "reasoningEffort"));
+            if (effort is not null)
             {
-                values.Add(effort);
+                values.Add(new CodexReasoningOption(
+                    effort.Value,
+                    ReadString(item, "description") ?? string.Empty));
             }
         }
 
         return values;
     }
+
+    private static IReadOnlyList<CodexServiceTierOption> ReadServiceTiers(JsonObject model)
+    {
+        if (model["serviceTiers"] is not JsonArray tiers)
+        {
+            return [];
+        }
+
+        var values = new List<CodexServiceTierOption>();
+        foreach (var item in tiers.OfType<JsonObject>())
+        {
+            var id = ReadString(item, "id");
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                values.Add(new CodexServiceTierOption(
+                    id,
+                    ReadString(item, "name") ?? id,
+                    ReadString(item, "description") ?? string.Empty));
+            }
+        }
+
+        return values;
+    }
+
+    private static IReadOnlyList<string> ReadStringArray(JsonObject source, string propertyName)
+    {
+        if (source[propertyName] is not JsonArray items)
+        {
+            return [];
+        }
+
+        var values = new List<string>();
+        foreach (var item in items.OfType<JsonValue>())
+        {
+            if (item.TryGetValue<string>(out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                values.Add(value);
+            }
+        }
+
+        return values;
+    }
+
+    private static CodexReasoningEffort? ParseReasoningEffort(string? value) => value?.ToLowerInvariant() switch
+    {
+        "none" => CodexReasoningEffort.None,
+        "minimal" => CodexReasoningEffort.Minimal,
+        "low" => CodexReasoningEffort.Low,
+        "medium" => CodexReasoningEffort.Medium,
+        "high" => CodexReasoningEffort.High,
+        "xhigh" => CodexReasoningEffort.XHigh,
+        _ => null
+    };
 
     private static IReadOnlyList<CodexConversationTurnSnapshot> ParseConversationTurns(JsonArray? turns)
     {

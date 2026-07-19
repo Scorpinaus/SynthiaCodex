@@ -95,22 +95,237 @@
             <Button x:Name="JumpLatestButton" Content="Jump to latest" Style="{StaticResource CompactButton}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,14,14" Visibility="Collapsed" Click="OnJumpLatestClick"/>
             </Grid>
         </Border>
-        <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,12,0,0" Padding="12"><StackPanel>
-            <Expander Header="Run settings" IsExpanded="False" Margin="0,0,0,8"><Grid Margin="0,8,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
-                <StackPanel><TextBlock Text="Model" Style="{StaticResource SectionLabel}"/><DockPanel><Button DockPanel.Dock="Right" Content="Load models" Command="{Binding TaskWorkspace.LoadModelsCommand}" Margin="8,0,0,0" Style="{StaticResource CompactButton}"/><ComboBox ItemsSource="{Binding TaskWorkspace.ModelOptions}" Text="{Binding TaskWorkspace.ModelOverride, UpdateSourceTrigger=PropertyChanged}" IsEditable="True"/></DockPanel></StackPanel>
-                <StackPanel Grid.Column="2"><TextBlock Text="Reasoning" Style="{StaticResource SectionLabel}"/><ComboBox ItemsSource="{Binding TaskWorkspace.ReasoningEffortOptions}" SelectedItem="{Binding TaskWorkspace.ReasoningEffortOverride, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
-            </Grid></Expander>
-            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,12,0,0" Padding="12" AutomationProperties.Name="Task composer">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
                 <Grid>
-                    <TextBox x:Name="PromptBox" Text="{Binding TaskWorkspace.Prompt, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" MinHeight="82" MaxHeight="150" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Padding="10" Visibility="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource InverseBooleanToVisibilityConverter}}" ToolTip="Describe a task. Press Ctrl+Enter to run."/>
-                    <TextBox x:Name="GuidanceBox" Text="{Binding TaskWorkspace.SteeringText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" MinHeight="82" MaxHeight="150" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Padding="10" Visibility="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource BooleanToVisibilityConverter}}" ToolTip="Guide the active task using this same composer."/>
+                    <TextBox x:Name="PromptBox"
+                             Text="{Binding TaskWorkspace.Prompt, UpdateSourceTrigger=PropertyChanged}"
+                             AcceptsReturn="True"
+                             MinHeight="82"
+                             MaxHeight="150"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             Padding="10"
+                             Visibility="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                             ToolTip="Describe a task. Press Ctrl+Enter to run."
+                             AutomationProperties.Name="Task prompt"/>
+                    <TextBox x:Name="GuidanceBox"
+                             Text="{Binding TaskWorkspace.SteeringText, UpdateSourceTrigger=PropertyChanged}"
+                             AcceptsReturn="True"
+                             MinHeight="82"
+                             MaxHeight="150"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             Padding="10"
+                             Visibility="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource BooleanToVisibilityConverter}}"
+                             ToolTip="Guide the active task using this same composer."
+                             AutomationProperties.Name="Active task guidance"/>
                 </Grid>
-                <StackPanel Grid.Column="1" Margin="10,0,0,0">
-                    <Button Content="{Binding TaskWorkspace.ComposerActionLabel}" Command="{Binding TaskWorkspace.SubmitCommand}" Style="{StaticResource RunTaskButton}" MinWidth="104" Visibility="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
-                    <Button Content="Guide task" Command="{Binding TaskWorkspace.SteerCommand}" Style="{StaticResource RunTaskButton}" MinWidth="104" Visibility="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                    <Button Content="Cancel" Command="{Binding TaskWorkspace.CancelCommand}" MinWidth="104" Margin="0,8,0,0" Visibility="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                </StackPanel>
+
+                <Grid Grid.Row="1" Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Button x:Name="ModelOptionsButton"
+                            Command="{Binding TaskWorkspace.OpenOptionsCommand}"
+                            Style="{StaticResource CompactButton}"
+                            MinHeight="32"
+                            MaxWidth="340"
+                            Padding="10,4"
+                            HorizontalAlignment="Left"
+                            HorizontalContentAlignment="Left"
+                            IsEnabled="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                            ToolTip="Choose the model, reasoning effort, and Fast mode for the next turn."
+                            AutomationProperties.Name="Model, reasoning, and Fast options">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding TaskWorkspace.ModelSelectionSummary}"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="⌄" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Button>
+
+                    <Popup x:Name="ModelOptionsPopup"
+                           PlacementTarget="{Binding ElementName=ModelOptionsButton}"
+                           Placement="Top"
+                           VerticalOffset="-8"
+                           IsOpen="{Binding TaskWorkspace.IsOptionsFlyoutOpen, Mode=TwoWay}"
+                           StaysOpen="False"
+                           AllowsTransparency="True"
+                           PopupAnimation="Fade"
+                           DataContext="{Binding DataContext, ElementName=ModelOptionsButton}">
+                        <Border Width="380"
+                                MaxHeight="460"
+                                Padding="12"
+                                CornerRadius="8"
+                                Background="{DynamicResource PanelBrush}"
+                                BorderBrush="{DynamicResource ButtonBorderBrush}"
+                                BorderThickness="1"
+                                PreviewKeyDown="OnModelOptionsPreviewKeyDown">
+                            <Grid>
+                                <StackPanel Visibility="{Binding TaskWorkspace.IsOptionsMainPage, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <Grid Margin="4,2,4,10">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="Model options" FontSize="15" FontWeight="SemiBold"/>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding TaskWorkspace.AccountPlanLabel}"
+                                                   Foreground="{DynamicResource MutedInkBrush}"
+                                                   Visibility="{Binding TaskWorkspace.HasAccountPlanLabel, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                   AutomationProperties.Name="Account plan context"/>
+                                    </Grid>
+
+                                    <Button Command="{Binding TaskWorkspace.ShowModelsCommand}"
+                                            Margin="0,2"
+                                            Padding="10,8"
+                                            HorizontalContentAlignment="Stretch"
+                                            AutomationProperties.Name="Choose model">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Text="Model" Foreground="{DynamicResource MutedInkBrush}"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding TaskWorkspace.SelectedModel.DisplayName, TargetNullValue=Load models}" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Grid.Column="2" Text="›" Margin="8,0,0,0"/>
+                                        </Grid>
+                                    </Button>
+
+                                    <Button Command="{Binding TaskWorkspace.ShowReasoningCommand}"
+                                            Margin="0,2"
+                                            Padding="10,8"
+                                            HorizontalContentAlignment="Stretch"
+                                            AutomationProperties.Name="Choose reasoning effort">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Text="Reasoning" Foreground="{DynamicResource MutedInkBrush}"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding TaskWorkspace.SelectedReasoning.DisplayName, TargetNullValue=Default}"/>
+                                            <TextBlock Grid.Column="2" Text="›" Margin="8,0,0,0"/>
+                                        </Grid>
+                                    </Button>
+
+                                    <Border Margin="0,8,0,4" Padding="10,8" Background="{DynamicResource FieldBrush}" CornerRadius="5">
+                                        <StackPanel>
+                                            <CheckBox Content="Fast mode"
+                                                      IsChecked="{Binding TaskWorkspace.IsFastModeEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                      IsEnabled="{Binding TaskWorkspace.IsFastModeAvailable}"
+                                                      AutomationProperties.Name="Fast mode"/>
+                                            <TextBlock Text="{Binding TaskWorkspace.FastModeDescription}"
+                                                       Foreground="{DynamicResource MutedInkBrush}"
+                                                       FontSize="11"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,5,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <TextBlock Text="Loading the model catalog..."
+                                               Margin="4,8,4,2"
+                                               Foreground="{DynamicResource MutedInkBrush}"
+                                               Visibility="{Binding TaskWorkspace.IsModelCatalogLoading, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                    <TextBlock Text="{Binding TaskWorkspace.ModelCatalogError}"
+                                               Margin="4,8,4,2"
+                                               Foreground="{DynamicResource DangerBrush}"
+                                               TextWrapping="Wrap"
+                                               Visibility="{Binding TaskWorkspace.HasModelCatalogError, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                               AutomationProperties.LiveSetting="Polite"/>
+                                    <Button Content="Refresh models"
+                                            Command="{Binding TaskWorkspace.LoadModelsCommand}"
+                                            Style="{StaticResource CompactButton}"
+                                            HorizontalAlignment="Left"
+                                            Margin="0,8,0,0"/>
+                                </StackPanel>
+
+                                <StackPanel Visibility="{Binding TaskWorkspace.IsOptionsModelPage, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <Button Content="‹  Model"
+                                            Command="{Binding TaskWorkspace.ShowOptionsMainCommand}"
+                                            Style="{StaticResource CompactButton}"
+                                            HorizontalAlignment="Left"
+                                            Margin="0,0,0,8"/>
+                                    <ListBox ItemsSource="{Binding TaskWorkspace.ModelCatalog}"
+                                             SelectedItem="{Binding TaskWorkspace.SelectedModel, Mode=TwoWay}"
+                                             MaxHeight="360"
+                                             BorderThickness="0"
+                                             Background="Transparent"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                             AutomationProperties.Name="Available models">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="8,4"
+                                                            MaxHeight="44"
+                                                            ToolTip="{Binding AvailabilityMessage}">
+                                                    <TextBlock Text="{Binding DisplayName}"
+                                                               FontWeight="SemiBold"
+                                                               TextWrapping="NoWrap"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding Description}"
+                                                               Foreground="{DynamicResource MutedInkBrush}"
+                                                               FontSize="11"
+                                                               TextWrapping="NoWrap"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               ToolTip="{Binding Description}"
+                                                               Margin="0,2,0,0"/>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+
+                                <StackPanel Visibility="{Binding TaskWorkspace.IsOptionsReasoningPage, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <Button Content="‹  Reasoning"
+                                            Command="{Binding TaskWorkspace.ShowOptionsMainCommand}"
+                                            Style="{StaticResource CompactButton}"
+                                            HorizontalAlignment="Left"
+                                            Margin="0,0,0,8"/>
+                                    <TextBlock Text="{Binding TaskWorkspace.SelectedModel.DisplayName}"
+                                               Foreground="{DynamicResource MutedInkBrush}"
+                                               Margin="8,0,8,6"/>
+                                    <ListBox ItemsSource="{Binding TaskWorkspace.ReasoningOptions}"
+                                             SelectedItem="{Binding TaskWorkspace.SelectedReasoning, Mode=TwoWay}"
+                                             MaxHeight="330"
+                                             BorderThickness="0"
+                                             Background="Transparent"
+                                             AutomationProperties.Name="Supported reasoning efforts">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="8,6">
+                                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource MutedInkBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Popup>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="10,0,0,0">
+                        <Button Content="{Binding TaskWorkspace.ComposerActionLabel}"
+                                Command="{Binding TaskWorkspace.SubmitCommand}"
+                                Style="{StaticResource RunTaskButton}"
+                                MinWidth="104"
+                                Visibility="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
+                        <Button Content="Guide task"
+                                Command="{Binding TaskWorkspace.SteerCommand}"
+                                Style="{StaticResource RunTaskButton}"
+                                MinWidth="104"
+                                Visibility="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        <Button Content="Cancel"
+                                Command="{Binding TaskWorkspace.CancelCommand}"
+                                MinWidth="104"
+                                Margin="8,0,0,0"
+                                Visibility="{Binding TaskWorkspace.IsTurnRunning, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                    </StackPanel>
+                </Grid>
             </Grid>
-        </StackPanel></Border>
+        </Border>
     </Grid>
 </UserControl>

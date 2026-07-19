@@ -42,7 +42,8 @@ public sealed class AppServices
         CodexThreadWorkspace threadWorkspace,
         ITerminalService terminalService,
         IAppLogger logger,
-        IAttachmentStore attachmentStore)
+        IAttachmentStore attachmentStore,
+        WorkspaceAttachmentResolver workspaceAttachmentResolver)
     {
         SettingsStore = settingsStore;
         CodexDiscoveryService = codexDiscoveryService;
@@ -60,6 +61,7 @@ public sealed class AppServices
         TerminalService = terminalService;
         Logger = logger;
         AttachmentStore = attachmentStore;
+        WorkspaceAttachmentResolver = workspaceAttachmentResolver;
     }
 
     public ISettingsStore SettingsStore { get; }
@@ -94,6 +96,8 @@ public sealed class AppServices
 
     public IAttachmentStore AttachmentStore { get; }
 
+    public WorkspaceAttachmentResolver WorkspaceAttachmentResolver { get; }
+
     public static AppServices Create()
     {
         var appDataDirectory = SystemPaths.AppDataDirectory;
@@ -122,6 +126,7 @@ public sealed class AppServices
         var threadWorkspace = new CodexThreadWorkspace();
         var terminalService = new WindowsConPtyTerminalService(logger);
         var attachmentStore = new LocalAttachmentStore(Path.Combine(appDataDirectory, "attachments"), logger);
+        var workspaceAttachmentResolver = new WorkspaceAttachmentResolver();
 
         logger.Log(AppLogLevel.Information, "app_services_created", "Application services were created.");
 
@@ -141,6 +146,7 @@ public sealed class AppServices
             threadWorkspace,
             terminalService,
             logger,
-            attachmentStore);
+            attachmentStore,
+            workspaceAttachmentResolver);
     }
 }

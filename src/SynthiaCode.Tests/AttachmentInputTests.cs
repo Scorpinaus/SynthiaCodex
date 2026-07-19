@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using SynthiaCode.App.Services;
@@ -18,8 +19,10 @@ internal static class AttachmentInputTests
     public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
     [
         ("attachment protocol serializes ordered multimodal input", ProtocolSerializesOrderedInputAsync),
+        ("attachment protocol serializes file and folder mentions", ProtocolSerializesMentionsAsync),
         ("model catalog advertises image input capability", ModelCatalogAdvertisesImageCapabilityAsync),
         ("managed attachment store copies validates and deduplicates images", StoreCopiesValidatesAndDeduplicatesAsync),
+        ("workspace attachment resolver contains files and folders", WorkspaceResolverContainsReferencesAsync),
         ("attachment references survive queue and settings snapshots", ReferencesSurviveQueueAndSettingsSnapshotsAsync),
         ("composer attachment state validates model capability", ComposerAttachmentStateValidatesCapabilityAsync),
         ("task view exposes attachment picker previews and drop target", TaskViewExposesAttachmentSurfaceAsync)
@@ -60,6 +63,47 @@ internal static class AttachmentInputTests
         Assert(ReadString(steer, "params.input.0.path") == imagePath, "steer image path");
         transport.ServerSend("""{"id":2,"result":{"turnId":"turn_images"}}""");
         Assert((await steerTask).TurnId == "turn_images", "steer result");
+    }
+
+    private static async Task ProtocolSerializesMentionsAsync()
+    {
+        await using var transport = new FakeAppServerTransport();
+        await using var client = new CodexAppServerClient(
+            transport,
+            new CodexAppServerClientMetadata("attachment_tests", "Attachment Tests", "1.0"));
+        await InitializeAsync(client, transport);
+
+        var filePath = Path.GetFullPath(@"C:\Repo\src\App.cs");
+        var folderPath = Path.GetFullPath(@"C:\Repo\src");
+        var startTask = client.StartTurnAsync(new CodexTurnStartRequest(
+            "thr_mentions",
+            [
+                new CodexTextInput("Review these"),
+                new CodexMentionInput("src/App.cs", filePath),
+                new CodexMentionInput("src", folderPath)
+            ],
+            @"C:\Repo",
+            CodexSandbox.WorkspaceWrite));
+
+        await transport.WaitForClientMessageCountAsync(3);
+        var start = JsonNode.Parse(transport.ClientMessages[2])!.AsObject();
+        Assert(ReadString(start, "params.input.1.type") == "mention", "file mention type");
+        Assert(ReadString(start, "params.input.1.name") == "src/App.cs", "file mention name");
+        Assert(ReadString(start, "params.input.1.path") == filePath, "file mention path");
+        Assert(ReadString(start, "params.input.2.type") == "mention", "folder mention type");
+        transport.ServerSend("""{"id":1,"result":{"turn":{"id":"turn_mentions"}}}""");
+        await startTask;
+
+        var steerTask = client.SteerTurnAsync(new CodexTurnSteerRequest(
+            "thr_mentions",
+            "turn_mentions",
+            [new CodexMentionInput("src/App.cs", filePath)]));
+        await transport.WaitForClientMessageCountAsync(4);
+        var steer = JsonNode.Parse(transport.ClientMessages[3])!.AsObject();
+        Assert(ReadString(steer, "params.input.0.type") == "mention", "steer mention type");
+        Assert(ReadString(steer, "params.input.0.path") == filePath, "steer mention path");
+        transport.ServerSend("""{"id":2,"result":{"turnId":"turn_mentions"}}""");
+        await steerTask;
     }
 
     private static async Task ModelCatalogAdvertisesImageCapabilityAsync()
@@ -107,11 +151,53 @@ internal static class AttachmentInputTests
         await AssertThrowsAsync<InvalidDataException>(() => store.ImportFileAsync(invalid), "invalid image rejected");
     }
 
+    private static Task WorkspaceResolverContainsReferencesAsync()
+    {
+        using var workspace = TempWorkspace.Create();
+        var sourceFolder = Path.Combine(workspace.Root, "src");
+        Directory.CreateDirectory(sourceFolder);
+        var sourceFile = Path.Combine(sourceFolder, "App.cs");
+        File.WriteAllText(sourceFile, "class App { }");
+        var sibling = Path.Combine(Path.GetDirectoryName(workspace.Root)!, Path.GetFileName(workspace.Root) + "-sibling");
+        Directory.CreateDirectory(sibling);
+        var outsideFile = Path.Combine(sibling, "outside.cs");
+        File.WriteAllText(outsideFile, "outside");
+
+        try
+        {
+            var resolver = new WorkspaceAttachmentResolver();
+            var file = resolver.Resolve(workspace.Root, sourceFile, AttachmentKind.File);
+            var folder = resolver.Resolve(workspace.Root, sourceFolder, AttachmentKind.Folder);
+            Assert(file.Kind == AttachmentKind.File && file.SourceKind == AttachmentSourceKind.WorkspaceReference, "file reference kind");
+            Assert(file.WorkspaceRelativePath == "src/App.cs", "file path stored relative");
+            Assert(folder.Kind == AttachmentKind.Folder && folder.WorkspaceRelativePath == "src", "folder path stored relative");
+            AssertThrows<InvalidDataException>(
+                () => resolver.Resolve(workspace.Root, outsideFile, AttachmentKind.File),
+                "sibling prefix path rejected");
+            AssertThrows<InvalidDataException>(
+                () => resolver.Resolve(workspace.Root, workspace.Root, AttachmentKind.Folder),
+                "workspace root folder rejected");
+        }
+        finally
+        {
+            Directory.Delete(sibling, recursive: true);
+        }
+        return Task.CompletedTask;
+    }
+
     private static Task ReferencesSurviveQueueAndSettingsSnapshotsAsync()
     {
         var image = Reference("objects/aa/image.png");
+        var file = new AttachmentReference
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Kind = AttachmentKind.File,
+            SourceKind = AttachmentSourceKind.WorkspaceReference,
+            DisplayName = "App.cs",
+            WorkspaceRelativePath = "src/App.cs"
+        };
         var queue = new CodexFollowUpQueue();
-        var queued = queue.Enqueue("Inspect it", Options(@"D:\Repo"), [image]);
+        var queued = queue.Enqueue("Inspect it", Options(@"D:\Repo"), [image, file]);
         var settings = new AppSettings
         {
             ProjectThreads =
@@ -127,7 +213,7 @@ internal static class AttachmentInputTests
                         {
                             TurnId = "turn_image",
                             UserPrompt = "Inspect it",
-                            UserImages = [image]
+                            UserAttachments = [image, file]
                         }
                     ]
                 }
@@ -138,7 +224,7 @@ internal static class AttachmentInputTests
                 {
                     ProjectPath = @"D:\Repo",
                     ThreadId = "thr_image",
-                    Images = [image]
+                    Attachments = [image, file]
                 }
             ]
         };
@@ -146,9 +232,21 @@ internal static class AttachmentInputTests
         var snapshot = AppSettingsSnapshot.Create(settings);
         image.DisplayName = "mutated.png";
         var persisted = snapshot.ProjectThreads.Single();
-        Assert(persisted.QueuedFollowUps.Single().Images.Single().DisplayName == "image.png", "queue image deep copied");
-        Assert(persisted.ConversationTurns.Single().UserImages.Single().DisplayName == "image.png", "turn image deep copied");
-        Assert(snapshot.ComposerAttachmentDrafts.Single().Images.Single().DisplayName == "image.png", "draft image deep copied");
+        Assert(persisted.QueuedFollowUps.Single().Attachments[0].DisplayName == "image.png", "queue image deep copied");
+        Assert(persisted.QueuedFollowUps.Single().Attachments[1].WorkspaceRelativePath == "src/App.cs", "queue file copied");
+        Assert(persisted.ConversationTurns.Single().UserAttachments[0].DisplayName == "image.png", "turn image deep copied");
+        Assert(snapshot.ComposerAttachmentDrafts.Single().Attachments[1].WorkspaceRelativePath == "src/App.cs", "draft file deep copied");
+        var json = JsonSerializer.Serialize(snapshot);
+        Assert(json.Contains("\"Attachments\"", StringComparison.Ordinal), "v2 attachment property is serialized");
+        Assert(json.Contains("\"UserAttachments\"", StringComparison.Ordinal), "v2 turn attachment property is serialized");
+        Assert(!json.Contains("\"Images\"", StringComparison.Ordinal), "legacy image property is not written");
+        Assert(!json.Contains("\"UserImages\"", StringComparison.Ordinal), "legacy turn image property is not written");
+
+        var legacy = JsonSerializer.Deserialize<AppSettings>(
+            """{"ComposerAttachmentDrafts":[{"ProjectPath":"D:\\Repo","ThreadId":"thr","Images":[{"Id":"legacy","StorageKey":"objects/legacy.png","DisplayName":"legacy.png","ByteLength":12}]}]}""")!;
+        var migrated = legacy.ComposerAttachmentDrafts.Single().Attachments.Single();
+        Assert(migrated.Kind == AttachmentKind.Image, "legacy attachment defaults to image");
+        Assert(migrated.SourceKind == AttachmentSourceKind.ManagedCopy, "legacy attachment defaults to managed copy");
         return Task.CompletedTask;
     }
 
@@ -176,6 +274,17 @@ internal static class AttachmentInputTests
 
         viewModel.RemoveAttachmentCommand.Execute(image);
         Assert(!viewModel.HasAttachments && viewModel.CanSubmitAttachments, "removing image clears capability error");
+
+        var file = new AttachmentReference
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Kind = AttachmentKind.File,
+            SourceKind = AttachmentSourceKind.WorkspaceReference,
+            DisplayName = "App.cs",
+            WorkspaceRelativePath = "src/App.cs"
+        };
+        viewModel.AddAttachment(file);
+        Assert(viewModel.CanSubmitAttachments, "text-only model permits workspace file mentions");
         return Task.CompletedTask;
     }
 
@@ -200,6 +309,8 @@ internal static class AttachmentInputTests
         resources["ConversationActivityDetailText"] = new Style(typeof(TextBlock));
         var view = new TaskView();
         Assert(view.FindName("AttachImagesButton") is FrameworkElement, "attach button exists");
+        Assert(view.FindName("AttachFilesButton") is FrameworkElement, "attach files button exists");
+        Assert(view.FindName("AttachFolderButton") is FrameworkElement, "attach folder button exists");
         Assert(view.FindName("AttachmentPreviewList") is FrameworkElement, "attachment preview list exists");
         Assert(view.FindName("ComposerDropTarget") is FrameworkElement { AllowDrop: true }, "composer accepts drops");
     });
@@ -216,6 +327,8 @@ internal static class AttachmentInputTests
     private static AttachmentReference Reference(string storageKey) => new()
     {
         Id = Guid.NewGuid().ToString("N"),
+        Kind = AttachmentKind.Image,
+        SourceKind = AttachmentSourceKind.ManagedCopy,
         StorageKey = storageKey,
         DisplayName = "image.png",
         MediaType = "image/png",
@@ -252,6 +365,19 @@ internal static class AttachmentInputTests
         try
         {
             await action();
+        }
+        catch (T)
+        {
+            return;
+        }
+        throw new InvalidOperationException(message);
+    }
+
+    private static void AssertThrows<T>(Action action, string message) where T : Exception
+    {
+        try
+        {
+            action();
         }
         catch (T)
         {

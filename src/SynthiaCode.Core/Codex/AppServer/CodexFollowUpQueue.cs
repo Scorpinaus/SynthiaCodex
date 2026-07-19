@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json.Serialization;
 using SynthiaCode.Core.Attachments;
 
 namespace SynthiaCode.Core.Codex.AppServer;
@@ -68,7 +69,28 @@ public sealed class QueuedFollowUpSnapshot
     public QueuedFollowUpState State { get; set; }
     public string? LastError { get; set; }
     public QueuedTurnOptionsSnapshot Options { get; set; } = new();
-    public List<AttachmentReference> Images { get; set; } = [];
+    public List<AttachmentReference> Attachments { get; set; } = [];
+
+    [JsonIgnore]
+    public List<AttachmentReference> Images
+    {
+        get => Attachments;
+        set => Attachments = value ?? [];
+    }
+
+    [JsonPropertyName("Images")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<AttachmentReference>? LegacyImages
+    {
+        get => null;
+        set
+        {
+            if (Attachments.Count == 0 && value is not null)
+            {
+                Attachments = value;
+            }
+        }
+    }
 
     public QueuedFollowUpSnapshot Clone() => new()
     {
@@ -79,7 +101,7 @@ public sealed class QueuedFollowUpSnapshot
         State = State,
         LastError = LastError,
         Options = Options.Clone(),
-        Images = [.. Images.Select(image => image.Clone())]
+        Attachments = [.. Attachments.Select(attachment => attachment.Clone())]
     };
 }
 
@@ -151,9 +173,13 @@ public sealed class QueuedFollowUp : INotifyPropertyChanged
 
     public QueuedTurnOptionsSnapshot Options { get; init; } = new();
 
-    public IReadOnlyList<AttachmentReference> Images { get; init; } = [];
+    public IReadOnlyList<AttachmentReference> Attachments { get; init; } = [];
 
-    public bool HasImages => Images.Count > 0;
+    public IReadOnlyList<AttachmentReference> Images => Attachments;
+
+    public bool HasAttachments => Attachments.Count > 0;
+
+    public bool HasImages => Attachments.Any(attachment => attachment.Kind == AttachmentKind.Image);
 
     public string StateLabel => State switch
     {
@@ -176,7 +202,7 @@ public sealed class QueuedFollowUp : INotifyPropertyChanged
         State = State,
         LastError = LastError,
         Options = Options.Clone(),
-        Images = [.. Images.Select(image => image.Clone())]
+        Attachments = [.. Attachments.Select(attachment => attachment.Clone())]
     };
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
@@ -208,11 +234,11 @@ public sealed class CodexFollowUpQueue
     public QueuedFollowUp Enqueue(
         string text,
         QueuedTurnOptionsSnapshot options,
-        IEnumerable<AttachmentReference>? images = null)
+        IEnumerable<AttachmentReference>? attachments = null)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var imageList = (images ?? []).Select(image => image.Clone()).ToList();
-        var normalized = ValidateContent(text, imageList, replacingItemId: null);
+        var attachmentList = (attachments ?? []).Select(attachment => attachment.Clone()).ToList();
+        var normalized = ValidateContent(text, attachmentList, replacingItemId: null);
         if (Items.Count >= MaximumItems)
         {
             throw new InvalidOperationException($"A thread can queue at most {MaximumItems} follow-ups.");
@@ -228,7 +254,7 @@ public sealed class CodexFollowUpQueue
             UpdatedAt = now,
             State = QueuedFollowUpState.Pending,
             Options = options.Clone(),
-            Images = imageList
+            Attachments = attachmentList
         };
         Items.Add(item);
         return item;
@@ -239,7 +265,7 @@ public sealed class CodexFollowUpQueue
         Items.Clear();
         foreach (var snapshot in (snapshots ?? []).Take(MaximumItems))
         {
-            if (string.IsNullOrWhiteSpace(snapshot.Text) && snapshot.Images.Count == 0)
+            if (string.IsNullOrWhiteSpace(snapshot.Text) && snapshot.Attachments.Count == 0)
             {
                 continue;
             }
@@ -259,7 +285,7 @@ public sealed class CodexFollowUpQueue
                     ? InterruptedDeliveryMessage
                     : snapshot.LastError,
                 Options = (snapshot.Options ?? new QueuedTurnOptionsSnapshot()).Clone(),
-                Images = [.. snapshot.Images.Select(image => image.Clone())]
+                Attachments = [.. snapshot.Attachments.Select(attachment => attachment.Clone())]
             });
         }
     }
@@ -271,7 +297,7 @@ public sealed class CodexFollowUpQueue
     {
         var item = GetRequired(id);
         EnsureMutable(item);
-        item.Text = ValidateContent(text, item.Images, id);
+        item.Text = ValidateContent(text, item.Attachments, id);
         item.EditText = item.Text;
         item.UpdatedAt = DateTimeOffset.UtcNow;
     }
@@ -359,27 +385,38 @@ public sealed class CodexFollowUpQueue
 
     private string ValidateContent(
         string? text,
-        IReadOnlyCollection<AttachmentReference> images,
+        IReadOnlyCollection<AttachmentReference> attachments,
         string? replacingItemId)
     {
         var normalized = text?.Trim() ?? string.Empty;
-        if (normalized.Length == 0 && images.Count == 0)
+        if (normalized.Length == 0 && attachments.Count == 0)
         {
             throw new InvalidOperationException("A queued follow-up cannot be empty.");
         }
 
-        if (images.Count > AttachmentLimits.MaximumImagesPerInput)
+        if (attachments.Count > AttachmentLimits.MaximumAttachmentsPerInput)
+        {
+            throw new InvalidOperationException($"A queued follow-up can contain at most {AttachmentLimits.MaximumAttachmentsPerInput} attachments.");
+        }
+        if (attachments.Count(attachment => attachment.IsImage) > AttachmentLimits.MaximumImagesPerInput)
         {
             throw new InvalidOperationException($"A queued follow-up can contain at most {AttachmentLimits.MaximumImagesPerInput} images.");
         }
-        if (images.Any(image => string.IsNullOrWhiteSpace(image.StorageKey) || image.ByteLength <= 0))
+        if (attachments.Count(attachment => attachment.IsFolder) > AttachmentLimits.MaximumFoldersPerInput)
         {
-            throw new InvalidOperationException("A queued follow-up contains an invalid image reference.");
+            throw new InvalidOperationException($"A queued follow-up can contain at most {AttachmentLimits.MaximumFoldersPerInput} folders.");
         }
-        var imageBytes = images.Sum(image => image.ByteLength);
-        if (imageBytes > AttachmentLimits.MaximumBytesPerInput)
+        if (attachments.Any(attachment => !IsValidAttachmentReference(attachment)))
         {
-            throw new InvalidOperationException($"Queued images cannot exceed {AttachmentLimits.MaximumBytesPerInput / (1024 * 1024)} MiB per follow-up.");
+            throw new InvalidOperationException("A queued follow-up contains an invalid attachment reference.");
+        }
+
+        var managedBytes = attachments
+            .Where(attachment => attachment.SourceKind == AttachmentSourceKind.ManagedCopy)
+            .Sum(attachment => attachment.ByteLength);
+        if (managedBytes > AttachmentLimits.MaximumBytesPerInput)
+        {
+            throw new InvalidOperationException($"Queued managed attachments cannot exceed {AttachmentLimits.MaximumBytesPerInput / (1024 * 1024)} MiB per follow-up.");
         }
 
         var byteCount = Encoding.UTF8.GetByteCount(normalized);
@@ -397,6 +434,32 @@ public sealed class CodexFollowUpQueue
         }
 
         return normalized;
+    }
+
+    private static bool IsValidAttachmentReference(AttachmentReference attachment)
+    {
+        if (attachment.SourceKind == AttachmentSourceKind.ManagedCopy)
+        {
+            return attachment.IsImage
+                && !string.IsNullOrWhiteSpace(attachment.StorageKey)
+                && attachment.ByteLength > 0;
+        }
+
+        if (attachment.SourceKind != AttachmentSourceKind.WorkspaceReference
+            || (!attachment.IsFile && !attachment.IsFolder)
+            || string.IsNullOrWhiteSpace(attachment.WorkspaceRelativePath)
+            || Path.IsPathRooted(attachment.WorkspaceRelativePath)
+            || Encoding.UTF8.GetByteCount(attachment.WorkspaceRelativePath) > AttachmentLimits.MaximumWorkspacePathBytes)
+        {
+            return false;
+        }
+
+        var segments = attachment.WorkspaceRelativePath
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length > 0
+            && segments.All(segment => segment is not "." and not "..")
+            && string.IsNullOrWhiteSpace(attachment.StorageKey);
     }
 
     private void SetState(string id, QueuedFollowUpState state, string? error)

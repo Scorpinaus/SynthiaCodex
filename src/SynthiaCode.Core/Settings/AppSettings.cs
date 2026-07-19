@@ -3,6 +3,7 @@ using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Codex.AppServer;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization;
 
 namespace SynthiaCode.Core.Settings;
 
@@ -30,6 +31,8 @@ public sealed class AppSettings
 
     public int ExecutionPolicySchemaVersion { get; set; }
 
+    public int AttachmentSchemaVersion { get; set; } = 2;
+
     public bool IsProjectRailOpen { get; set; } = true;
 
     public bool IsDetailsPaneOpen { get; set; }
@@ -45,14 +48,35 @@ public sealed class ComposerAttachmentDraftSnapshot
 {
     public string ProjectPath { get; set; } = string.Empty;
     public string? ThreadId { get; set; }
-    public List<AttachmentReference> Images { get; set; } = [];
+    public List<AttachmentReference> Attachments { get; set; } = [];
+
+    [JsonIgnore]
+    public List<AttachmentReference> Images
+    {
+        get => Attachments;
+        set => Attachments = value ?? [];
+    }
+
+    [JsonPropertyName("Images")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<AttachmentReference>? LegacyImages
+    {
+        get => null;
+        set
+        {
+            if (Attachments.Count == 0 && value is not null)
+            {
+                Attachments = value;
+            }
+        }
+    }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public ComposerAttachmentDraftSnapshot Clone() => new()
     {
         ProjectPath = ProjectPath,
         ThreadId = ThreadId,
-        Images = [.. Images.Select(image => image.Clone())],
+        Attachments = [.. Attachments.Select(attachment => attachment.Clone())],
         UpdatedAt = UpdatedAt
     };
 }

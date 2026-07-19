@@ -88,7 +88,7 @@
 | Built-in Browser | No shared in-app browser, website permissions, comments, downloads, or browser developer mode | **Missing** | Requires a browser surface plus Browser tool/plugin integration. |
 | Chrome integration | No Chrome extension or signed-in Chrome control | **Missing** | ChatGPT can operate existing Chrome sessions through its extension. |
 | Computer Use | No screen/desktop control surface | **Missing** | ChatGPT can control supported desktop apps and browser UI with explicit permissions. |
-| File attachments and image inputs | Picker, clipboard/file paste, Explorer drag/drop, ordered previews, model-capability checks, image-only or mixed input, queued images, transcript previews, and content-addressed managed persistence | **Near** | Add bounded thumbnail decoding and materialize images found only in external app-server history; generic document attachment is not supported by the current input protocol. |
+| File attachments and image inputs | Image/file/folder pickers, clipboard file-list paste, Explorer drag/drop, ordered type-specific previews, image model-capability checks, attachment-only or mixed input, queued attachments, transcript previews, managed image persistence, and contained live workspace references | **Near** | External regular-file snapshots, recursive external folders, app-server history mention materialization, bounded thumbnail decoding, and installed-runtime folder-mention smoke coverage remain follow-up work. |
 | Artifact/file viewer | Markdown text and safe links render; no document/spreadsheet/slide/PDF artifact viewer | **Missing** | ChatGPT can create and preview files in conversation. |
 | Image generation, Sites, and visualizations | No dedicated generation or interactive artifact surfaces | **Missing** | These are broader ChatGPT capabilities rather than core local coding requirements. |
 | Scheduled tasks | No create/manage/run history or recurring local project tasks | **Missing** | ChatGPT Scheduled supports local/worktree runs, chat continuity, skills, plugins, and RRULE schedules. |
@@ -137,13 +137,18 @@ P0 attachments and image input moved from **Missing** to **Near**:
 4. Model `inputModalities` blocks unsupported image submission without discarding the draft.
 5. Content-addressed managed copies survive source deletion, deduplicate, enforce format/size/dimension/store limits, and persist safely in drafts, queued follow-ups, and conversation snapshots.
 6. Startup rehydrates managed paths and performs reference-aware staging/orphan cleanup; unavailable files fail visibly.
+7. Workspace files and folders now share the ordered attachment strip and can be added through dedicated pickers, clipboard file lists, or Explorer drag/drop.
+8. File/folder references are stored as workspace-relative live references, revalidated against the owning thread or queued workspace, and serialized as app-server `mention` inputs for start and steer.
+9. Containment rejects the workspace root, sibling-prefix escapes, wildcards, alternate data streams, missing paths, and reparse targets outside the workspace; external non-image files and external folders remain fail-closed.
+10. Generic attachment metadata persists through drafts, queues, turns, forks, and settings snapshots while legacy `Images`/`UserImages` settings continue to load.
+11. Text-only models continue to accept file/folder mentions; image capability gating applies only when an image is present.
 
 ## Recommended parity backlog
 
 ### P0 — Complete the core local coding experience
 
 1. **Queued follow-ups hardening (core implemented):** refresh and re-resolve model availability and managed permission policy immediately before background dispatch, then add live disconnect/reconnect smoke coverage.
-2. **Attachments and image input (core implemented):** add bounded thumbnail decoding and external app-server history image materialization as follow-up hardening.
+2. **Attachments and image input (workspace core implemented):** add installed-runtime folder-mention smoke coverage, bounded thumbnail decoding, app-server history attachment materialization, and permission-gated external regular-file snapshots as follow-up hardening. Recursive external-folder snapshotting remains intentionally out of scope.
 3. **Structured Git review:** add hunk staging/revert, inline diff comments, and a dedicated review target flow.
 4. **Push and pull requests:** add native branch push and GitHub PR creation/status.
 5. **Worktree lifecycle:** add starting-branch selection, setup scripts/actions, Local/Worktree handoff, snapshots/restore, and retention settings.

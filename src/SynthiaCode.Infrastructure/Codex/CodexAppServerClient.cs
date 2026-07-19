@@ -1324,7 +1324,13 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                 case CodexImageInput image when image.DataUrl.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase):
                     hasContent = true;
                     break;
-                case CodexTextInput or CodexLocalImageInput or CodexImageInput:
+                case CodexMentionInput mention when
+                    !string.IsNullOrWhiteSpace(mention.Name) &&
+                    !string.IsNullOrWhiteSpace(mention.Path) &&
+                    Path.IsPathRooted(mention.Path):
+                    hasContent = true;
+                    break;
+                case CodexTextInput or CodexLocalImageInput or CodexImageInput or CodexMentionInput:
                     break;
                 default:
                     throw new ArgumentException("The prompt contains an unsupported input part.", parameterName);
@@ -1332,7 +1338,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
         if (!hasContent)
         {
-            throw new ArgumentException("At least one non-empty text or image input is required.", parameterName);
+            throw new ArgumentException("At least one non-empty text or attachment input is required.", parameterName);
         }
     }
 
@@ -1357,6 +1363,15 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                 {
                     ["type"] = "image",
                     ["url"] = image.DataUrl
+                },
+                CodexMentionInput mention when
+                    !string.IsNullOrWhiteSpace(mention.Name) &&
+                    !string.IsNullOrWhiteSpace(mention.Path) &&
+                    Path.IsPathRooted(mention.Path) => new JsonObject
+                {
+                    ["type"] = "mention",
+                    ["name"] = mention.Name,
+                    ["path"] = mention.Path
                 },
                 _ => null
             };

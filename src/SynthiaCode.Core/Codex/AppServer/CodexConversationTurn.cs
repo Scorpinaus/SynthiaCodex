@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization;
 using SynthiaCode.Core.Attachments;
 
 namespace SynthiaCode.Core.Codex.AppServer;
@@ -18,6 +19,7 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
     public CodexConversationTurn()
     {
         Activity.CollectionChanged += OnActivityChanged;
+        UserAttachments.CollectionChanged += OnUserAttachmentsChanged;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -76,9 +78,13 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
 
     public ObservableCollection<CodexTimelineItem> Activity { get; } = [];
 
-    public ObservableCollection<AttachmentReference> UserImages { get; } = [];
+    public ObservableCollection<AttachmentReference> UserAttachments { get; } = [];
 
-    public bool HasUserImages => UserImages.Count > 0;
+    public ObservableCollection<AttachmentReference> UserImages => UserAttachments;
+
+    public bool HasUserAttachments => UserAttachments.Count > 0;
+
+    public bool HasUserImages => HasUserAttachments;
 
     public bool IsActivityExpanded
     {
@@ -99,7 +105,7 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
         StartedAt = StartedAt,
         CompletedAt = CompletedAt,
         Activity = [.. Activity],
-        UserImages = [.. UserImages.Select(image => image.Clone())]
+        UserAttachments = [.. UserAttachments.Select(attachment => attachment.Clone())]
     };
 
     public static CodexConversationTurn FromSnapshot(CodexConversationTurnSnapshot snapshot)
@@ -117,9 +123,9 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
         {
             turn.Activity.Add(UnicodeTextNormalizer.RepairLegacyMojibake(item));
         }
-        foreach (var image in snapshot.UserImages)
+        foreach (var attachment in snapshot.UserAttachments)
         {
-            turn.UserImages.Add(image.Clone());
+            turn.UserAttachments.Add(attachment.Clone());
         }
 
         return turn;
@@ -129,6 +135,12 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
     {
         OnPropertyChanged(nameof(HasActivity));
         OnPropertyChanged(nameof(ActivitySummary));
+    }
+
+    private void OnUserAttachmentsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasUserAttachments));
+        OnPropertyChanged(nameof(HasUserImages));
     }
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
@@ -156,5 +168,26 @@ public sealed class CodexConversationTurnSnapshot
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAt { get; set; }
     public List<CodexTimelineItem> Activity { get; set; } = [];
-    public List<AttachmentReference> UserImages { get; set; } = [];
+    public List<AttachmentReference> UserAttachments { get; set; } = [];
+
+    [JsonIgnore]
+    public List<AttachmentReference> UserImages
+    {
+        get => UserAttachments;
+        set => UserAttachments = value ?? [];
+    }
+
+    [JsonPropertyName("UserImages")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<AttachmentReference>? LegacyUserImages
+    {
+        get => null;
+        set
+        {
+            if (UserAttachments.Count == 0 && value is not null)
+            {
+                UserAttachments = value;
+            }
+        }
+    }
 }

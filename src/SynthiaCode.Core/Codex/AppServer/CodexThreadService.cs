@@ -127,7 +127,7 @@ public sealed class CodexThreadService
 
     public CodexConversationTurn BeginTurn(
         string prompt,
-        IEnumerable<AttachmentReference>? images = null)
+        IEnumerable<AttachmentReference>? attachments = null)
     {
         lock (stateGate)
         {
@@ -137,9 +137,9 @@ public sealed class CodexThreadService
                 Status = CodexTurnStatus.Running,
                 StartedAt = DateTimeOffset.UtcNow
             };
-            foreach (var image in images ?? [])
+            foreach (var attachment in attachments ?? [])
             {
-                turn.UserImages.Add(image.Clone());
+                turn.UserAttachments.Add(attachment.Clone());
             }
             AddBounded(ConversationTurns, turn, MaximumConversationTurns);
             ActiveTurnId = null;
@@ -169,11 +169,11 @@ public sealed class CodexThreadService
                 {
                     AddBounded(existing.Activity, item, MaximumTimelineItems);
                 }
-                if (existing.UserImages.Count == 0)
+                if (existing.UserAttachments.Count == 0)
                 {
-                    foreach (var image in pending.UserImages)
+                    foreach (var attachment in pending.UserAttachments)
                     {
-                        existing.UserImages.Add(image.Clone());
+                        existing.UserAttachments.Add(attachment.Clone());
                     }
                 }
                 ConversationTurns.Remove(pending);
@@ -253,12 +253,12 @@ public sealed class CodexThreadService
             }
 
             turn.UserPrompt = snapshot.UserPrompt;
-            if (snapshot.UserImages.Count > 0)
+            if (snapshot.UserAttachments.Count > 0)
             {
-                turn.UserImages.Clear();
-                foreach (var image in snapshot.UserImages)
+                turn.UserAttachments.Clear();
+                foreach (var attachment in snapshot.UserAttachments)
                 {
-                    turn.UserImages.Add(image.Clone());
+                    turn.UserAttachments.Add(attachment.Clone());
                 }
             }
             turn.AssistantResponse = UnicodeTextNormalizer.RepairLegacyMojibake(snapshot.AssistantResponse);

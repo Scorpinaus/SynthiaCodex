@@ -56,16 +56,20 @@
                                     <StackPanel>
                                         <TextBlock Text="You" Style="{StaticResource ConversationRoleText}" Foreground="{DynamicResource SignalBrush}" Margin="0,0,0,6"/>
                                         <TextBlock Text="{Binding UserPrompt}" Style="{StaticResource ConversationBodyText}"/>
-                                        <ItemsControl ItemsSource="{Binding UserImages}"
+                                        <ItemsControl ItemsSource="{Binding UserAttachments}"
                                                       Margin="0,8,0,0"
-                                                      Visibility="{Binding HasUserImages, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                      Visibility="{Binding HasUserAttachments, Converter={StaticResource BooleanToVisibilityConverter}}">
                                             <ItemsControl.ItemsPanel>
                                                 <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
                                             </ItemsControl.ItemsPanel>
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
-                                                    <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="5" Margin="0,0,8,8" Padding="3">
-                                                        <Image Source="{Binding ManagedPath}" Width="108" Height="80" Stretch="Uniform" ToolTip="{Binding DisplayName}"/>
+                                                    <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="5" Margin="0,0,8,8" Padding="6">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <Image Source="{Binding ManagedPath}" Width="108" Height="80" Stretch="Uniform" ToolTip="{Binding DisplayName}" Visibility="{Binding IsImage, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                                            <TextBlock Text="{Binding KindLabel}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,6,0" Visibility="{Binding IsImage, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
+                                                            <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="200"/>
+                                                        </StackPanel>
                                                     </Border>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
@@ -266,7 +270,7 @@
                     <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
                         <ItemsControl x:Name="AttachmentPreviewList"
                                       ItemsSource="{Binding TaskWorkspace.Attachments}"
-                                      AutomationProperties.Name="Attached image previews">
+                                      AutomationProperties.Name="Attachment previews">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
@@ -274,11 +278,17 @@
                                 <DataTemplate>
                                     <Border Width="152" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="6" Margin="0,0,8,0" Padding="5">
                                         <StackPanel>
-                                            <Image Source="{Binding ManagedPath}" Height="72" Stretch="Uniform" ToolTip="{Binding DisplayName}"/>
+                                            <Image Source="{Binding ManagedPath}" Height="72" Stretch="Uniform" ToolTip="{Binding DisplayName}" Visibility="{Binding IsImage, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                            <Border Height="72" Background="{DynamicResource PanelBrush}" CornerRadius="4" Visibility="{Binding IsImage, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding KindLabel}" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding WorkspaceRelativePath}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="136"/>
+                                                </StackPanel>
+                                            </Border>
                                             <TextBlock Text="{Binding DisplayName}" Margin="2,4,2,0" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Text="{Binding SizeLabel}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10" Margin="2,1,2,0"/>
+                                            <TextBlock Text="{Binding LocationLabel}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10" Margin="2,1,2,0"/>
                                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,4,0,0">
-                                                <Button Content="Open" Click="OnOpenAttachmentClick" Style="{StaticResource CompactButton}" Padding="5" ToolTip="Open managed image"/>
+                                                <Button Content="Open" Click="OnOpenAttachmentClick" Style="{StaticResource CompactButton}" Padding="5" ToolTip="Open file or reveal folder"/>
                                                 <Button Content="←" Command="{Binding DataContext.TaskWorkspace.MoveAttachmentLeftCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}" CommandParameter="{Binding}" Style="{StaticResource CompactButton}" MinWidth="30" Padding="4" ToolTip="Move image left"/>
                                                 <Button Content="→" Command="{Binding DataContext.TaskWorkspace.MoveAttachmentRightCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}" CommandParameter="{Binding}" Style="{StaticResource CompactButton}" MinWidth="30" Padding="4" Margin="3,0,0,0" ToolTip="Move image right"/>
                                                 <Button Content="Remove" Command="{Binding DataContext.TaskWorkspace.RemoveAttachmentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}" CommandParameter="{Binding}" Style="{StaticResource CompactButton}" Padding="5" Margin="3,0,0,0"/>
@@ -391,6 +401,24 @@
                                 Padding="10,4"
                                 ToolTip="Choose PNG, JPEG, GIF, or WebP images. You can also paste or drop images."
                                 AutomationProperties.Name="Attach images"/>
+                        <Button x:Name="AttachFilesButton"
+                                Content="Attach files"
+                                Click="OnAttachFilesClick"
+                                Style="{StaticResource CompactButton}"
+                                MinHeight="32"
+                                Margin="8,0,0,0"
+                                Padding="10,4"
+                                ToolTip="Attach files from the active workspace."
+                                AutomationProperties.Name="Attach files"/>
+                        <Button x:Name="AttachFolderButton"
+                                Content="Attach folder"
+                                Click="OnAttachFolderClick"
+                                Style="{StaticResource CompactButton}"
+                                MinHeight="32"
+                                Margin="8,0,0,0"
+                                Padding="10,4"
+                                ToolTip="Attach one folder inside the active workspace."
+                                AutomationProperties.Name="Attach folder"/>
                     </WrapPanel>
 
                     <Popup x:Name="ModelOptionsPopup"

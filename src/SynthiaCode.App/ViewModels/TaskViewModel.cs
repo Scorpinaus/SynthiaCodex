@@ -203,7 +203,7 @@ public sealed class TaskViewModel : ObservableObject
 
     public bool HasAttachments => Attachments.Count > 0;
 
-    public bool CanSubmitAttachments => !HasAttachments || SelectedModel?.SupportsImageInput != false;
+    public bool CanSubmitAttachments => !Attachments.Any(attachment => attachment.IsImage) || SelectedModel?.SupportsImageInput != false;
 
     public string AttachmentValidationMessage => CanSubmitAttachments
         ? string.Empty
@@ -212,22 +212,45 @@ public sealed class TaskViewModel : ObservableObject
     public void AddAttachment(AttachmentReference attachment)
     {
         ArgumentNullException.ThrowIfNull(attachment);
-        if (Attachments.Any(existing =>
-                !string.IsNullOrWhiteSpace(existing.ContentSha256) &&
-                string.Equals(existing.ContentSha256, attachment.ContentSha256, StringComparison.OrdinalIgnoreCase)))
+        if (Attachments.Any(existing => IsDuplicate(existing, attachment)))
         {
             return;
         }
-        if (Attachments.Count >= AttachmentLimits.MaximumImagesPerInput)
+        if (Attachments.Count >= AttachmentLimits.MaximumAttachmentsPerInput)
+        {
+            throw new InvalidOperationException($"A prompt can contain at most {AttachmentLimits.MaximumAttachmentsPerInput} attachments.");
+        }
+        if (attachment.IsImage && Attachments.Count(item => item.IsImage) >= AttachmentLimits.MaximumImagesPerInput)
         {
             throw new InvalidOperationException($"A prompt can contain at most {AttachmentLimits.MaximumImagesPerInput} images.");
         }
-        if (Attachments.Sum(image => image.ByteLength) + attachment.ByteLength > AttachmentLimits.MaximumBytesPerInput)
+        if (attachment.IsFolder && Attachments.Count(item => item.IsFolder) >= AttachmentLimits.MaximumFoldersPerInput)
         {
-            throw new InvalidOperationException($"Prompt images cannot exceed {AttachmentLimits.MaximumBytesPerInput / (1024 * 1024)} MiB in total.");
+            throw new InvalidOperationException($"A prompt can contain at most {AttachmentLimits.MaximumFoldersPerInput} folders.");
+        }
+        var managedBytes = Attachments
+            .Where(item => item.SourceKind == AttachmentSourceKind.ManagedCopy)
+            .Sum(item => item.ByteLength);
+        if (attachment.SourceKind == AttachmentSourceKind.ManagedCopy &&
+            managedBytes + attachment.ByteLength > AttachmentLimits.MaximumBytesPerInput)
+        {
+            throw new InvalidOperationException($"Managed prompt attachments cannot exceed {AttachmentLimits.MaximumBytesPerInput / (1024 * 1024)} MiB in total.");
         }
         Attachments.Add(attachment.Clone());
         NotifyAttachmentsChanged();
+    }
+
+    private static bool IsDuplicate(AttachmentReference left, AttachmentReference right)
+    {
+        if (left.SourceKind == AttachmentSourceKind.WorkspaceReference &&
+            right.SourceKind == AttachmentSourceKind.WorkspaceReference)
+        {
+            return left.Kind == right.Kind &&
+                string.Equals(left.WorkspaceRelativePath, right.WorkspaceRelativePath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return !string.IsNullOrWhiteSpace(left.ContentSha256) &&
+            string.Equals(left.ContentSha256, right.ContentSha256, StringComparison.OrdinalIgnoreCase);
     }
 
     public void ReplaceAttachments(IEnumerable<AttachmentReference>? attachments)

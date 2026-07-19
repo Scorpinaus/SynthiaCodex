@@ -199,7 +199,48 @@ public partial class TaskView : UserControl
         };
         if (picker.ShowDialog(Window.GetWindow(this)) == true)
         {
-            await ImportFilesAsync(picker.FileNames).ConfigureAwait(true);
+            if (DataContext is MainViewModel main)
+            {
+                await main.AddImageFilesAsync(picker.FileNames).ConfigureAwait(true);
+            }
+        }
+    }
+
+    private async void OnAttachFilesClick(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel main)
+        {
+            return;
+        }
+        var picker = new OpenFileDialog
+        {
+            Title = "Attach files from the active workspace",
+            Filter = "All files|*.*",
+            Multiselect = true,
+            CheckFileExists = true,
+            InitialDirectory = Directory.Exists(main.ActiveWorkspacePath) ? main.ActiveWorkspacePath : null
+        };
+        if (picker.ShowDialog(Window.GetWindow(this)) == true)
+        {
+            await main.AddWorkspaceFilesAsync(picker.FileNames).ConfigureAwait(true);
+        }
+    }
+
+    private async void OnAttachFolderClick(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel main)
+        {
+            return;
+        }
+        var picker = new OpenFolderDialog
+        {
+            Title = "Attach a folder from the active workspace",
+            Multiselect = false,
+            InitialDirectory = Directory.Exists(main.ActiveWorkspacePath) ? main.ActiveWorkspacePath : null
+        };
+        if (picker.ShowDialog(Window.GetWindow(this)) == true)
+        {
+            await main.AddWorkspaceFolderAsync(picker.FolderName).ConfigureAwait(true);
         }
     }
 
@@ -232,7 +273,7 @@ public partial class TaskView : UserControl
     {
         if (e.Data.GetData(DataFormats.FileDrop) is string[] paths)
         {
-            await ImportFilesAsync(paths).ConfigureAwait(true);
+            await ImportAttachmentPathsAsync(paths).ConfigureAwait(true);
         }
         e.Handled = true;
     }
@@ -248,7 +289,7 @@ public partial class TaskView : UserControl
         {
             if (Clipboard.ContainsFileDropList())
             {
-                await main.AddImageFilesAsync(Clipboard.GetFileDropList().Cast<string>()).ConfigureAwait(true);
+                await main.AddAttachmentPathsAsync(Clipboard.GetFileDropList().Cast<string>()).ConfigureAwait(true);
                 e.Handled = true;
                 return;
             }
@@ -278,13 +319,13 @@ public partial class TaskView : UserControl
         }
     }
 
-    private async Task ImportFilesAsync(IEnumerable<string> paths)
+    private async Task ImportAttachmentPathsAsync(IEnumerable<string> paths)
     {
         if (DataContext is not MainViewModel main)
         {
             return;
         }
-        await main.AddImageFilesAsync(paths).ConfigureAwait(true);
+        await main.AddAttachmentPathsAsync(paths).ConfigureAwait(true);
     }
 
     private void OnModelOptionsPreviewKeyDown(object sender, KeyEventArgs e)

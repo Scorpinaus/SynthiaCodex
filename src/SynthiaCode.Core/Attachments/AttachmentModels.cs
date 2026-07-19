@@ -4,7 +4,10 @@ namespace SynthiaCode.Core.Attachments;
 
 public static class AttachmentLimits
 {
+    public const int MaximumAttachmentsPerInput = 20;
     public const int MaximumImagesPerInput = 10;
+    public const int MaximumFoldersPerInput = 5;
+    public const int MaximumWorkspacePathBytes = 4 * 1024;
     public const long MaximumBytesPerImage = 20L * 1024 * 1024;
     public const long MaximumBytesPerInput = 50L * 1024 * 1024;
     public const long MaximumPixelCount = 50_000_000;
@@ -12,10 +15,26 @@ public static class AttachmentLimits
     public const long MaximumStoreBytes = 1024L * 1024 * 1024;
 }
 
+public enum AttachmentKind
+{
+    Image = 0,
+    File = 1,
+    Folder = 2
+}
+
+public enum AttachmentSourceKind
+{
+    ManagedCopy = 0,
+    WorkspaceReference = 1
+}
+
 public sealed class AttachmentReference
 {
     public string Id { get; set; } = string.Empty;
+    public AttachmentKind Kind { get; set; }
+    public AttachmentSourceKind SourceKind { get; set; }
     public string StorageKey { get; set; } = string.Empty;
+    public string? WorkspaceRelativePath { get; set; }
     public string DisplayName { get; set; } = string.Empty;
     public string MediaType { get; set; } = string.Empty;
     public long ByteLength { get; set; }
@@ -27,7 +46,25 @@ public sealed class AttachmentReference
     public string? ManagedPath { get; set; }
 
     [JsonIgnore]
-    public bool IsAvailable => !string.IsNullOrWhiteSpace(ManagedPath) && File.Exists(ManagedPath);
+    public bool IsAvailable => !string.IsNullOrWhiteSpace(ManagedPath) &&
+        (Kind == AttachmentKind.Folder ? Directory.Exists(ManagedPath) : File.Exists(ManagedPath));
+
+    [JsonIgnore]
+    public bool IsImage => Kind == AttachmentKind.Image;
+
+    [JsonIgnore]
+    public bool IsFile => Kind == AttachmentKind.File;
+
+    [JsonIgnore]
+    public bool IsFolder => Kind == AttachmentKind.Folder;
+
+    [JsonIgnore]
+    public string KindLabel => Kind.ToString();
+
+    [JsonIgnore]
+    public string LocationLabel => SourceKind == AttachmentSourceKind.WorkspaceReference
+        ? WorkspaceRelativePath ?? DisplayName
+        : "Managed copy";
 
     [JsonIgnore]
     public string DimensionsLabel => PixelWidth > 0 && PixelHeight > 0
@@ -42,7 +79,10 @@ public sealed class AttachmentReference
     public AttachmentReference Clone() => new()
     {
         Id = Id,
+        Kind = Kind,
+        SourceKind = SourceKind,
         StorageKey = StorageKey,
+        WorkspaceRelativePath = WorkspaceRelativePath,
         DisplayName = DisplayName,
         MediaType = MediaType,
         ByteLength = ByteLength,

@@ -89,6 +89,8 @@ public sealed record CodexImageInput(string DataUrl) : CodexUserInput;
 
 public sealed record CodexLocalImageInput(string Path) : CodexUserInput;
 
+public sealed record CodexMentionInput(string Name, string Path) : CodexUserInput;
+
 public sealed record CodexTurnStartRequest(
     string ThreadId,
     IReadOnlyList<CodexUserInput> Inputs,

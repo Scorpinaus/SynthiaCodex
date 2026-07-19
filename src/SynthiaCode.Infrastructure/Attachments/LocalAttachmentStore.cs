@@ -122,6 +122,8 @@ public sealed class LocalAttachmentStore : IAttachmentStore
             return new AttachmentReference
             {
                 Id = Guid.NewGuid().ToString("N"),
+                Kind = AttachmentKind.Image,
+                SourceKind = AttachmentSourceKind.ManagedCopy,
                 StorageKey = storageKey,
                 DisplayName = SanitizeDisplayName(displayName, metadata.Extension),
                 MediaType = metadata.MediaType,

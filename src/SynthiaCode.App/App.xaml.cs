@@ -47,7 +47,8 @@ public partial class App : Application
             services.ThreadWorkspace,
             services.TerminalService,
             services.Logger,
-            services.AttachmentStore);
+            services.AttachmentStore,
+            services.WorkspaceAttachmentResolver);
 
         MainWindow = new MainWindow(mainViewModel);
         MainWindow.Show();

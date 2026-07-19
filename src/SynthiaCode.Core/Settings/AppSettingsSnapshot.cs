@@ -21,6 +21,7 @@ public static class AppSettingsSnapshot
             PermissionMode = source.PermissionMode,
             CustomPermissionProfileId = source.CustomPermissionProfileId,
             ExecutionPolicySchemaVersion = source.ExecutionPolicySchemaVersion,
+            AttachmentSchemaVersion = source.AttachmentSchemaVersion,
             IsProjectRailOpen = source.IsProjectRailOpen,
             IsDetailsPaneOpen = source.IsDetailsPaneOpen,
             RecentProjects = [.. source.RecentProjects],
@@ -61,6 +62,6 @@ public static class AppSettingsSnapshot
         StartedAt = source.StartedAt,
         CompletedAt = source.CompletedAt,
         Activity = [.. source.Activity],
-        UserImages = [.. source.UserImages.Select(image => image.Clone())]
+        UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())]
     };
 }

@@ -13,6 +13,7 @@ using SynthiaCode.Core.Projects;
 using SynthiaCode.Core.Settings;
 using SynthiaCode.Core.Terminal;
 using SynthiaCode.Core.Worktrees;
+using SynthiaCode.Infrastructure.Attachments;
 
 namespace SynthiaCode.App.ViewModels;
 
@@ -31,6 +32,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly CodexFollowUpQueueWorkspace followUpQueueWorkspace = new();
     private readonly IAppLogger logger;
     private readonly IAttachmentStore? attachmentStore;
+    private readonly WorkspaceAttachmentResolver workspaceAttachmentResolver;
     private readonly CancellationTokenSource appServerWarmUpCancellation = new();
     private CodexThreadService threadService
     {
@@ -93,7 +95,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         CodexThreadWorkspace threadWorkspace,
         ITerminalService terminalService,
         IAppLogger logger,
-        IAttachmentStore? attachmentStore = null)
+        IAttachmentStore? attachmentStore = null,
+        WorkspaceAttachmentResolver? workspaceAttachmentResolver = null)
     {
         this.settingsStore = settingsStore;
         this.appServerSessionCoordinator = appServerSessionCoordinator;
@@ -107,6 +110,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         this.threadWorkspace = threadWorkspace;
         this.logger = logger;
         this.attachmentStore = attachmentStore;
+        this.workspaceAttachmentResolver = workspaceAttachmentResolver ?? new WorkspaceAttachmentResolver();
         synchronizationContext = SynchronizationContext.Current;
         appServerSessionCoordinator.NotificationReceived += OnAppServerNotificationReceived;
         appServerSessionCoordinator.ServerRequestReceived += OnServerRequestReceived;
@@ -260,6 +264,65 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 : $"Added {imported} image{(imported == 1 ? string.Empty : "s")}; {failures.Count} skipped";
     }
 
+    public async Task AddAttachmentPathsAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        string workspacePath;
+        try
+        {
+            workspacePath = GetActiveWorkspacePath();
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusMessage = ex.Message;
+            return;
+        }
+        var added = 0;
+        var failures = new List<string>();
+        foreach (var path in paths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                AttachmentReference attachment;
+                if (Directory.Exists(path))
+                {
+                    attachment = workspaceAttachmentResolver.Resolve(workspacePath, path, AttachmentKind.Folder);
+                }
+                else if (IsSupportedImagePath(path))
+                {
+                    if (attachmentStore is null)
+                    {
+                        throw new InvalidOperationException("Attachment storage is unavailable.");
+                    }
+                    attachment = await attachmentStore.ImportFileAsync(path, cancellationToken).ConfigureAwait(true);
+                }
+                else
+                {
+                    attachment = workspaceAttachmentResolver.Resolve(workspacePath, path, AttachmentKind.File);
+                }
+
+                TaskWorkspace.AddAttachment(attachment);
+                added++;
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+            {
+                failures.Add($"{Path.GetFileName(path)}: {ex.Message}");
+            }
+        }
+
+        StatusMessage = failures.Count == 0
+            ? $"Added {added} attachment{(added == 1 ? string.Empty : "s")}"
+            : added == 0
+                ? failures[0]
+                : $"Added {added} attachment{(added == 1 ? string.Empty : "s")}; {failures.Count} skipped";
+    }
+
+    public Task AddWorkspaceFilesAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default) =>
+        AddAttachmentPathsAsync(paths, cancellationToken);
+
+    public Task AddWorkspaceFolderAsync(string path, CancellationToken cancellationToken = default) =>
+        AddAttachmentPathsAsync([path], cancellationToken);
+
     public async Task AddPastedImageAsync(
         Stream imageStream,
         string displayName = "pasted-image.png",
@@ -279,17 +342,27 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
 
     public void ReportAttachmentError(string message) =>
-        StatusMessage = string.IsNullOrWhiteSpace(message) ? "Could not add the image." : message;
+        StatusMessage = string.IsNullOrWhiteSpace(message) ? "Could not add the attachment." : message;
 
     public void OpenAttachment(AttachmentReference attachment)
     {
         ArgumentNullException.ThrowIfNull(attachment);
-        var path = attachmentStore is not null ? attachmentStore.ResolvePath(attachment) : attachment.ManagedPath;
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        var path = attachment.SourceKind == AttachmentSourceKind.ManagedCopy
+            ? attachmentStore?.ResolvePath(attachment) ?? attachment.ManagedPath
+            : workspaceAttachmentResolver.Revalidate(GetActiveWorkspacePath(), attachment).ManagedPath;
+        var exists = attachment.IsFolder ? Directory.Exists(path) : File.Exists(path);
+        if (string.IsNullOrWhiteSpace(path) || !exists)
         {
             throw new FileNotFoundException($"Attachment '{attachment.DisplayName}' is unavailable.", path);
         }
-        userInteractionService.OpenInEditor(path);
+        if (attachment.IsFolder)
+        {
+            userInteractionService.RevealInExplorer(path);
+        }
+        else
+        {
+            userInteractionService.OpenInEditor(path);
+        }
     }
 
     private void CaptureAttachmentDraft(string? projectPath, string? threadId)
@@ -321,7 +394,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             settings.ComposerAttachmentDrafts.Add(draft);
         }
-        draft.Images = [.. TaskWorkspace.Attachments.Select(image => image.Clone())];
+        draft.Attachments = [.. TaskWorkspace.Attachments.Select(attachment => attachment.Clone())];
         draft.UpdatedAt = DateTimeOffset.UtcNow;
     }
 
@@ -339,7 +412,23 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var draft = settings.ComposerAttachmentDrafts.FirstOrDefault(item =>
                 string.Equals(Path.GetFullPath(item.ProjectPath), normalizedProject, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(item.ThreadId, threadId, StringComparison.Ordinal));
-            TaskWorkspace.ReplaceAttachments(draft?.Images ?? []);
+            var attachments = (draft?.Attachments ?? []).Select(attachment =>
+            {
+                if (attachment.SourceKind != AttachmentSourceKind.WorkspaceReference)
+                {
+                    return attachment;
+                }
+                try
+                {
+                    return workspaceAttachmentResolver.Revalidate(GetActiveWorkspacePath(), attachment);
+                }
+                catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException)
+                {
+                    attachment.ManagedPath = null;
+                    return attachment;
+                }
+            });
+            TaskWorkspace.ReplaceAttachments(attachments);
         }
         finally
         {
@@ -730,11 +819,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         var references = settings.ProjectThreads
             .SelectMany(thread =>
-                thread.ConversationTurns.SelectMany(turn => turn.UserImages)
-                    .Concat(thread.QueuedFollowUps.SelectMany(item => item.Images)))
-            .Concat(settings.ComposerAttachmentDrafts.SelectMany(draft => draft.Images))
+                thread.ConversationTurns.SelectMany(turn => turn.UserAttachments)
+                    .Concat(thread.QueuedFollowUps.SelectMany(item => item.Attachments)))
+            .Concat(settings.ComposerAttachmentDrafts.SelectMany(draft => draft.Attachments))
             .ToList();
-        foreach (var attachment in references)
+        foreach (var attachment in references.Where(item => item.SourceKind == AttachmentSourceKind.ManagedCopy))
         {
             try
             {
@@ -746,7 +835,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 logger.Log(
                     AppLogLevel.Warning,
                     "attachment_restore_unavailable",
-                    "A persisted image attachment is unavailable.",
+                    "A persisted managed attachment is unavailable.",
                     new Dictionary<string, string?> { ["storageKey"] = attachment.StorageKey },
                     ex);
             }
@@ -754,7 +843,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await attachmentStore.CleanupAsync(references.Select(item => item.StorageKey)).ConfigureAwait(true);
+            await attachmentStore.CleanupAsync(references
+                .Where(item => item.SourceKind == AttachmentSourceKind.ManagedCopy)
+                .Select(item => item.StorageKey)).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -1061,9 +1152,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             var guidance = SteeringText.Trim();
-            var images = TaskWorkspace.Attachments.Select(image => image.Clone()).ToList();
+            var attachments = TaskWorkspace.Attachments.Select(attachment => attachment.Clone()).ToList();
             var queue = followUpQueueWorkspace.GetOrCreate(threadId);
-            queue.Enqueue(guidance, CaptureQueuedTurnOptions(GetWorkspacePathForThread(threadId)), images);
+            queue.Enqueue(guidance, CaptureQueuedTurnOptions(GetWorkspacePathForThread(threadId)), attachments);
             TaskWorkspace.NotifyQueuedFollowUpsChanged();
             await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
             SteeringText = string.Empty;
@@ -1117,7 +1208,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 await appServerSessionCoordinator.SteerTurnAsync(new CodexTurnSteerRequest(
                     threadId,
                     turnId,
-                    BuildUserInputs(item.Text, item.Images, item.Options.Model))).ConfigureAwait(true);
+                    BuildUserInputs(item.Text, item.Attachments, item.Options.WorkspacePath, item.Options.Model))).ConfigureAwait(true);
                 if (!string.IsNullOrWhiteSpace(item.Text))
                 {
                     threadWorkspace.GetRequired(threadId).AddGuidance(item.Text);
@@ -1162,11 +1253,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             var guidance = SteeringText.Trim();
-            var images = TaskWorkspace.Attachments.Select(image => image.Clone()).ToList();
+            var attachments = TaskWorkspace.Attachments.Select(attachment => attachment.Clone()).ToList();
             await appServerSessionCoordinator.SteerTurnAsync(new CodexTurnSteerRequest(
                 threadId,
                 turnId,
-                BuildUserInputs(guidance, images))).ConfigureAwait(true);
+                BuildUserInputs(guidance, attachments, GetActiveWorkspacePath()))).ConfigureAwait(true);
             var service = threadWorkspace.ThreadIds.Contains(threadId)
                 ? threadWorkspace.GetRequired(threadId)
                 : threadService;
@@ -1899,14 +1990,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private IReadOnlyList<CodexUserInput> BuildUserInputs(
         string text,
-        IReadOnlyList<AttachmentReference> images,
+        IReadOnlyList<AttachmentReference> attachments,
+        string workspacePath,
         string? model = null)
     {
         var selectedModel = string.IsNullOrWhiteSpace(model)
             ? TaskWorkspace.SelectedModel
             : TaskWorkspace.ModelCatalog.FirstOrDefault(item =>
                 string.Equals(item.Model, model, StringComparison.OrdinalIgnoreCase));
-        if (images.Count > 0 && selectedModel?.SupportsImageInput == false)
+        if (attachments.Any(attachment => attachment.IsImage) && selectedModel?.SupportsImageInput == false)
         {
             throw new InvalidOperationException(
                 $"{selectedModel.DisplayName} does not accept image input. Remove the images or choose an image-capable model.");
@@ -1918,22 +2010,30 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             inputs.Add(new CodexTextInput(text));
         }
 
-        foreach (var image in images)
+        foreach (var attachment in attachments)
         {
+            if (attachment.SourceKind == AttachmentSourceKind.WorkspaceReference)
+            {
+                var resolved = workspaceAttachmentResolver.Revalidate(workspacePath, attachment);
+                attachment.ManagedPath = resolved.ManagedPath;
+                inputs.Add(new CodexMentionInput(resolved.WorkspaceRelativePath!, resolved.ManagedPath!));
+                continue;
+            }
+
             var path = attachmentStore is not null
-                ? attachmentStore.ResolvePath(image)
-                : image.ManagedPath;
+                ? attachmentStore.ResolvePath(attachment)
+                : attachment.ManagedPath;
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
             {
-                throw new FileNotFoundException($"Attachment '{image.DisplayName}' is unavailable.", path);
+                throw new FileNotFoundException($"Attachment '{attachment.DisplayName}' is unavailable.", path);
             }
-            image.ManagedPath = path;
+            attachment.ManagedPath = path;
             inputs.Add(new CodexLocalImageInput(path));
         }
 
         if (inputs.Count == 0)
         {
-            throw new InvalidOperationException("Enter a prompt or attach an image before sending.");
+            throw new InvalidOperationException("Enter a prompt or attach a file, folder, or image before sending.");
         }
         return inputs;
     }
@@ -1941,13 +2041,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private CodexTurnStartRequest CreateTurnStartRequest(
         string threadId,
         string prompt,
-        IReadOnlyList<AttachmentReference> images,
+        IReadOnlyList<AttachmentReference> attachments,
         string cwd)
     {
         var permissions = ResolvePermissionPolicy();
         return new CodexTurnStartRequest(
             threadId,
-            BuildUserInputs(prompt, images),
+            BuildUserInputs(prompt, attachments, cwd),
             cwd,
             permissions.Sandbox,
             NormalizeOverride(ModelOverride),
@@ -2053,7 +2153,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             }
 
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
-            service.BeginTurn(item.Text, item.Images);
+            service.BeginTurn(item.Text, item.Attachments);
             if (string.Equals(threadId, activeThreadId, StringComparison.Ordinal))
             {
                 TaskWorkspace.NotifyResponseChanged();
@@ -2064,7 +2164,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             persisted.Preview = item.Text;
             var turn = await appServerSessionCoordinator.StartTurnAsync(new CodexTurnStartRequest(
                 threadId,
-                BuildUserInputs(item.Text, item.Images, options.Model),
+                BuildUserInputs(item.Text, item.Attachments, workspacePath, options.Model),
                 workspacePath,
                 options.Sandbox,
                 options.Model,
@@ -2735,6 +2835,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         RaiseThreadCommandStates();
     }
 
+    private static bool IsSupportedImagePath(string path) =>
+        Path.GetExtension(path).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp";
+
     private static CodexConversationTurnSnapshot CloneConversationTurn(CodexConversationTurnSnapshot source) => new()
     {
         TurnId = source.TurnId,
@@ -2744,7 +2847,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         StartedAt = source.StartedAt,
         CompletedAt = source.CompletedAt,
         Activity = [.. source.Activity],
-        UserImages = [.. source.UserImages.Select(image => image.Clone())]
+        UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())]
     };
 
     public async ValueTask DisposeAsync()

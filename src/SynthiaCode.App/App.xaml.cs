@@ -47,6 +47,7 @@ public partial class App : Application
             services.ThreadWorkspace,
             services.TerminalService,
             services.Logger,
+            services.GeneralWorkspaceService,
             services.AttachmentStore,
             services.WorkspaceAttachmentResolver);
 

@@ -11,6 +11,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
     private readonly Action<ProjectThreadState?> selectionChanged;
     private readonly IReadOnlyList<AsyncRelayCommand> statefulCommands;
     private string? selectedProjectPath;
+    private string? generalWorkspacePath;
     private string newThreadWorkspaceMode = "Current checkout";
     private ProjectThreadState? selectedThread;
 
@@ -18,12 +19,15 @@ public sealed class ProjectThreadViewModel : ObservableObject
         Func<Task> browseProject,
         Func<object?, Task> openRecentProject,
         Func<Task> createThread,
+        Func<Task> createGeneralThread,
+        Func<Task> createProjectThread,
         Func<Task> resumeThread,
         Func<Task> forkThread,
         Func<Task> archiveThread,
         Func<Task> unarchiveThread,
         Func<Task> removeWorktree,
-        Func<bool> canManageThreads,
+        Func<bool> canCreateThread,
+        Func<bool> canCreateGeneralThread,
         Func<bool> canUseSelectedThread,
         Func<bool> canArchiveSelectedThread,
         Func<bool> canUnarchiveSelectedThread,
@@ -52,11 +56,12 @@ public sealed class ProjectThreadViewModel : ObservableObject
             await openRecentProject(parameter).ConfigureAwait(true);
             SynchronizeProjectSelection(expandSelected: true);
         });
-        NewThreadCommand = new AsyncRelayCommand(createThread, canManageThreads);
+        NewThreadCommand = new AsyncRelayCommand(createThread, canCreateThread);
+        NewGeneralThreadCommand = new AsyncRelayCommand(createGeneralThread, canCreateGeneralThread);
         NewThreadForProjectCommand = new AsyncRelayCommand(parameter =>
-            CreateThreadForProjectAsync(parameter, "Current checkout", openRecentProject, createThread));
+            CreateThreadForProjectAsync(parameter, "Current checkout", openRecentProject, createProjectThread));
         NewWorktreeThreadForProjectCommand = new AsyncRelayCommand(parameter =>
-            CreateThreadForProjectAsync(parameter, "New worktree", openRecentProject, createThread));
+            CreateThreadForProjectAsync(parameter, "New worktree", openRecentProject, createProjectThread));
         ResumeThreadCommand = new AsyncRelayCommand(resumeThread, canUseSelectedThread);
         ForkThreadCommand = new AsyncRelayCommand(forkThread, canUseSelectedThread);
         ArchiveThreadCommand = new AsyncRelayCommand(archiveThread, canArchiveSelectedThread);
@@ -65,6 +70,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
         statefulCommands =
         [
             (AsyncRelayCommand)NewThreadCommand,
+            (AsyncRelayCommand)NewGeneralThreadCommand,
             (AsyncRelayCommand)ResumeThreadCommand,
             (AsyncRelayCommand)ForkThreadCommand,
             (AsyncRelayCommand)ArchiveThreadCommand,
@@ -77,11 +83,14 @@ public sealed class ProjectThreadViewModel : ObservableObject
 
     public ObservableCollection<ProjectThreadState> Threads { get; } = [];
 
+    public ObservableCollection<ProjectThreadState> GeneralThreads { get; } = [];
+
     public ObservableCollection<ProjectNavigationItemViewModel> Projects { get; } = [];
 
     public ICommand BrowseProjectCommand { get; }
     public ICommand OpenRecentProjectCommand { get; }
     public ICommand NewThreadCommand { get; }
+    public ICommand NewGeneralThreadCommand { get; }
     public ICommand NewThreadForProjectCommand { get; }
     public ICommand NewWorktreeThreadForProjectCommand { get; }
     public ICommand ResumeThreadCommand { get; }
@@ -109,7 +118,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
 
     public string SelectedProjectName =>
         string.IsNullOrWhiteSpace(SelectedProjectPath)
-            ? "No project selected"
+            ? "General"
             : new DirectoryInfo(SelectedProjectPath).Name;
 
     public string NewThreadWorkspaceMode
@@ -128,19 +137,39 @@ public sealed class ProjectThreadViewModel : ObservableObject
                 OnPropertyChanged(nameof(ActiveWorkspacePath));
                 OnPropertyChanged(nameof(ActiveWorkspaceLabel));
                 OnPropertyChanged(nameof(SelectedThreadTitle));
+                OnPropertyChanged(nameof(SelectedGeneralThread));
                 RaiseCommandStates();
                 selectionChanged(value);
             }
         }
     }
 
-    public string ActiveWorkspacePath => SelectedThread?.WorkspacePath ?? SelectedProjectPath ?? "No workspace selected";
+    public ProjectThreadState? SelectedGeneralThread
+    {
+        get => SelectedThread?.ScopeKind == ThreadScopeKind.General ? SelectedThread : null;
+        set
+        {
+            if (value is not null)
+            {
+                SelectedThread = value;
+            }
+        }
+    }
 
-    public string ActiveWorkspaceLabel => SelectedThread?.WorkspaceModeLabel ?? "Current checkout";
+    public string ActiveWorkspacePath => SelectedThread?.WorkspacePath ?? SelectedProjectPath ?? generalWorkspacePath ?? "General workspace unavailable";
+
+    public string ActiveWorkspaceLabel => SelectedThread?.WorkspaceModeLabel
+        ?? (string.IsNullOrWhiteSpace(SelectedProjectPath) ? "General workspace" : "Current checkout");
 
     public string SelectedThreadTitle => SelectedThread?.DisplayTitle ?? "No thread selected";
 
     public void SetSelectedProjectPath(string? path) => SelectedProjectPath = path;
+
+    public void SetGeneralWorkspacePath(string? path)
+    {
+        generalWorkspacePath = string.IsNullOrWhiteSpace(path) ? null : Path.GetFullPath(path);
+        OnPropertyChanged(nameof(ActiveWorkspacePath));
+    }
 
     public void RefreshRecentProjects(IEnumerable<RecentProject> projects)
     {
@@ -157,6 +186,15 @@ public sealed class ProjectThreadViewModel : ObservableObject
     {
         var projectList = projects.ToList();
         var threadList = threads.ToList();
+        GeneralThreads.Clear();
+        foreach (var thread in threadList
+            .Where(thread => thread.ScopeKind == ThreadScopeKind.General)
+            .OrderByDescending(thread => thread.IsPinned)
+            .ThenByDescending(thread => thread.UpdatedAt))
+        {
+            GeneralThreads.Add(thread);
+        }
+        OnPropertyChanged(nameof(SelectedGeneralThread));
         var existing = Projects.ToList();
         var refreshed = new List<ProjectNavigationItemViewModel>();
 
@@ -167,7 +205,9 @@ public sealed class ProjectThreadViewModel : ObservableObject
                 ?? new ProjectNavigationItemViewModel(project);
             item.Update(
                 project,
-                threadList.Where(thread => ProjectNavigationItemViewModel.PathsEqual(thread.ProjectPath, project.Path)));
+                threadList.Where(thread =>
+                    thread.ScopeKind == ThreadScopeKind.Project &&
+                    ProjectNavigationItemViewModel.PathsEqual(thread.ProjectPath, project.Path)));
             refreshed.Add(item);
         }
 

@@ -19,6 +19,8 @@ using SynthiaCode.Core.Worktrees;
 using SynthiaCode.Infrastructure.Worktrees;
 using SynthiaCode.Core.Terminal;
 using SynthiaCode.Infrastructure.Terminal;
+using SynthiaCode.Core.Workspaces;
+using SynthiaCode.Infrastructure.Workspaces;
 using System.IO;
 using System.Reflection;
 
@@ -42,6 +44,7 @@ public sealed class AppServices
         CodexThreadWorkspace threadWorkspace,
         ITerminalService terminalService,
         IAppLogger logger,
+        IGeneralWorkspaceService generalWorkspaceService,
         IAttachmentStore attachmentStore,
         WorkspaceAttachmentResolver workspaceAttachmentResolver)
     {
@@ -60,6 +63,7 @@ public sealed class AppServices
         ThreadWorkspace = threadWorkspace;
         TerminalService = terminalService;
         Logger = logger;
+        GeneralWorkspaceService = generalWorkspaceService;
         AttachmentStore = attachmentStore;
         WorkspaceAttachmentResolver = workspaceAttachmentResolver;
     }
@@ -94,6 +98,8 @@ public sealed class AppServices
 
     public IAppLogger Logger { get; }
 
+    public IGeneralWorkspaceService GeneralWorkspaceService { get; }
+
     public IAttachmentStore AttachmentStore { get; }
 
     public WorkspaceAttachmentResolver WorkspaceAttachmentResolver { get; }
@@ -125,6 +131,7 @@ public sealed class AppServices
         var threadStore = new ThreadStore();
         var threadWorkspace = new CodexThreadWorkspace();
         var terminalService = new WindowsConPtyTerminalService(logger);
+        var generalWorkspaceService = new GeneralWorkspaceService(appDataDirectory);
         var attachmentStore = new LocalAttachmentStore(Path.Combine(appDataDirectory, "attachments"), logger);
         var workspaceAttachmentResolver = new WorkspaceAttachmentResolver();
 
@@ -146,6 +153,7 @@ public sealed class AppServices
             threadWorkspace,
             terminalService,
             logger,
+            generalWorkspaceService,
             attachmentStore,
             workspaceAttachmentResolver);
     }

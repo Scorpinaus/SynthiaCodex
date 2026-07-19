@@ -158,7 +158,8 @@ internal static class AccountFeatureTests
 
             var footer = FindVisualDescendants<FrameworkElement>(view)
                 .Single(element => element.Name == "AccountFooter");
-            var projectList = FindVisualDescendants<ListBox>(view).First();
+            var projectList = FindVisualDescendants<ListBox>(view)
+                .First(listBox => ReferenceEquals(listBox.ItemsSource, projectWorkspace.Projects));
             var scroller = FindVisualDescendant<ScrollViewer>(projectList)
                 ?? throw new InvalidOperationException("project navigation scroll viewer was not created");
             var footerTop = footer.TransformToAncestor(view).Transform(new Point()).Y;
@@ -204,6 +205,9 @@ internal static class AccountFeatureTests
         () => Task.CompletedTask,
         () => Task.CompletedTask,
         () => Task.CompletedTask,
+        () => Task.CompletedTask,
+        () => Task.CompletedTask,
+        () => true,
         () => true,
         () => true,
         () => true,

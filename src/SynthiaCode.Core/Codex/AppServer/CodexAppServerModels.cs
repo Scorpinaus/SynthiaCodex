@@ -20,7 +20,8 @@ public sealed record CodexThreadStartOptions(
     CodexSandbox? Sandbox = null,
     CodexApprovalPolicy? ApprovalPolicy = null,
     CodexApprovalsReviewer? ApprovalsReviewer = null,
-    string? PermissionProfileId = null)
+    string? PermissionProfileId = null,
+    string? Cwd = null)
 {
     public static CodexThreadStartOptions Default { get; } = new();
 }

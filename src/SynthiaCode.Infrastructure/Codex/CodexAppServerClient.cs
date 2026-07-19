@@ -86,6 +86,11 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             parameters["model"] = options.Model;
         }
 
+        if (!string.IsNullOrWhiteSpace(options.Cwd))
+        {
+            parameters["cwd"] = options.Cwd;
+        }
+
         if (options.Sandbox is not null)
         {
             parameters["sandbox"] = options.Sandbox.Value.ToProtocolValue();

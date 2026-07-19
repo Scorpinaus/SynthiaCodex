@@ -46,6 +46,7 @@ public sealed class AppSettings
 
 public sealed class ComposerAttachmentDraftSnapshot
 {
+    public ThreadScopeKind ScopeKind { get; set; } = ThreadScopeKind.Project;
     public string ProjectPath { get; set; } = string.Empty;
     public string? ThreadId { get; set; }
     public List<AttachmentReference> Attachments { get; set; } = [];
@@ -74,6 +75,7 @@ public sealed class ComposerAttachmentDraftSnapshot
 
     public ComposerAttachmentDraftSnapshot Clone() => new()
     {
+        ScopeKind = ScopeKind,
         ProjectPath = ProjectPath,
         ThreadId = ThreadId,
         Attachments = [.. Attachments.Select(attachment => attachment.Clone())],
@@ -85,6 +87,7 @@ public sealed class ComposerAttachmentDraftSnapshot
 // deserialize without a migration or schema rewrite.
 public sealed class PersistedProjectThread
 {
+    public ThreadScopeKind ScopeKind { get; set; } = ThreadScopeKind.Project;
     public string ProjectPath { get; set; } = string.Empty;
     public string ThreadId { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
@@ -115,7 +118,14 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
     private string turnStatus = "Idle";
 
     public event PropertyChangedEventHandler? PropertyChanged;
+    public ThreadScopeKind ScopeKind { get; set; } = ThreadScopeKind.Project;
     public string ProjectPath { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public ThreadScopeKey ScopeKey => ThreadScopeKey.From(ScopeKind, ProjectPath);
+
+    [JsonIgnore]
+    public bool IsGeneral => ScopeKind == ThreadScopeKind.General;
 
     public string ThreadId { get; set; } = string.Empty;
 
@@ -239,6 +249,7 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
 
     public string WorkspaceModeLabel => Mode.ToLowerInvariant() switch
     {
+        "general" => "General workspace",
         "worktree" => string.IsNullOrWhiteSpace(WorktreeBranch) ? "Worktree" : $"Worktree · {WorktreeBranch}",
         "worktree-removed" => "Worktree removed",
         _ => "Current checkout"

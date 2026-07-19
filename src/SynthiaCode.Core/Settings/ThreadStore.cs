@@ -7,12 +7,17 @@ public sealed class ThreadStore
     public IReadOnlyList<ProjectThreadState> GetProjectThreads(
         AppSettings settings,
         string projectPath,
+        bool includeArchived = true) =>
+        GetThreads(settings, ThreadScopeKey.ForProject(projectPath), includeArchived);
+
+    public IReadOnlyList<ProjectThreadState> GetThreads(
+        AppSettings settings,
+        ThreadScopeKey scope,
         bool includeArchived = true)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        var normalizedProject = NormalizePath(projectPath);
         return settings.ProjectThreads
-            .Where(thread => PathsEqual(thread.ProjectPath, normalizedProject))
+            .Where(thread => ScopeMatches(thread.ScopeKind, thread.ProjectPath, scope))
             .Where(thread => includeArchived || !thread.IsArchived)
             .OrderByDescending(thread => thread.IsPinned)
             .ThenByDescending(thread => thread.UpdatedAt)
@@ -21,16 +26,18 @@ public sealed class ThreadStore
     }
 
     public ProjectThreadState? GetActive(AppSettings settings, string projectPath) =>
-        GetProjectThreads(settings, projectPath).FirstOrDefault(thread => thread.IsActive)
-        ?? GetProjectThreads(settings, projectPath, includeArchived: false).FirstOrDefault();
+        GetActive(settings, ThreadScopeKey.ForProject(projectPath));
+
+    public ProjectThreadState? GetActive(AppSettings settings, ThreadScopeKey scope) =>
+        GetThreads(settings, scope).FirstOrDefault(thread => thread.IsActive)
+        ?? GetThreads(settings, scope, includeArchived: false).FirstOrDefault();
 
     public ProjectThreadState Upsert(AppSettings settings, ProjectThreadState state)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(state);
-        state.ProjectPath = NormalizePath(state.ProjectPath);
+        NormalizeAndValidate(state);
         var existing = settings.ProjectThreads.FirstOrDefault(thread =>
-            PathsEqual(thread.ProjectPath, state.ProjectPath) &&
             string.Equals(thread.ThreadId, state.ThreadId, StringComparison.Ordinal));
         if (existing is null)
         {
@@ -38,6 +45,14 @@ public sealed class ThreadStore
             return state;
         }
 
+        if (existing.ScopeKind != state.ScopeKind ||
+            (state.ScopeKind == ThreadScopeKind.Project && !PathsEqual(existing.ProjectPath, state.ProjectPath)))
+        {
+            throw new InvalidOperationException($"Thread '{state.ThreadId}' cannot be moved to a different scope.");
+        }
+
+        existing.ScopeKind = state.ScopeKind;
+        existing.ProjectPath = state.ProjectPath;
         existing.Title = state.Title;
         existing.Preview = state.Preview;
         existing.IsArchived = state.IsArchived;
@@ -58,9 +73,11 @@ public sealed class ThreadStore
     }
 
     public void SetActive(AppSettings settings, string projectPath, string threadId)
+        => SetActive(settings, ThreadScopeKey.ForProject(projectPath), threadId);
+
+    public void SetActive(AppSettings settings, ThreadScopeKey scope, string threadId)
     {
-        var normalizedProject = NormalizePath(projectPath);
-        var threads = settings.ProjectThreads.Where(thread => PathsEqual(thread.ProjectPath, normalizedProject));
+        var threads = settings.ProjectThreads.Where(thread => ScopeMatches(thread.ScopeKind, thread.ProjectPath, scope));
         foreach (var thread in threads)
         {
             thread.IsActive = string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal);
@@ -69,15 +86,51 @@ public sealed class ThreadStore
 
     public void SetArchived(AppSettings settings, string projectPath, string threadId, bool archived)
     {
-        var normalizedProject = NormalizePath(projectPath);
         var thread = settings.ProjectThreads
-            .Where(item => PathsEqual(item.ProjectPath, normalizedProject))
+            .Where(item => ScopeMatches(item.ScopeKind, item.ProjectPath, ThreadScopeKey.ForProject(projectPath)))
             .FirstOrDefault(item => string.Equals(item.ThreadId, threadId, StringComparison.Ordinal))
             ?? throw new InvalidOperationException($"Thread '{threadId}' was not found for this project.");
+        SetArchived(thread, archived);
+    }
+
+    public void SetArchived(AppSettings settings, string threadId, bool archived)
+    {
+        var thread = settings.ProjectThreads.FirstOrDefault(item =>
+            string.Equals(item.ThreadId, threadId, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException($"Thread '{threadId}' was not found.");
+        SetArchived(thread, archived);
+    }
+
+    private static void SetArchived(PersistedProjectThread thread, bool archived)
+    {
         thread.IsArchived = archived;
         thread.IsActive = thread.IsActive && !archived;
         thread.UpdatedAt = DateTimeOffset.UtcNow;
     }
+
+    private static void NormalizeAndValidate(ProjectThreadState state)
+    {
+        if (state.ScopeKind == ThreadScopeKind.General)
+        {
+            state.ProjectPath = string.Empty;
+            if (string.IsNullOrWhiteSpace(state.WorkspacePath) || !Path.IsPathFullyQualified(state.WorkspacePath))
+            {
+                throw new InvalidOperationException("A General thread requires an absolute workspace path.");
+            }
+            state.WorkspacePath = NormalizePath(state.WorkspacePath);
+            return;
+        }
+
+        state.ProjectPath = NormalizePath(state.ProjectPath);
+        if (!string.IsNullOrWhiteSpace(state.WorkspacePath))
+        {
+            state.WorkspacePath = NormalizePath(state.WorkspacePath);
+        }
+    }
+
+    private static bool ScopeMatches(ThreadScopeKind kind, string projectPath, ThreadScopeKey scope) =>
+        kind == scope.Kind &&
+        (kind == ThreadScopeKind.General || PathsEqual(projectPath, scope.ProjectPath ?? string.Empty));
 
     private static string NormalizePath(string path) => Path.GetFullPath(path);
 
@@ -93,6 +146,7 @@ public sealed class ThreadStore
 
     private static ProjectThreadState ToPresentation(PersistedProjectThread source) => new()
     {
+        ScopeKind = source.ScopeKind,
         ProjectPath = source.ProjectPath,
         ThreadId = source.ThreadId,
         Title = source.Title,
@@ -116,6 +170,7 @@ public sealed class ThreadStore
 
     private static PersistedProjectThread ToPersisted(ProjectThreadState source) => new()
     {
+        ScopeKind = source.ScopeKind,
         ProjectPath = source.ProjectPath,
         ThreadId = source.ThreadId,
         Title = source.Title,

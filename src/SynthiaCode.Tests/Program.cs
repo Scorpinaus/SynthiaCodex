@@ -16,6 +16,7 @@ using SynthiaCode.Infrastructure.Projects;
 using SynthiaCode.Infrastructure.Settings;
 using SynthiaCode.Infrastructure.Terminal;
 using SynthiaCode.Infrastructure.Worktrees;
+using SynthiaCode.Infrastructure.Workspaces;
 using System.Runtime.CompilerServices;
 using System.Diagnostics;
 using System.Text;
@@ -115,6 +116,7 @@ tests.AddRange(ApprovalPresentationTests.All);
 tests.AddRange(AccountFeatureTests.All);
 tests.AddRange(ResponsiveLayoutTests.All);
 tests.AddRange(MarkdownLinkTests.All);
+tests.AddRange(ProjectlessThreadTests.All);
 
 var failures = 0;
 var testFilter = Environment.GetEnvironmentVariable("SYNTHIACODE_TEST_FILTER");
@@ -2558,7 +2560,8 @@ static MainViewModel CreateMainViewModel(
         new ThreadStore(),
         new CodexThreadWorkspace(),
         terminalService ?? new FakeTerminalService(),
-        effectiveLogger);
+        effectiveLogger,
+        new GeneralWorkspaceService(Path.Combine(projectPath, ".synthiacode-test-data")));
 }
 
 static async Task WaitUntilAsync(Func<bool> condition, string label)

@@ -18,7 +18,7 @@
 
 | Area | Current parity | Assessment |
 | --- | --- | --- |
-| Local coding loop | **Strong** | Projects, chats, multi-turn work, queued follow-ups, streaming, models, permissions, terminal, Git changes, and worktrees are usable end to end. |
+| Local coding loop | **Strong** | General and project chats, multi-turn work, queued follow-ups, streaming, models, permissions, terminal, Git changes, and worktrees are usable end to end. |
 | Safety and approvals | **Near full** | The three composer permission modes and server-request approvals now map closely to ChatGPT desktop. |
 | Git and worktree lifecycle | **Moderate** | Core isolation and file-level Git operations exist; chunk review, handoff, push, PR, snapshots, and setup actions do not. |
 | Agent orchestration | **Partial** | Parallel top-level chats and collaboration activity exist, but subagent thread inspection and management are absent. |
@@ -32,6 +32,7 @@
 
 | Feature | SynthiaCode | Status | Remaining difference |
 | --- | --- | --- | --- |
+| Start a chat without a project | First-class General scope with a managed app-data workspace, explicit and implicit creation, persistence, resume/fork/archive, attachments, queues, permissions, and per-thread terminal context | **Full** | General intentionally has no Git or assistant-worktree operations until a project is attached. |
 | Open a local project/folder | Folder picker, recent projects, project grouping, and project-scoped app-server work | **Full** | None material for the local coding loop. |
 | Multiple local chats per project | Project/thread navigation with independently persisted threads | **Full** | ChatGPT has broader chat-management and search controls. |
 | Multi-turn conversations | Restored history, follow-up turns, per-turn transcript/activity, cancellation, and recovery | **Full** | None material for normal local follow-ups. |
@@ -110,6 +111,14 @@
 | Chat profile, usage insights, and pets | Basic account/rate-limit view only | **Partial** | Profile analytics/cards and pets are non-core gaps. |
 
 ## What changed in this recheck
+
+Projectless threads moved from **Missing** to **Full** for the local conversation outcome:
+
+1. A dedicated General group and New action create threads without adding or selecting a project; first prompt submission also creates General implicitly.
+2. General threads use a contained shared `%LOCALAPPDATA%\SynthiaCode\workspaces\general` root, and every thread/turn lifecycle request receives the correct absolute `cwd`.
+3. Explicit scope identity keeps General persistence, active selection, drafts, queued follow-ups, notifications, and navigation separate from project threads while legacy settings default to Project.
+4. Resume, fork, archive, unarchive, attachments, permission discovery, and isolated terminal sessions work in General; Git and assistant-worktree mutations remain project-only with a clear empty state.
+5. General-workspace initialization fails closed without disabling project-thread creation, and existing project/current-checkout/worktree flows remain covered by the full regression suite.
 
 The permissions area moved from **partial** to **full/near-full functional parity**:
 

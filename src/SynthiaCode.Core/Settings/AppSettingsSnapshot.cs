@@ -32,6 +32,7 @@ public static class AppSettingsSnapshot
 
     private static PersistedProjectThread CloneThread(PersistedProjectThread source) => new()
     {
+        ScopeKind = source.ScopeKind,
         ProjectPath = source.ProjectPath,
         ThreadId = source.ThreadId,
         Title = source.Title,

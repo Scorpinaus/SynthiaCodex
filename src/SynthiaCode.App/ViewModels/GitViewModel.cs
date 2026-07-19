@@ -7,7 +7,7 @@ using SynthiaCode.Core.Logging;
 
 namespace SynthiaCode.App.ViewModels;
 
-public sealed record GitContext(string? ProjectPath, string? WorkspacePath);
+public sealed record GitContext(string? ProjectPath, string? WorkspacePath, bool IsGeneral = false);
 
 public sealed class GitViewModel : ObservableObject
 {
@@ -145,7 +145,9 @@ public sealed class GitViewModel : ObservableObject
         var context = contextProvider();
         if (string.IsNullOrWhiteSpace(context.ProjectPath))
         {
-            Reset("Select a project to inspect Git changes");
+            Reset(context.IsGeneral
+                ? "General threads are not attached to a Git project"
+                : "Select a project to inspect Git changes");
             return;
         }
 

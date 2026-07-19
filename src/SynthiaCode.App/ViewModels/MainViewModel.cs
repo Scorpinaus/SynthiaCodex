@@ -13,6 +13,7 @@ using SynthiaCode.Core.Projects;
 using SynthiaCode.Core.Settings;
 using SynthiaCode.Core.Terminal;
 using SynthiaCode.Core.Worktrees;
+using SynthiaCode.Core.Workspaces;
 using SynthiaCode.Infrastructure.Attachments;
 
 namespace SynthiaCode.App.ViewModels;
@@ -31,6 +32,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly CodexThreadWorkspace threadWorkspace;
     private readonly CodexFollowUpQueueWorkspace followUpQueueWorkspace = new();
     private readonly IAppLogger logger;
+    private readonly IGeneralWorkspaceService generalWorkspaceService;
     private readonly IAttachmentStore? attachmentStore;
     private readonly WorkspaceAttachmentResolver workspaceAttachmentResolver;
     private readonly CancellationTokenSource appServerWarmUpCancellation = new();
@@ -72,6 +74,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string? executionPolicyCwd;
     private bool isShuttingDown;
     private bool isRestoringAttachmentDraft;
+    private string? generalWorkspacePath;
+    private string? generalWorkspaceError;
     private Task? shutdownTask;
     private Task? appServerWarmUpTask;
     private readonly HashSet<string> loadedThreadIds = new(StringComparer.Ordinal);
@@ -95,6 +99,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         CodexThreadWorkspace threadWorkspace,
         ITerminalService terminalService,
         IAppLogger logger,
+        IGeneralWorkspaceService generalWorkspaceService,
         IAttachmentStore? attachmentStore = null,
         WorkspaceAttachmentResolver? workspaceAttachmentResolver = null)
     {
@@ -109,6 +114,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         this.threadStore = threadStore;
         this.threadWorkspace = threadWorkspace;
         this.logger = logger;
+        this.generalWorkspaceService = generalWorkspaceService;
         this.attachmentStore = attachmentStore;
         this.workspaceAttachmentResolver = workspaceAttachmentResolver ?? new WorkspaceAttachmentResolver();
         synchronizationContext = SynchronizationContext.Current;
@@ -165,13 +171,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ProjectWorkspace = new ProjectThreadViewModel(
             BrowseProjectAsync,
             OpenRecentProjectAsync,
-            NewThreadAsync,
+            NewThreadForCurrentScopeAsync,
+            NewGeneralThreadAsync,
+            NewProjectThreadAsync,
             ResumeSelectedThreadAsync,
             ForkSelectedThreadAsync,
             ArchiveSelectedThreadAsync,
             UnarchiveSelectedThreadAsync,
             RemoveSelectedWorktreeAsync,
-            CanManageThreads,
+            CanCreateThreadInCurrentScope,
+            CanCreateGeneralThread,
             CanUseSelectedThread,
             CanArchiveSelectedThread,
             CanUnarchiveSelectedThread,
@@ -390,14 +399,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void CaptureAttachmentDraft(string? projectPath, string? threadId)
     {
-        if (isRestoringAttachmentDraft || string.IsNullOrWhiteSpace(projectPath))
+        if (isRestoringAttachmentDraft)
         {
             return;
         }
 
-        var normalizedProject = Path.GetFullPath(projectPath);
+        var scope = string.IsNullOrWhiteSpace(projectPath)
+            ? ThreadScopeKey.General
+            : ThreadScopeKey.ForProject(projectPath);
         var draft = settings.ComposerAttachmentDrafts.FirstOrDefault(item =>
-            string.Equals(Path.GetFullPath(item.ProjectPath), normalizedProject, StringComparison.OrdinalIgnoreCase) &&
+            scope.Matches(item.ScopeKind, item.ProjectPath) &&
             string.Equals(item.ThreadId, threadId, StringComparison.Ordinal));
         if (TaskWorkspace.Attachments.Count == 0)
         {
@@ -410,7 +421,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         draft ??= new ComposerAttachmentDraftSnapshot
         {
-            ProjectPath = normalizedProject,
+            ScopeKind = scope.Kind,
+            ProjectPath = scope.ProjectPath ?? string.Empty,
             ThreadId = threadId
         };
         if (!settings.ComposerAttachmentDrafts.Contains(draft))
@@ -426,14 +438,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         isRestoringAttachmentDraft = true;
         try
         {
-            if (string.IsNullOrWhiteSpace(projectPath))
-            {
-                TaskWorkspace.ClearAttachments();
-                return;
-            }
-            var normalizedProject = Path.GetFullPath(projectPath);
+            var scope = string.IsNullOrWhiteSpace(projectPath)
+                ? ThreadScopeKey.General
+                : ThreadScopeKey.ForProject(projectPath);
             var draft = settings.ComposerAttachmentDrafts.FirstOrDefault(item =>
-                string.Equals(Path.GetFullPath(item.ProjectPath), normalizedProject, StringComparison.OrdinalIgnoreCase) &&
+                scope.Matches(item.ScopeKind, item.ProjectPath) &&
                 string.Equals(item.ThreadId, threadId, StringComparison.Ordinal));
             var attachments = (draft?.Attachments ?? []).Select(attachment =>
             {
@@ -807,6 +816,18 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         logger.Log(AppLogLevel.Information, "view_model_initialize", "Main view model initialization started.");
         settings = await settingsStore.LoadAsync().ConfigureAwait(true);
+        try
+        {
+            generalWorkspacePath = generalWorkspaceService.EnsureWorkspace();
+            generalWorkspaceError = null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            generalWorkspacePath = null;
+            generalWorkspaceError = $"The General workspace is unavailable: {ex.Message}";
+            logger.Log(AppLogLevel.Error, "general_workspace_unavailable", generalWorkspaceError, exception: ex);
+        }
+        ProjectWorkspace.SetGeneralWorkspacePath(generalWorkspacePath);
         await RestoreAndCleanupAttachmentsAsync().ConfigureAwait(true);
         IsProjectRailOpen = settings.IsProjectRailOpen;
         IsDetailsPaneOpen = settings.IsDetailsPaneOpen;
@@ -828,6 +849,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             await settingsStore.SaveAsync(settings).ConfigureAwait(true);
         }
         RefreshRecentProjects();
+        RestorePersistedThreadState();
         await DiagnosticsViewModel.RefreshAsync().ConfigureAwait(true);
         StatusMessage = "Ready";
         appServerWarmUpTask = WarmUpAppServerAsync(appServerWarmUpCancellation.Token);
@@ -973,24 +995,64 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             new Dictionary<string, string?> { ["path"] = SelectedProjectPath });
     }
 
-    private async Task NewThreadAsync()
+    private Task NewThreadForCurrentScopeAsync() =>
+        string.IsNullOrWhiteSpace(SelectedProjectPath)
+            ? NewGeneralThreadAsync()
+            : NewProjectThreadAsync();
+
+    private async Task NewGeneralThreadAsync()
+    {
+        if (!CanManageThreads() || string.IsNullOrWhiteSpace(generalWorkspacePath))
+        {
+            StatusMessage = generalWorkspaceError ?? "Sign in before creating a thread";
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(SelectedProjectPath))
+        {
+            CaptureAttachmentDraft(SelectedProjectPath, activeThreadId);
+            SelectedProjectPath = null;
+            activeThreadId = null;
+            activeTurnId = null;
+            activeThreadLoaded = false;
+            RestorePersistedThreadState();
+        }
+
+        NewThreadWorkspaceMode = "Current checkout";
+        await NewThreadAsync(ThreadScopeKey.General).ConfigureAwait(true);
+    }
+
+    private async Task NewProjectThreadAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedProjectPath))
+        {
+            StatusMessage = "Select a project before creating a project thread";
+            return;
+        }
+
+        await NewThreadAsync(ThreadScopeKey.ForProject(SelectedProjectPath)).ConfigureAwait(true);
+    }
+
+    private async Task NewThreadAsync(ThreadScopeKey scope)
     {
         if (!CanManageThreads())
         {
-            StatusMessage = "Select a project and sign in before creating a thread";
+            StatusMessage = generalWorkspaceError ?? "Sign in before creating a thread";
             return;
         }
 
         try
         {
+            var workspacePath = GetWorkspacePath(scope);
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
             var result = await appServerSessionCoordinator
-                .StartThreadAsync(CreateThreadStartOptions())
+                .StartThreadAsync(CreateThreadStartOptions(workspacePath))
                 .ConfigureAwait(true);
             AssistantWorktree? worktree = null;
-            if (string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal))
+            if (scope.Kind == ThreadScopeKind.Project &&
+                string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal))
             {
-                var repository = await gitService.GetRepositoryStateAsync(SelectedProjectPath!).ConfigureAwait(true);
+                var repository = await gitService.GetRepositoryStateAsync(scope.ProjectPath!).ConfigureAwait(true);
                 if (!repository.IsRepository || string.IsNullOrWhiteSpace(repository.RootPath))
                 {
                     throw new InvalidOperationException("A new worktree requires a detected Git repository.");
@@ -1003,14 +1065,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             }
 
             var state = CreateThreadState(
+                scope,
                 result.ThreadId,
                 $"Thread {ProjectThreads.Count + 1}",
-                worktree?.Path,
+                worktree?.Path ?? workspacePath,
                 worktree?.Branch);
             loadedThreadIds.Add(result.ThreadId);
             RefreshProjectThreads(result.ThreadId);
-            StatusMessage = worktree is null
-                ? "New Codex thread created in the current checkout"
+            StatusMessage = scope.Kind == ThreadScopeKind.General
+                ? "New Codex thread created in General"
+                : worktree is null
+                    ? "New Codex thread created in the current checkout"
                 : $"New Codex thread created in worktree {worktree.TaskId}";
             await settingsStore.SaveAsync(settings).ConfigureAwait(true);
         }
@@ -1023,7 +1088,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task ResumeSelectedThreadAsync()
     {
-        if (!CanUseSelectedThread() || SelectedProjectPath is null || SelectedThread is null)
+        if (!CanUseSelectedThread() || SelectedThread is null)
         {
             return;
         }
@@ -1050,7 +1115,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task ForkSelectedThreadAsync()
     {
-        if (!CanUseSelectedThread() || SelectedProjectPath is null || SelectedThread is null)
+        if (!CanUseSelectedThread() || SelectedThread is null)
         {
             return;
         }
@@ -1064,9 +1129,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 .ForkThreadAsync(CreateThreadForkRequest(sourceThread.ThreadId, sourceWorkspace))
                 .ConfigureAwait(true);
             AssistantWorktree? worktree = null;
-            if (string.Equals(sourceThread.Mode, "worktree", StringComparison.OrdinalIgnoreCase))
+            if (sourceThread.ScopeKind == ThreadScopeKind.Project &&
+                string.Equals(sourceThread.Mode, "worktree", StringComparison.OrdinalIgnoreCase))
             {
-                var repository = await gitService.GetRepositoryStateAsync(SelectedProjectPath).ConfigureAwait(true);
+                var repository = await gitService.GetRepositoryStateAsync(sourceThread.ProjectPath).ConfigureAwait(true);
                 if (!repository.IsRepository || string.IsNullOrWhiteSpace(repository.RootPath))
                 {
                     throw new InvalidOperationException("The source project is no longer a Git repository.");
@@ -1080,9 +1146,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             }
 
             var state = CreateThreadState(
+                sourceThread.ScopeKey,
                 result.ThreadId,
                 $"Fork of {sourceThread.DisplayTitle}",
-                worktree?.Path,
+                worktree?.Path ?? sourceWorkspace,
                 worktree?.Branch);
             state.Preview = sourceThread.Preview;
             var sourceService = threadWorkspace.GetRequired(sourceThread.ThreadId);
@@ -1103,7 +1170,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task ArchiveSelectedThreadAsync()
     {
-        if (!CanArchiveSelectedThread() || SelectedThread is null || SelectedProjectPath is null)
+        if (!CanArchiveSelectedThread() || SelectedThread is null)
         {
             return;
         }
@@ -1113,7 +1180,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
             await appServerSessionCoordinator.ArchiveThreadAsync(SelectedThread.ThreadId).ConfigureAwait(true);
             await Terminal.StopAndRemoveAsync(SelectedThread.ThreadId).ConfigureAwait(true);
-            threadStore.SetArchived(settings, SelectedProjectPath, SelectedThread.ThreadId, archived: true);
+            threadStore.SetArchived(settings, SelectedThread.ThreadId, archived: true);
             StatusMessage = "Codex thread archived";
             RefreshProjectThreads(SelectedThread.ThreadId);
             await settingsStore.SaveAsync(settings).ConfigureAwait(true);
@@ -1127,7 +1194,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task UnarchiveSelectedThreadAsync()
     {
-        if (!CanUnarchiveSelectedThread() || SelectedThread is null || SelectedProjectPath is null)
+        if (!CanUnarchiveSelectedThread() || SelectedThread is null)
         {
             return;
         }
@@ -1136,7 +1203,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
             await appServerSessionCoordinator.UnarchiveThreadAsync(SelectedThread.ThreadId).ConfigureAwait(true);
-            threadStore.SetArchived(settings, SelectedProjectPath, SelectedThread.ThreadId, archived: false);
+            threadStore.SetArchived(settings, SelectedThread.ThreadId, archived: false);
             StatusMessage = "Codex thread unarchived";
             RefreshProjectThreads(SelectedThread.ThreadId);
             await settingsStore.SaveAsync(settings).ConfigureAwait(true);
@@ -1301,27 +1368,29 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
 
     private ProjectThreadState CreateThreadState(
+        ThreadScopeKey scope,
         string threadId,
         string title,
-        string? workspacePath = null,
+        string workspacePath,
         string? worktreeBranch = null)
     {
-        var projectPath = SelectedProjectPath
-            ?? throw new InvalidOperationException("A project must be selected before creating a thread record.");
         var state = new ProjectThreadState
         {
-            ProjectPath = projectPath,
+            ScopeKind = scope.Kind,
+            ProjectPath = scope.ProjectPath ?? string.Empty,
             ThreadId = threadId,
             Title = title,
-            Mode = string.IsNullOrWhiteSpace(workspacePath) ? "local" : "worktree",
-            WorkspacePath = string.IsNullOrWhiteSpace(workspacePath) ? projectPath : Path.GetFullPath(workspacePath),
+            Mode = scope.Kind == ThreadScopeKind.General
+                ? "general"
+                : string.IsNullOrWhiteSpace(worktreeBranch) ? "local" : "worktree",
+            WorkspacePath = Path.GetFullPath(workspacePath),
             WorktreeBranch = worktreeBranch,
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };
         threadStore.Upsert(settings, state);
-        threadStore.SetActive(settings, projectPath, threadId);
+        threadStore.SetActive(settings, scope, threadId);
         threadWorkspace.Restore(state);
         followUpQueueWorkspace.Restore(threadId, state.QueuedFollowUps);
         return state;
@@ -1427,7 +1496,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         _ = SaveLayoutSelectionAsync();
         if (appServerSessionCoordinator.State == AppServerSessionState.Connected)
         {
-            var policyCwd = SelectedProjectPath is null ? null : Path.GetFullPath(SelectedProjectPath);
+            var policyCwd = GetActiveWorkspacePathIfAvailable();
             if (!executionPolicyLoaded || !string.Equals(executionPolicyCwd, policyCwd, StringComparison.OrdinalIgnoreCase))
             {
                 _ = RefreshExecutionPolicyAsync(policyCwd, appServerWarmUpCancellation.Token);
@@ -1449,7 +1518,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private string? GetActiveWorkspacePathIfAvailable()
     {
-        var path = SelectedThread?.WorkspacePath ?? SelectedProjectPath;
+        var path = SelectedThread?.WorkspacePath ?? SelectedProjectPath ?? generalWorkspacePath;
         return string.IsNullOrWhiteSpace(path) ? null : Path.GetFullPath(path);
     }
 
@@ -1462,14 +1531,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
 
         var key = string.IsNullOrWhiteSpace(SelectedProjectPath)
-            ? null
+            ? "scope:general"
             : $"project:{Path.GetFullPath(SelectedProjectPath)}";
         return new TerminalContext(key, workspacePath);
     }
 
     private GitContext CreateGitContext() => new(
         SelectedProjectPath,
-        GetActiveWorkspacePathIfAvailable());
+        GetActiveWorkspacePathIfAvailable(),
+        IsGeneral: string.IsNullOrWhiteSpace(SelectedProjectPath));
 
     private async Task SaveThemeSelectionAsync()
     {
@@ -1502,12 +1572,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (IsTurnRunning)
         {
             StatusMessage = "A Codex turn is already running";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(SelectedProjectPath))
-        {
-            StatusMessage = "Select a project before starting a Codex task";
             return;
         }
 
@@ -1610,20 +1674,19 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task<string> EnsureActiveThreadAsync()
     {
-        if (string.IsNullOrWhiteSpace(SelectedProjectPath))
-        {
-            throw new InvalidOperationException("A project must be selected before starting a Codex thread.");
-        }
+        var scope = GetCurrentScope();
+        var workspacePath = GetWorkspacePath(scope);
 
         if (string.IsNullOrWhiteSpace(activeThreadId))
         {
             var thread = await appServerSessionCoordinator
-                .StartThreadAsync(CreateThreadStartOptions())
+                .StartThreadAsync(CreateThreadStartOptions(workspacePath))
                 .ConfigureAwait(true);
             AssistantWorktree? worktree = null;
-            if (string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal))
+            if (scope.Kind == ThreadScopeKind.Project &&
+                string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal))
             {
-                var repository = await gitService.GetRepositoryStateAsync(SelectedProjectPath).ConfigureAwait(true);
+                var repository = await gitService.GetRepositoryStateAsync(scope.ProjectPath!).ConfigureAwait(true);
                 if (!repository.IsRepository || string.IsNullOrWhiteSpace(repository.RootPath))
                 {
                     throw new InvalidOperationException("A new worktree requires a detected Git repository.");
@@ -1636,9 +1699,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             }
 
             CreateThreadState(
+                scope,
                 thread.ThreadId,
                 $"Thread {ProjectThreads.Count + 1}",
-                worktree?.Path,
+                worktree?.Path ?? workspacePath,
                 worktree?.Branch);
             RefreshProjectThreads(thread.ThreadId);
             loadedThreadIds.Add(thread.ThreadId);
@@ -1673,9 +1737,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 ex);
 
             var thread = await appServerSessionCoordinator
-                .StartThreadAsync(CreateThreadStartOptions())
+                .StartThreadAsync(CreateThreadStartOptions(workspacePath))
                 .ConfigureAwait(true);
-            CreateThreadState(thread.ThreadId, $"Thread {ProjectThreads.Count + 1}");
+            CreateThreadState(scope, thread.ThreadId, $"Thread {ProjectThreads.Count + 1}", workspacePath);
             RefreshProjectThreads(thread.ThreadId);
             loadedThreadIds.Add(thread.ThreadId);
             activeThreadLoaded = true;
@@ -1899,9 +1963,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private bool CanManageThreads() =>
         !IsShuttingDown &&
-        !string.IsNullOrWhiteSpace(SelectedProjectPath) &&
         currentCodex.IsFound &&
         currentAuth.Readiness is not (AuthReadiness.Unavailable or AuthReadiness.NotSignedIn);
+
+    private bool CanCreateThreadInCurrentScope() =>
+        CanManageThreads() &&
+        (!string.IsNullOrWhiteSpace(SelectedProjectPath) || !string.IsNullOrWhiteSpace(generalWorkspacePath));
+
+    private bool CanCreateGeneralThread() =>
+        CanManageThreads() && !string.IsNullOrWhiteSpace(generalWorkspacePath);
 
     private bool CanUseSelectedThread() => CanManageThreads() && SelectedThread is not null;
 
@@ -1916,6 +1986,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private bool CanRemoveSelectedWorktree() =>
         CanUseSelectedThread() &&
+        SelectedThread?.ScopeKind == ThreadScopeKind.Project &&
         SelectedThread?.IsRunning == false &&
         string.Equals(SelectedThread.Mode, "worktree", StringComparison.OrdinalIgnoreCase) &&
         !string.IsNullOrWhiteSpace(SelectedThread.WorkspacePath) &&
@@ -1951,8 +2022,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private string GetActiveWorkspacePath()
     {
-        var path = SelectedThread?.WorkspacePath ?? SelectedProjectPath
-            ?? throw new InvalidOperationException("Select a project before starting a Codex task.");
+        var path = SelectedThread?.WorkspacePath ?? SelectedProjectPath ?? generalWorkspacePath
+            ?? throw new InvalidOperationException(generalWorkspaceError ?? "The General workspace is unavailable.");
         path = Path.GetFullPath(path);
         if (!Directory.Exists(path))
         {
@@ -1974,7 +2045,34 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         return resolved;
     }
 
-    private CodexThreadStartOptions CreateThreadStartOptions()
+    private ThreadScopeKey GetCurrentScope() =>
+        SelectedThread?.ScopeKey
+        ?? (!string.IsNullOrWhiteSpace(SelectedProjectPath)
+            ? ThreadScopeKey.ForProject(SelectedProjectPath)
+            : ThreadScopeKey.General);
+
+    private string GetWorkspacePath(ThreadScopeKey scope)
+    {
+        var path = scope.Kind == ThreadScopeKind.General
+            ? generalWorkspacePath
+            : scope.ProjectPath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new InvalidOperationException(scope.Kind == ThreadScopeKind.General
+                ? generalWorkspaceError ?? "The General workspace is unavailable."
+                : "The selected project workspace is unavailable.");
+        }
+
+        path = Path.GetFullPath(path);
+        if (!Directory.Exists(path))
+        {
+            throw new InvalidOperationException($"The active workspace is unavailable: {path}");
+        }
+
+        return path;
+    }
+
+    private CodexThreadStartOptions CreateThreadStartOptions(string cwd)
     {
         var permissions = ResolvePermissionPolicy();
         return new CodexThreadStartOptions(
@@ -1982,7 +2080,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             permissions.Sandbox,
             permissions.ApprovalPolicy,
             permissions.ApprovalsReviewer,
-            permissions.PermissionProfileId);
+            permissions.PermissionProfileId,
+            cwd);
     }
 
     private CodexThreadResumeRequest CreateThreadResumeRequest(string threadId, string cwd)
@@ -2516,13 +2615,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
 
         if (!string.IsNullOrWhiteSpace(routedThreadId) &&
-            !string.IsNullOrWhiteSpace(SelectedProjectPath) &&
             notification.Method is "thread/archived" or "thread/unarchived" &&
             settings.ProjectThreads.Any(thread => string.Equals(thread.ThreadId, routedThreadId, StringComparison.Ordinal)))
         {
             threadStore.SetArchived(
                 settings,
-                SelectedProjectPath,
                 routedThreadId,
                 archived: notification.Method == "thread/archived");
         }
@@ -2614,22 +2711,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void RestorePersistedThreadState()
     {
         ProjectThreads.Clear();
-        if (string.IsNullOrWhiteSpace(SelectedProjectPath))
-        {
-            threadService.Reset();
-            SelectedThread = null;
-            RefreshProjectNavigation();
-            return;
-        }
-
-        foreach (var persisted in threadStore.GetProjectThreads(settings, SelectedProjectPath))
+        var scope = string.IsNullOrWhiteSpace(SelectedProjectPath)
+            ? ThreadScopeKey.General
+            : ThreadScopeKey.ForProject(SelectedProjectPath);
+        foreach (var persisted in threadStore.GetThreads(settings, scope))
         {
             ProjectThreads.Add(persisted);
             threadWorkspace.Restore(persisted);
             followUpQueueWorkspace.Restore(persisted.ThreadId, persisted.QueuedFollowUps);
         }
 
-        SelectedThread = threadStore.GetActive(settings, SelectedProjectPath);
+        SelectedThread = threadStore.GetActive(settings, scope);
         if (SelectedThread is null)
         {
             threadService = new CodexThreadService();
@@ -2644,26 +2736,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private ProjectThreadState? FindProjectThreadState()
     {
-        if (string.IsNullOrWhiteSpace(SelectedProjectPath))
-        {
-            return null;
-        }
-
-        return SelectedThread ?? threadStore.GetActive(settings, SelectedProjectPath);
+        return SelectedThread ?? threadStore.GetActive(settings, GetCurrentScope());
     }
 
     private void RefreshProjectThreads(string? selectedThreadId = null)
     {
-        if (string.IsNullOrWhiteSpace(SelectedProjectPath))
-        {
-            ProjectThreads.Clear();
-            SelectedThread = null;
-            return;
-        }
-
+        var scope = GetCurrentScope();
         selectedThreadId ??= SelectedThread?.ThreadId;
         ProjectThreads.Clear();
-        foreach (var thread in threadStore.GetProjectThreads(settings, SelectedProjectPath))
+        foreach (var thread in threadStore.GetThreads(settings, scope))
         {
             ProjectThreads.Add(thread);
         }
@@ -2675,6 +2756,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void HandleSelectedThreadChanged(ProjectThreadState? state)
     {
+        if (state?.ScopeKind == ThreadScopeKind.General && !string.IsNullOrWhiteSpace(SelectedProjectPath))
+        {
+            CaptureAttachmentDraft(SelectedProjectPath, activeThreadId);
+            SelectedProjectPath = null;
+            activeThreadId = null;
+            activeTurnId = null;
+            activeThreadLoaded = false;
+            RefreshProjectThreads(state.ThreadId);
+            return;
+        }
+
         SelectThread(state);
         OnPropertyChanged(nameof(SelectedThread));
         OnPropertyChanged(nameof(ActiveWorkspacePath));
@@ -2687,14 +2779,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         var previousActiveThreadId = activeThreadId;
         CaptureAttachmentDraft(SelectedProjectPath, previousActiveThreadId);
-        if (previousActiveThreadId is null && state is not null && !string.IsNullOrWhiteSpace(SelectedProjectPath))
+        if (previousActiveThreadId is null && state is not null)
         {
-            var normalizedProject = Path.GetFullPath(SelectedProjectPath);
+            var scope = state.ScopeKey;
             var newThreadDraft = settings.ComposerAttachmentDrafts.FirstOrDefault(item =>
-                string.Equals(Path.GetFullPath(item.ProjectPath), normalizedProject, StringComparison.OrdinalIgnoreCase) &&
+                scope.Matches(item.ScopeKind, item.ProjectPath) &&
                 item.ThreadId is null);
             var existingThreadDraft = settings.ComposerAttachmentDrafts.Any(item =>
-                string.Equals(Path.GetFullPath(item.ProjectPath), normalizedProject, StringComparison.OrdinalIgnoreCase) &&
+                scope.Matches(item.ScopeKind, item.ProjectPath) &&
                 string.Equals(item.ThreadId, state.ThreadId, StringComparison.Ordinal));
             if (newThreadDraft is not null && !existingThreadDraft)
             {
@@ -2726,9 +2818,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             TaskWorkspace.UseFollowUpQueue(followUpQueueWorkspace.ThreadIds.Contains(state.ThreadId)
                 ? followUpQueueWorkspace.GetRequired(state.ThreadId)
                 : followUpQueueWorkspace.Restore(state.ThreadId, state.QueuedFollowUps));
-            if (!state.IsArchived && !string.IsNullOrWhiteSpace(SelectedProjectPath))
+            if (!state.IsArchived)
             {
-                threadStore.SetActive(settings, SelectedProjectPath, state.ThreadId);
+                threadStore.SetActive(settings, state.ScopeKey, state.ThreadId);
             }
         }
 
@@ -2755,7 +2847,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task SaveActiveThreadStateAsync()
     {
-        if (string.IsNullOrWhiteSpace(SelectedProjectPath) || string.IsNullOrWhiteSpace(activeThreadId))
+        if (string.IsNullOrWhiteSpace(activeThreadId))
         {
             return;
         }
@@ -2765,16 +2857,19 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var persisted = FindProjectThreadState();
             if (persisted is null)
             {
+                var scope = GetCurrentScope();
                 persisted = new ProjectThreadState
                 {
-                    ProjectPath = SelectedProjectPath,
+                    ScopeKind = scope.Kind,
+                    ProjectPath = scope.ProjectPath ?? string.Empty,
                     ThreadId = activeThreadId,
-                    Title = $"Thread {ProjectThreads.Count + 1}"
+                    Title = $"Thread {ProjectThreads.Count + 1}",
+                    Mode = scope.Kind == ThreadScopeKind.General ? "general" : "local",
+                    WorkspacePath = GetActiveWorkspacePath()
                 };
                 threadStore.Upsert(settings, persisted);
             }
 
-            persisted.ProjectPath = SelectedProjectPath;
             persisted.ThreadId = activeThreadId;
             persisted.FinalResponse = threadService.FinalResponse;
             persisted.TimelineItems = [.. threadService.TimelineItems.TakeLast(100)];
@@ -2800,6 +2895,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void RefreshProjectNavigation()
     {
         var threads = new List<ProjectThreadState>();
+        threads.AddRange(string.IsNullOrWhiteSpace(SelectedProjectPath)
+            ? ProjectThreads
+            : threadStore.GetThreads(settings, ThreadScopeKey.General));
         foreach (var project in settings.RecentProjects)
         {
             if (ProjectNavigationItemViewModel.PathsEqual(project.Path, SelectedProjectPath))

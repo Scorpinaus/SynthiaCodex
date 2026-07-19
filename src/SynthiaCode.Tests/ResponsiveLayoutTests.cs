@@ -220,7 +220,8 @@ internal static class ResponsiveLayoutTests
                 "navigation action menus paint their complete popup background");
         }
 
-        var projectList = FindVisualDescendants<ListBox>(view).First();
+        var projectList = FindVisualDescendants<ListBox>(view)
+            .First(listBox => ReferenceEquals(listBox.ItemsSource, workspace.Projects));
         var scroller = FindVisualDescendant<ScrollViewer>(projectList)
             ?? throw new InvalidOperationException("project navigation scroll viewer was not created");
         var projectText = FindVisualDescendants<TextBlock>(view).Single(block => block.Text == longProjectName);
@@ -359,6 +360,9 @@ internal static class ResponsiveLayoutTests
         () => Task.CompletedTask,
         () => Task.CompletedTask,
         () => Task.CompletedTask,
+        () => Task.CompletedTask,
+        () => Task.CompletedTask,
+        () => true,
         () => true,
         () => true,
         () => true,

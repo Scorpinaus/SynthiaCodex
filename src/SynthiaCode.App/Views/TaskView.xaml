@@ -43,15 +43,6 @@
                     <DataTemplate>
                         <Border Style="{StaticResource ConversationTurnCard}" Margin="2,2,2,18" AutomationProperties.Name="Conversation turn">
                             <StackPanel>
-                                <Grid Margin="0,0,0,10">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <TextBlock Text="Turn" Style="{StaticResource SectionLabel}" Margin="0"/>
-                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                        <TextBlock Text="{Binding StartedAt, StringFormat={}{0:g}}" Style="{StaticResource ConversationMetadataText}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                        <Border Style="{StaticResource StatePill}"><TextBlock Text="{Binding StatusLabel}" Style="{StaticResource ConversationMetadataText}"/></Border>
-                                    </StackPanel>
-                                </Grid>
-
                                 <Border Style="{StaticResource ConversationUserSurface}" Margin="48,0,0,12" AutomationProperties.Name="User message">
                                     <StackPanel>
                                         <TextBlock Text="You" Style="{StaticResource ConversationRoleText}" Foreground="{DynamicResource SignalBrush}" Margin="0,0,0,6"/>
@@ -74,6 +65,24 @@
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
+                                        <Grid Margin="0,10,0,0">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding StartedAtLocalTime, StringFormat={}{0:g}}"
+                                                       Style="{StaticResource ConversationMetadataText}"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,8,0"
+                                                       AutomationProperties.Name="User message date and time"/>
+                                            <Button Grid.Column="2"
+                                                    Content="Copy"
+                                                    CommandParameter="{Binding UserPrompt}"
+                                                    Style="{StaticResource CompactButton}"
+                                                    MinHeight="24"
+                                                    Padding="7,2"
+                                                    Click="OnCopyMessageClick"
+                                                    ToolTip="Copy user message"
+                                                    AutomationProperties.Name="Copy user message"/>
+                                        </Grid>
                                     </StackPanel>
                                 </Border>
 
@@ -103,6 +112,25 @@
                                                                     LinkCommand="{Binding DataContext.TaskWorkspace.OpenExternalUriCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                                                     Style="{StaticResource ConversationBodyText}"
                                                                     AutomationProperties.LiveSetting="Polite"/>
+                                        <Grid Margin="0,10,0,0">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding CompletedAtLocalTime, StringFormat={}{0:g}}"
+                                                       Style="{StaticResource ConversationMetadataText}"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,8,0"
+                                                       AutomationProperties.Name="Assistant message date and time"/>
+                                            <Button Grid.Column="2"
+                                                    Content="Copy"
+                                                    CommandParameter="{Binding AssistantResponse}"
+                                                    IsEnabled="{Binding HasAssistantResponse}"
+                                                    Style="{StaticResource CompactButton}"
+                                                    MinHeight="24"
+                                                    Padding="7,2"
+                                                    Click="OnCopyMessageClick"
+                                                    ToolTip="Copy assistant message"
+                                                    AutomationProperties.Name="Copy assistant message"/>
+                                        </Grid>
                                     </StackPanel>
                                 </Border>
                             </StackPanel>

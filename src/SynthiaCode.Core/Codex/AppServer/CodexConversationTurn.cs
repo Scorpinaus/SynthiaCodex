@@ -44,9 +44,12 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
             if (SetProperty(ref assistantResponse, value ?? string.Empty))
             {
                 OnPropertyChanged(nameof(AssistantResponseDisplay));
+                OnPropertyChanged(nameof(HasAssistantResponse));
             }
         }
     }
+
+    public bool HasAssistantResponse => !string.IsNullOrWhiteSpace(AssistantResponse);
 
     public string AssistantResponseDisplay => string.IsNullOrWhiteSpace(AssistantResponse)
         ? Status == CodexTurnStatus.Running ? "Working…" : "No assistant response"
@@ -70,11 +73,21 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
 
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    public DateTime StartedAtLocalTime => StartedAt.LocalDateTime;
+
     public DateTimeOffset? CompletedAt
     {
         get => completedAt;
-        set => SetProperty(ref completedAt, value);
+        set
+        {
+            if (SetProperty(ref completedAt, value))
+            {
+                OnPropertyChanged(nameof(CompletedAtLocalTime));
+            }
+        }
     }
+
+    public DateTime? CompletedAtLocalTime => CompletedAt?.LocalDateTime;
 
     public ObservableCollection<CodexTimelineItem> Activity { get; } = [];
 

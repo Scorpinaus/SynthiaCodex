@@ -188,6 +188,17 @@ public partial class TaskView : UserControl
         FollowLatest();
     }
 
+    private void OnCopyMessageClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { CommandParameter: string message } &&
+            !string.IsNullOrWhiteSpace(message))
+        {
+            Clipboard.SetText(message);
+        }
+
+        e.Handled = true;
+    }
+
     private void OnAttachClick(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { ContextMenu: { } menu } button)

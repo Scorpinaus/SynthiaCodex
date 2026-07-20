@@ -243,7 +243,9 @@ internal static class ResponsiveLayoutTests
                 TurnId = "responsive-turn",
                 UserPrompt = longLine,
                 AssistantResponse = tallResponse,
-                Status = CodexTurnStatus.Completed
+                Status = CodexTurnStatus.Completed,
+                StartedAt = DateTimeOffset.Parse("2026-07-20T12:43:00+08:00"),
+                CompletedAt = DateTimeOffset.Parse("2026-07-20T12:45:00+08:00")
             }
         };
         var view = new TaskView { Width = 620, Height = 520 };
@@ -264,6 +266,21 @@ internal static class ResponsiveLayoutTests
         Assert(responseText.ActualWidth <= scroller.ViewportWidth + 0.5, "assistant response stays within transcript viewport");
         Assert(responseText.ActualHeight > responseText.FontSize * 3, "assistant response wraps to multiple lines");
         Assert(responseText.Inlines.OfType<Hyperlink>().Any(), "assistant response renders a clickable markdown link");
+        var transcriptText = FindVisualDescendants<TextBlock>(conversationList).ToList();
+        var userTimestamp = transcriptText.Single(block =>
+            AutomationProperties.GetName(block) == "User message date and time");
+        var assistantTimestamp = transcriptText.Single(block =>
+            AutomationProperties.GetName(block) == "Assistant message date and time");
+        Assert(!string.IsNullOrWhiteSpace(userTimestamp.Text), "user message has its own timestamp footer");
+        Assert(!string.IsNullOrWhiteSpace(assistantTimestamp.Text), "assistant message has its own timestamp footer");
+        Assert(!transcriptText.Any(block => block.Text is "Turn" or "Completed"), "turn-level metadata is removed");
+
+        var copyButtons = FindVisualDescendants<Button>(conversationList)
+            .Where(button => button.Content?.ToString() == "Copy")
+            .ToDictionary(AutomationProperties.GetName);
+        Assert(copyButtons.Count == 2, "each message has a copy action");
+        Assert(Equals(copyButtons["Copy user message"].CommandParameter, longLine), "user copy action targets the user message");
+        Assert(Equals(copyButtons["Copy assistant message"].CommandParameter, tallResponse), "assistant copy action targets the assistant message");
         Assert(
             VirtualizingPanel.GetScrollUnit(conversationList) == ScrollUnit.Pixel,
             "transcript uses pixel scrolling for variable-height turns");

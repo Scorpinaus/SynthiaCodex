@@ -1,5 +1,6 @@
 using System.Text;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Documents;
@@ -46,15 +47,42 @@ public sealed class MarkdownTextBlock : TextBlock
         var segmentStart = 0;
         for (var lineStart = 0; lineStart < source.Length; lineStart = FindNextLineStart(source, lineStart))
         {
-            if (!TryReadMarkdownTable(source, lineStart, out var tableEnd, out var table))
+            Inline? block = null;
+            var blockEnd = lineStart;
+            if (TryReadFencedCodeBlock(source, lineStart, out blockEnd, out var code))
+            {
+                block = new InlineUIContainer(CreateFencedCodeBlock(code));
+            }
+            else if (TryReadMarkdownTable(source, lineStart, out blockEnd, out var table))
+            {
+                block = new InlineUIContainer(CreateTable(table));
+            }
+            else if (TryReadBlockQuote(source, lineStart, out blockEnd, out var quote))
+            {
+                block = new InlineUIContainer(CreateBlockQuote(quote));
+            }
+            else if (TryReadHeading(source, lineStart, out blockEnd, out var headingLevel, out var headingContent))
+            {
+                block = CreateHeading(headingLevel, headingContent);
+            }
+            else if (TryReadHorizontalRule(source, lineStart, out blockEnd))
+            {
+                block = new InlineUIContainer(CreateHorizontalRule());
+            }
+            else if (TryReadListItem(source, lineStart, out blockEnd, out var listPrefix, out var listContent, out var listAutomationName))
+            {
+                block = CreateListItem(listPrefix, listContent, listAutomationName);
+            }
+
+            if (block is null)
             {
                 continue;
             }
 
             AppendInlineMarkdown(Inlines, source[segmentStart..lineStart]);
-            Inlines.Add(new InlineUIContainer(CreateTable(table)));
-            segmentStart = tableEnd;
-            lineStart = tableEnd;
+            Inlines.Add(block);
+            segmentStart = blockEnd;
+            lineStart = blockEnd;
         }
 
         AppendInlineMarkdown(Inlines, source[segmentStart..]);
@@ -64,10 +92,47 @@ public sealed class MarkdownTextBlock : TextBlock
     {
         for (var index = 0; index < source.Length;)
         {
+            if (IsEscapedPunctuation(source, index))
+            {
+                inlines.Add(new Run(source[(index + 1)..(index + 2)]));
+                index += 2;
+                continue;
+            }
+
+            if (source[index] == '`' && index + 1 < source.Length && source[index + 1] == '`')
+            {
+                var markerEnd = index + 2;
+                while (markerEnd < source.Length && source[markerEnd] == '`')
+                {
+                    markerEnd++;
+                }
+
+                inlines.Add(new Run(source[index..markerEnd]));
+                index = markerEnd;
+                continue;
+            }
+
             if (source[index] == '`' && TryReadCodeSpan(source, index, out var codeEnd))
             {
-                inlines.Add(new Run(source[index..codeEnd]));
+                var code = new Run(source[(index + 1)..(codeEnd - 1)]);
+                code.SetResourceReference(TextElement.FontFamilyProperty, "MonoFont");
+                code.SetResourceReference(TextElement.BackgroundProperty, "SubtleBrush");
+                AutomationProperties.SetName(code, "Inline code");
+                inlines.Add(code);
                 index = codeEnd;
+                continue;
+            }
+
+            if (IsCombinedEmphasisMarkerStart(source, index) &&
+                TryReadDelimited(source, index, source.Substring(index, 3), out var combinedEnd, out var combinedContent))
+            {
+                var combined = new Bold();
+                AutomationProperties.SetName(combined, "Bold italic");
+                var emphasis = new Italic();
+                AppendInlineMarkdown(emphasis.Inlines, combinedContent);
+                combined.Inlines.Add(emphasis);
+                inlines.Add(combined);
+                index = combinedEnd;
                 continue;
             }
 
@@ -78,6 +143,27 @@ public sealed class MarkdownTextBlock : TextBlock
                 AppendInlineMarkdown(strong.Inlines, strongContent);
                 inlines.Add(strong);
                 index = strongEnd;
+                continue;
+            }
+
+            if (IsStrikethroughMarkerStart(source, index) &&
+                TryReadDelimited(source, index, "~~", out var strikeEnd, out var strikeContent))
+            {
+                var strike = new Span { TextDecorations = System.Windows.TextDecorations.Strikethrough };
+                AutomationProperties.SetName(strike, "Strikethrough");
+                AppendInlineMarkdown(strike.Inlines, strikeContent);
+                inlines.Add(strike);
+                index = strikeEnd;
+                continue;
+            }
+
+            if (IsEmphasisMarkerStart(source, index) &&
+                TryReadDelimited(source, index, source[index].ToString(), out var emphasisEnd, out var emphasisContent))
+            {
+                var emphasis = new Italic();
+                AppendInlineMarkdown(emphasis.Inlines, emphasisContent);
+                inlines.Add(emphasis);
+                index = emphasisEnd;
                 continue;
             }
 
@@ -115,6 +201,123 @@ public sealed class MarkdownTextBlock : TextBlock
         }
     }
 
+    private Span CreateHeading(int level, string content)
+    {
+        var heading = new Span
+        {
+            FontSize = FontSize * (level switch
+            {
+                1 => 1.6,
+                2 => 1.45,
+                3 => 1.3,
+                4 => 1.2,
+                5 => 1.1,
+                _ => 1.05
+            }),
+            FontWeight = FontWeights.Bold
+        };
+        AutomationProperties.SetName(heading, $"Markdown heading level {level}");
+        AppendInlineMarkdown(heading.Inlines, content);
+        return heading;
+    }
+
+    private Span CreateListItem(string prefix, string content, string automationName)
+    {
+        var item = new Span();
+        AutomationProperties.SetName(item, automationName);
+        item.Inlines.Add(new Run(prefix));
+        AppendInlineMarkdown(item.Inlines, content);
+        return item;
+    }
+
+    private Border CreateHorizontalRule()
+    {
+        var rule = new Border
+        {
+            Height = 1,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Margin = new Thickness(0, 8, 0, 8)
+        };
+        rule.SetResourceReference(Border.BackgroundProperty, "LineBrush");
+        BindBlockWidth(rule);
+        AutomationProperties.SetName(rule, "Markdown horizontal rule");
+        return rule;
+    }
+
+    private Border CreateBlockQuote(string content)
+    {
+        var quote = new Border
+        {
+            BorderThickness = new Thickness(3, 0, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Margin = new Thickness(0, 4, 0, 4),
+            Padding = new Thickness(10, 4, 8, 4),
+            Child = CreateNestedMarkdownTextBlock(content)
+        };
+        quote.SetResourceReference(Border.BorderBrushProperty, "SignalBrush");
+        BindBlockWidth(quote);
+        AutomationProperties.SetName(quote, "Markdown block quote");
+        return quote;
+    }
+
+    private Border CreateFencedCodeBlock(string content)
+    {
+        var code = new TextBlock
+        {
+            Text = content.TrimEnd('\r', '\n'),
+            TextWrapping = TextWrapping.NoWrap,
+            FontSize = FontSize,
+            Foreground = Foreground
+        };
+        code.SetResourceReference(TextElement.FontFamilyProperty, "MonoFont");
+
+        var scroller = new ScrollViewer
+        {
+            Content = code,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
+        var block = new Border
+        {
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(5),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Margin = new Thickness(0, 4, 0, 4),
+            Padding = new Thickness(9, 7, 9, 7),
+            Child = scroller
+        };
+        block.SetResourceReference(Border.BackgroundProperty, "SubtleBrush");
+        block.SetResourceReference(Border.BorderBrushProperty, "LineBrush");
+        BindBlockWidth(block);
+        AutomationProperties.SetName(block, "Markdown fenced code block");
+        return block;
+    }
+
+    private MarkdownTextBlock CreateNestedMarkdownTextBlock(string content)
+    {
+        var nested = new MarkdownTextBlock
+        {
+            Markdown = content,
+            LinkCommand = LinkCommand,
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = FontFamily,
+            FontSize = FontSize,
+            FontStyle = FontStyle,
+            FontStretch = FontStretch,
+            FontWeight = FontWeight,
+            Foreground = Foreground
+        };
+        if (!double.IsNaN(LineHeight))
+        {
+            nested.LineHeight = LineHeight;
+        }
+
+        return nested;
+    }
+
+    private void BindBlockWidth(FrameworkElement block) =>
+        block.SetBinding(FrameworkElement.WidthProperty, new Binding(nameof(ActualWidth)) { Source = this });
+
     private Grid CreateTable(MarkdownTable table)
     {
         var grid = new Grid
@@ -122,7 +325,8 @@ public sealed class MarkdownTextBlock : TextBlock
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Margin = new Thickness(0, 4, 0, 4)
         };
-        grid.SetBinding(FrameworkElement.WidthProperty, new Binding(nameof(ActualWidth)) { Source = this });
+        BindBlockWidth(grid);
+        AutomationProperties.SetName(grid, "Markdown table");
 
         for (var column = 0; column < table.Header.Length; column++)
         {
@@ -136,22 +340,14 @@ public sealed class MarkdownTextBlock : TextBlock
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             for (var column = 0; column < table.Header.Length; column++)
             {
-                var cellText = new MarkdownTextBlock
+                var cellText = CreateNestedMarkdownTextBlock(rows[row][column]);
+                cellText.FontWeight = row == 0 ? FontWeights.SemiBold : FontWeight;
+                cellText.TextAlignment = table.Alignments[column] switch
                 {
-                    Markdown = rows[row][column],
-                    LinkCommand = LinkCommand,
-                    TextWrapping = TextWrapping.Wrap,
-                    FontFamily = FontFamily,
-                    FontSize = FontSize,
-                    FontStyle = FontStyle,
-                    FontStretch = FontStretch,
-                    FontWeight = row == 0 ? FontWeights.SemiBold : FontWeight,
-                    Foreground = Foreground
+                    MarkdownTableAlignment.Center => TextAlignment.Center,
+                    MarkdownTableAlignment.Right => TextAlignment.Right,
+                    _ => TextAlignment.Left
                 };
-                if (!double.IsNaN(LineHeight))
-                {
-                    cellText.LineHeight = LineHeight;
-                }
 
                 var cell = new Border
                 {
@@ -213,6 +409,30 @@ public sealed class MarkdownTextBlock : TextBlock
         ((source[start] == '*' && source[start + 1] == '*') ||
          (source[start] == '_' && source[start + 1] == '_'));
 
+    private static bool IsCombinedEmphasisMarkerStart(string source, int start) =>
+        start + 2 < source.Length &&
+        ((source[start] == '*' && source[start + 1] == '*' && source[start + 2] == '*') ||
+         (source[start] == '_' && source[start + 1] == '_' && source[start + 2] == '_'));
+
+    private static bool IsStrikethroughMarkerStart(string source, int start) =>
+        start + 1 < source.Length && source[start] == '~' && source[start + 1] == '~';
+
+    private static bool IsEmphasisMarkerStart(string source, int start)
+    {
+        if (start >= source.Length || source[start] is not '*' and not '_' || IsStrongMarkerStart(source, start))
+        {
+            return false;
+        }
+
+        return start == 0 || !char.IsLetterOrDigit(source[start - 1]);
+    }
+
+    private static bool IsEscapedPunctuation(string source, int start) =>
+        start + 1 < source.Length &&
+        source[start] == '\\' &&
+        source[start + 1] is '\\' or '`' or '*' or '_' or '{' or '}' or '[' or ']' or
+            '(' or ')' or '#' or '+' or '-' or '.' or '!' or '|' or '>' or '~';
+
     private static bool TryReadStrong(string source, int start, out int end, out string content)
     {
         end = start;
@@ -232,6 +452,231 @@ public sealed class MarkdownTextBlock : TextBlock
         content = source[(start + marker.Length)..closing];
         end = closing + marker.Length;
         return true;
+    }
+
+    private static bool TryReadDelimited(
+        string source,
+        int start,
+        string marker,
+        out int end,
+        out string content)
+    {
+        end = start;
+        content = string.Empty;
+        var searchStart = start + marker.Length;
+        for (var closing = source.IndexOf(marker, searchStart, StringComparison.Ordinal);
+             closing >= 0;
+             closing = source.IndexOf(marker, closing + marker.Length, StringComparison.Ordinal))
+        {
+            if (closing == searchStart || (closing > 0 && source[closing - 1] == '\\'))
+            {
+                continue;
+            }
+
+            content = source[searchStart..closing];
+            end = closing + marker.Length;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadHeading(
+        string source,
+        int start,
+        out int end,
+        out int level,
+        out string content)
+    {
+        ReadLine(source, start, out var line, out end, out _);
+        level = 0;
+        content = string.Empty;
+        if (!TryTrimBlockIndent(line, out var trimmed))
+        {
+            return false;
+        }
+
+        while (level < trimmed.Length && level < 6 && trimmed[level] == '#')
+        {
+            level++;
+        }
+        if (level == 0 || level >= trimmed.Length || !char.IsWhiteSpace(trimmed[level]))
+        {
+            level = 0;
+            return false;
+        }
+
+        content = trimmed[(level + 1)..].TrimEnd();
+        return true;
+    }
+
+    private static bool TryReadListItem(
+        string source,
+        int start,
+        out int end,
+        out string prefix,
+        out string content,
+        out string automationName)
+    {
+        ReadLine(source, start, out var line, out end, out _);
+        prefix = string.Empty;
+        content = string.Empty;
+        automationName = string.Empty;
+        if (!TryTrimBlockIndent(line, out var trimmed))
+        {
+            return false;
+        }
+
+        if (trimmed.Length >= 2 &&
+            trimmed[0] is '-' or '*' or '+' &&
+            char.IsWhiteSpace(trimmed[1]))
+        {
+            content = trimmed[2..].TrimStart();
+            prefix = "• ";
+            automationName = "Markdown unordered list item";
+            if (content.Length >= 4 &&
+                content[0] == '[' &&
+                content[2] == ']' &&
+                char.IsWhiteSpace(content[3]) &&
+                content[1] is ' ' or 'x' or 'X')
+            {
+                prefix = content[1] is 'x' or 'X' ? "☑ " : "☐ ";
+                content = content[4..].TrimStart();
+                automationName = "Markdown task list item";
+            }
+
+            return true;
+        }
+
+        var digitEnd = 0;
+        while (digitEnd < trimmed.Length && digitEnd < 9 && char.IsDigit(trimmed[digitEnd]))
+        {
+            digitEnd++;
+        }
+        if (digitEnd == 0 ||
+            digitEnd + 1 >= trimmed.Length ||
+            trimmed[digitEnd] != '.' ||
+            !char.IsWhiteSpace(trimmed[digitEnd + 1]))
+        {
+            return false;
+        }
+
+        prefix = $"{trimmed[..digitEnd]}. ";
+        content = trimmed[(digitEnd + 2)..].TrimStart();
+        automationName = "Markdown ordered list item";
+        return true;
+    }
+
+    private static bool TryReadHorizontalRule(string source, int start, out int end)
+    {
+        ReadLine(source, start, out var line, out end, out _);
+        if (!TryTrimBlockIndent(line, out var trimmed))
+        {
+            return false;
+        }
+
+        var marker = new string(trimmed.Where(character => !char.IsWhiteSpace(character)).ToArray());
+        return marker.Length >= 3 &&
+               marker[0] is '-' or '_' or '*' &&
+               marker.All(character => character == marker[0]);
+    }
+
+    private static bool TryReadBlockQuote(string source, int start, out int end, out string content)
+    {
+        end = start;
+        content = string.Empty;
+        var lines = new List<string>();
+        for (var current = start; current < source.Length;)
+        {
+            ReadLine(source, current, out var line, out var lineEnd, out var nextLineStart);
+            if (!TryTrimBlockIndent(line, out var trimmed) || trimmed.Length == 0 || trimmed[0] != '>')
+            {
+                break;
+            }
+
+            var quoted = trimmed[1..];
+            if (quoted.Length > 0 && quoted[0] == ' ')
+            {
+                quoted = quoted[1..];
+            }
+            lines.Add(quoted);
+            end = lineEnd;
+            current = nextLineStart;
+        }
+
+        if (lines.Count == 0)
+        {
+            return false;
+        }
+
+        content = string.Join(Environment.NewLine, lines);
+        return true;
+    }
+
+    private static bool TryReadFencedCodeBlock(
+        string source,
+        int start,
+        out int end,
+        out string content)
+    {
+        end = start;
+        content = string.Empty;
+        ReadLine(source, start, out var openingLine, out _, out var contentStart);
+        if (!TryTrimBlockIndent(openingLine, out var opening) ||
+            opening.Length < 3 ||
+            opening[0] is not '`' and not '~')
+        {
+            return false;
+        }
+
+        var marker = opening[0];
+        var markerLength = 0;
+        while (markerLength < opening.Length && opening[markerLength] == marker)
+        {
+            markerLength++;
+        }
+        if (markerLength < 3)
+        {
+            return false;
+        }
+
+        for (var current = contentStart; current < source.Length;)
+        {
+            ReadLine(source, current, out var line, out var lineEnd, out var nextLineStart);
+            if (TryTrimBlockIndent(line, out var closing) && IsClosingFence(closing, marker, markerLength))
+            {
+                content = source[contentStart..current];
+                end = lineEnd;
+                return true;
+            }
+
+            current = nextLineStart;
+        }
+
+        return false;
+    }
+
+    private static bool IsClosingFence(string line, char marker, int minimumLength)
+    {
+        var markerLength = 0;
+        while (markerLength < line.Length && line[markerLength] == marker)
+        {
+            markerLength++;
+        }
+
+        return markerLength >= minimumLength && line[markerLength..].All(char.IsWhiteSpace);
+    }
+
+    private static bool TryTrimBlockIndent(string line, out string trimmed)
+    {
+        var indent = 0;
+        while (indent < line.Length && line[indent] == ' ')
+        {
+            indent++;
+        }
+
+        trimmed = indent <= 3 ? line[indent..] : string.Empty;
+        return indent <= 3;
     }
 
     private static bool TryReadMarkdownTable(string source, int start, out int end, out MarkdownTable table)
@@ -274,8 +719,20 @@ public sealed class MarkdownTextBlock : TextBlock
             nextRowStart = followingRowStart;
         }
 
-        table = new MarkdownTable(header, rows);
+        var alignments = delimiter.Select(ReadTableAlignment).ToArray();
+        table = new MarkdownTable(header, rows, alignments);
         return true;
+    }
+
+    private static MarkdownTableAlignment ReadTableAlignment(string delimiter)
+    {
+        var marker = delimiter.Trim();
+        return (marker.StartsWith(':'), marker.EndsWith(':')) switch
+        {
+            (true, true) => MarkdownTableAlignment.Center,
+            (false, true) => MarkdownTableAlignment.Right,
+            _ => MarkdownTableAlignment.Left
+        };
     }
 
     private static bool TryParseTableRow(string line, out string[] cells)
@@ -473,7 +930,11 @@ public sealed class MarkdownTextBlock : TextBlock
         for (var index = start; index < source.Length; index++)
         {
             if (source[index] is '[' or '<' or '`' ||
+                IsEscapedPunctuation(source, index) ||
+                IsCombinedEmphasisMarkerStart(source, index) ||
                 IsStrongMarkerStart(source, index) ||
+                IsStrikethroughMarkerStart(source, index) ||
+                IsEmphasisMarkerStart(source, index) ||
                 IsBareUrlStart(source, index))
             {
                 return index;
@@ -483,5 +944,15 @@ public sealed class MarkdownTextBlock : TextBlock
         return source.Length;
     }
 
-    private sealed record MarkdownTable(string[] Header, IReadOnlyList<string[]> Rows);
+    private sealed record MarkdownTable(
+        string[] Header,
+        IReadOnlyList<string[]> Rows,
+        IReadOnlyList<MarkdownTableAlignment> Alignments);
+
+    private enum MarkdownTableAlignment
+    {
+        Left,
+        Center,
+        Right
+    }
 }

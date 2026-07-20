@@ -1,7 +1,7 @@
 # SynthiaCode and ChatGPT Desktop Feature Parity
 
-- **Audit date:** 19 July 2026
-- **SynthiaCode baseline:** commit `319b67d` (`Add file folder attachments`) plus the completed external managed-snapshot implementation recorded below
+- **Audit date:** 20 July 2026
+- **SynthiaCode baseline:** commit `8755915` (`Improve answer formatting via bold and table formatting`) plus the completed Markdown rendering expansion recorded below
 - **Comparison surface:** ChatGPT desktop app with Codex/local-project capabilities
 - **Scope:** User-visible desktop functionality, local Codex workflows, and capabilities inherited through `codex app-server`
 
@@ -65,6 +65,7 @@
 | Feature | SynthiaCode | Status | Remaining difference |
 | --- | --- | --- | --- |
 | Streaming coding transcript | Batched streaming, user/activity/assistant separation, raw diagnostics, bounded history, and Jump to latest | **Full** | None material for text coding tasks. |
+| Assistant Markdown rendering | Headings, bold, italic, combined emphasis, strikethrough, inline and fenced code, ordered/unordered/task lists, block quotes, horizontal rules, aligned pipe tables, safe links/autolinks, escapes, and literal malformed-source fallback | **Near** | No remote Markdown images, raw HTML, nested-list layout, footnotes, definition lists, syntax highlighting, or per-code-block copy action. |
 | Rich activity rows | Commands, file changes, tools, MCP calls, web searches, plans, collaboration, guidance, and errors are projected | **Near** | Some newer item families may appear only in raw diagnostics until allowlisted. |
 | Integrated terminal | Per-thread ConPTY PowerShell sessions with start, input, clear, kill, working directory, and bounded output | **Partial** | ChatGPT can directly consume current terminal output and exposes reusable project actions; SynthiaCode does not wire terminal output into agent context or environment actions. |
 | Git status and file diff | Working/staged views, changed-file selection, and refresh | **Near** | Diff is plain text rather than a structured hunk/code-review surface. |
@@ -90,7 +91,7 @@
 | Chrome integration | No Chrome extension or signed-in Chrome control | **Missing** | ChatGPT can operate existing Chrome sessions through its extension. |
 | Computer Use | No screen/desktop control surface | **Missing** | ChatGPT can control supported desktop apps and browser UI with explicit permissions. |
 | File attachments and image inputs | Image/file/folder pickers, clipboard file-list paste, Explorer drag/drop, ordered previews, image capability checks, attachment-only/mixed input, queue/transcript persistence, contained live workspace references, and immutable managed snapshots for external images/files/folders | **Near** | Interactive folder review/exclusions, optional live external roots, app-server history mention materialization, bounded thumbnail decoding, attachment-specific permission preflight, and installed-runtime managed-mention smoke coverage remain follow-up work. |
-| Artifact/file viewer | Markdown text and safe links render; no document/spreadsheet/slide/PDF artifact viewer | **Missing** | ChatGPT can create and preview files in conversation. |
+| Artifact/file viewer | Rich assistant Markdown renders in the transcript, but there is no document/spreadsheet/slide/PDF artifact viewer | **Missing** | ChatGPT can create and preview files in conversation. |
 | Image generation, Sites, and visualizations | No dedicated generation or interactive artifact surfaces | **Missing** | These are broader ChatGPT capabilities rather than core local coding requirements. |
 | Scheduled tasks | No create/manage/run history or recurring local project tasks | **Missing** | ChatGPT Scheduled supports local/worktree runs, chat continuity, skills, plugins, and RRULE schedules. |
 | Remote/cloud connections | Local stdio app-server only; no SSH/device/cloud chat surface | **Missing** | ChatGPT supports remote connections, cloud environments, and cloud-operated work. |
@@ -111,6 +112,14 @@
 | Chat profile, usage insights, and pets | Basic account/rate-limit view only | **Partial** | Profile analytics/cards and pets are non-core gaps. |
 
 ## What changed in this recheck
+
+Assistant answer Markdown moved from basic text/link rendering to **Near** parity for common technical responses:
+
+1. Inline rendering now supports bold, italic, combined bold/italic, strikethrough, styled inline code, safe links/autolinks, and backslash-escaped Markdown punctuation.
+2. Block rendering now supports six ATX heading levels, ordered and unordered lists, checked and unchecked task lists, multi-line block quotes, horizontal rules, and backtick or tilde fenced code blocks with horizontal scrolling.
+3. Pipe tables retain bold/code/link formatting inside cells, honor left/center/right delimiter alignment, use responsive themed grids, and stay within the transcript width.
+4. Invalid tables, unmatched emphasis, and unclosed code fences remain visible rather than being partially consumed; focused parser tests, malformed-input tests, and responsive transcript coverage protect these behaviors.
+5. Remaining Markdown gaps are explicitly limited to remote images, raw HTML, nested-list layout, footnotes, definition lists, syntax highlighting, and code-block-specific copy controls.
 
 Projectless threads moved from **Missing** to **Full** for the local conversation outcome:
 

@@ -60,7 +60,6 @@ internal static class ResponsiveLayoutTests
         resources["ConversationTurnCard"] = BorderStyle(new Thickness(14));
         resources["ConversationUserSurface"] = BorderStyle(new Thickness(12));
         resources["ConversationAssistantSurface"] = BorderStyle(new Thickness(12));
-        resources["ConversationActivitySurface"] = BorderStyle(new Thickness(10, 8, 10, 8));
         resources["CompactButton"] = new Style(typeof(Button));
         resources["CreateThreadButton"] = new Style(typeof(Button));
         resources["ProjectActionButton"] = new Style(typeof(Button));
@@ -235,20 +234,26 @@ internal static class ResponsiveLayoutTests
     private static void VerifyTranscriptWrapsAndScrolls()
     {
         var longLine = string.Join(' ', Enumerable.Repeat("A responsive assistant response with [release notes](https://example.com/releases) must stay inside the transcript column.", 18));
+        var longActivity = string.Join(' ', Enumerable.Repeat("Complete activity details must remain visible inside the assistant message.", 20));
         var table = "| Model | Availability | Best suited for |\n|---|---|---|\n| **Qwen3.7-Max** | Hosted/API | Long-running agents |";
         var tallResponse = $"{table}{Environment.NewLine}{Environment.NewLine}{string.Join(Environment.NewLine, Enumerable.Repeat(longLine, 12))}";
-        var turns = new ObservableCollection<CodexConversationTurn>
+        var turn = new CodexConversationTurn
         {
-            new()
-            {
-                TurnId = "responsive-turn",
-                UserPrompt = longLine,
-                AssistantResponse = tallResponse,
-                Status = CodexTurnStatus.Completed,
-                StartedAt = DateTimeOffset.Parse("2026-07-20T12:43:00+08:00"),
-                CompletedAt = DateTimeOffset.Parse("2026-07-20T12:45:00+08:00")
-            }
+            TurnId = "responsive-turn",
+            UserPrompt = longLine,
+            AssistantResponse = tallResponse,
+            Status = CodexTurnStatus.Completed,
+            StartedAt = DateTimeOffset.Parse("2026-07-20T12:43:00+08:00"),
+            CompletedAt = DateTimeOffset.Parse("2026-07-20T12:45:00+08:00")
         };
+        turn.Activity.Add(new CodexTimelineItem(
+            CodexTimelineItemKind.WebSearch,
+            "Searched the web",
+            longActivity,
+            "item/webSearch",
+            DateTimeOffset.UtcNow));
+        turn.IsActivityExpanded = true;
+        var turns = new ObservableCollection<CodexConversationTurn> { turn };
         var view = new TaskView { Width = 620, Height = 520 };
         var conversationList = (ListBox?)view.FindName("ConversationList")
             ?? throw new InvalidOperationException("conversation list was not found");
@@ -262,8 +267,20 @@ internal static class ResponsiveLayoutTests
             ?? throw new InvalidOperationException("conversation scroll viewer was not created");
         var responseText = FindVisualDescendants<MarkdownTextBlock>(conversationList)
             .Single(block => block.Markdown == tallResponse);
+        var assistantSurface = FindVisualDescendants<Border>(conversationList)
+            .Single(border => AutomationProperties.GetName(border) == "Assistant message");
+        var activityExpander = FindVisualDescendants<Expander>(conversationList)
+            .Single(expander => AutomationProperties.GetName(expander) == "Turn activity");
+        var activityDetail = FindVisualDescendants<TextBlock>(activityExpander)
+            .Single(block => block.Text == longActivity);
 
         AssertNear(0, scroller.ScrollableWidth, "transcript has no horizontal scroll extent");
+        Assert(IsVisualDescendantOf(activityExpander, assistantSurface), "turn activity is contained by the assistant message surface");
+        Assert(IsVisualDescendantOf(responseText, assistantSurface), "assistant response shares the activity message surface");
+        Assert(activityDetail.TextTrimming == TextTrimming.None, "activity details are not visually trimmed");
+        Assert(activityDetail.TextWrapping != TextWrapping.NoWrap, "activity details wrap within the assistant message");
+        Assert(activityDetail.ActualHeight > activityDetail.FontSize * 3, "complete activity detail occupies multiple wrapped lines");
+        Assert(activityDetail.ActualWidth <= assistantSurface.ActualWidth + 0.5, "activity detail stays within the assistant message width");
         Assert(responseText.ActualWidth <= scroller.ViewportWidth + 0.5, "assistant response stays within transcript viewport");
         Assert(responseText.ActualHeight > responseText.FontSize * 3, "assistant response wraps to multiple lines");
         Assert(responseText.Inlines.OfType<Hyperlink>().Any(), "assistant response renders a clickable markdown link");
@@ -423,6 +440,19 @@ internal static class ResponsiveLayoutTests
 
     private static T? FindVisualDescendant<T>(DependencyObject root)
         where T : DependencyObject => FindVisualDescendants<T>(root).FirstOrDefault();
+
+    private static bool IsVisualDescendantOf(DependencyObject descendant, DependencyObject ancestor)
+    {
+        for (var current = VisualTreeHelper.GetParent(descendant); current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (ReferenceEquals(current, ancestor))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static void AssertNear(double expected, double actual, string message)
     {

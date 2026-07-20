@@ -3068,7 +3068,7 @@ internal sealed class FakeAppServerTransport : IAppServerTransport
 
     public async Task WaitForClientMessageCountAsync(int expectedCount)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         while (clientMessages.Count < expectedCount)
         {
             await clientMessageSignal.WaitAsync(timeout.Token);

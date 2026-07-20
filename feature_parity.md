@@ -1,7 +1,7 @@
 # SynthiaCode and ChatGPT Desktop Feature Parity
 
 - **Audit date:** 20 July 2026
-- **SynthiaCode baseline:** commit `8755915` (`Improve answer formatting via bold and table formatting`) plus the completed Markdown rendering expansion recorded below
+- **SynthiaCode baseline:** commit `5e7e2ee` (`Improved support for markdown rendering`) plus the completed activity presentation work recorded below
 - **Comparison surface:** ChatGPT desktop app with Codex/local-project capabilities
 - **Scope:** User-visible desktop functionality, local Codex workflows, and capabilities inherited through `codex app-server`
 
@@ -64,9 +64,9 @@
 
 | Feature | SynthiaCode | Status | Remaining difference |
 | --- | --- | --- | --- |
-| Streaming coding transcript | Batched streaming, user/activity/assistant separation, raw diagnostics, bounded history, and Jump to latest | **Full** | None material for text coding tasks. |
+| Streaming coding transcript | Batched streaming, distinct user messages, combined activity/assistant surfaces, raw diagnostics, bounded history, and Jump to latest | **Full** | None material for text coding tasks. |
 | Assistant Markdown rendering | Headings, bold, italic, combined emphasis, strikethrough, inline and fenced code, ordered/unordered/task lists, block quotes, horizontal rules, aligned pipe tables, safe links/autolinks, escapes, and literal malformed-source fallback | **Near** | No remote Markdown images, raw HTML, nested-list layout, footnotes, definition lists, syntax highlighting, or per-code-block copy action. |
-| Rich activity rows | Commands, file changes, tools, MCP calls, web searches, plans, collaboration, guidance, and errors are projected | **Near** | Some newer item families may appear only in raw diagnostics until allowlisted. |
+| Rich activity rows | Commands, complete file changes, tools, MCP calls, structured web-search actions, plans, collaboration, guidance, and errors are projected without client-side text truncation | **Near** | Some newer item families may appear only in raw diagnostics until allowlisted. |
 | Integrated terminal | Per-thread ConPTY PowerShell sessions with start, input, clear, kill, working directory, and bounded output | **Partial** | ChatGPT can directly consume current terminal output and exposes reusable project actions; SynthiaCode does not wire terminal output into agent context or environment actions. |
 | Git status and file diff | Working/staged views, changed-file selection, and refresh | **Near** | Diff is plain text rather than a structured hunk/code-review surface. |
 | Stage, unstage, discard, commit | File-level actions with destructive confirmation and commit message UI | **Near** | No individual-hunk operations. |
@@ -120,6 +120,14 @@ Assistant answer Markdown moved from basic text/link rendering to **Near** parit
 3. Pipe tables retain bold/code/link formatting inside cells, honor left/center/right delimiter alignment, use responsive themed grids, and stay within the transcript width.
 4. Invalid tables, unmatched emphasis, and unclosed code fences remain visible rather than being partially consumed; focused parser tests, malformed-input tests, and responsive transcript coverage protect these behaviors.
 5. Remaining Markdown gaps are explicitly limited to remote images, raw HTML, nested-list layout, footnotes, definition lists, syntax highlighting, and code-block-specific copy controls.
+
+Activity presentation now follows the combined Codex-style assistant outcome more closely:
+
+1. Each turn keeps a distinct user message while activity is nested at the top of the corresponding assistant message card.
+2. The activity expander retains live auto-expansion, historical collapse, stable lifecycle rows, and a divider from the final answer.
+3. User-facing activity no longer receives a 600-character ellipsis, and file changes retain every reported path rather than replacing paths after the fourth with a count.
+4. Completed web-search rows prefer the protocol's complete structured query list, page URL, or find-in-page pattern and URL, with the display query retained as a compatibility fallback.
+5. Long details wrap within the transcript; reducer, persistence, visual-containment, responsive-width, timestamp, and copy-action regressions are covered by the 152-test behavioral suite.
 
 Projectless threads moved from **Missing** to **Full** for the local conversation outcome:
 
@@ -215,3 +223,4 @@ Current ChatGPT/Codex behavior was checked against the official OpenAI manual an
 - [Projects and chats](https://learn.chatgpt.com/docs/projects)
 - [Image inputs](https://learn.chatgpt.com/docs/image-inputs)
 - [Code review](https://learn.chatgpt.com/docs/code-review)
+- [Codex app-server protocol](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)

@@ -86,27 +86,31 @@
                                     </StackPanel>
                                 </Border>
 
-                                <Border Style="{StaticResource ConversationActivitySurface}" Margin="24,0,24,12" Visibility="{Binding HasActivity, Converter={StaticResource BooleanToVisibilityConverter}}" AutomationProperties.Name="Turn activities">
-                                    <Expander Header="{Binding ActivitySummary}" IsExpanded="{Binding IsActivityExpanded, Mode=TwoWay}" AutomationProperties.Name="Turn activity">
-                                        <ItemsControl ItemsSource="{Binding Activity}" Margin="8,5,0,0">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1" Padding="0,7">
-                                                        <Grid>
-                                                            <Grid.ColumnDefinitions><ColumnDefinition Width="8"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                            <Ellipse Width="7" Height="7" Fill="{DynamicResource SignalBrush}" VerticalAlignment="Top" Margin="0,5,0,0"/>
-                                                            <StackPanel Grid.Column="2"><TextBlock Text="{Binding Title}" Style="{StaticResource ConversationActivityTitleText}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource ConversationActivityDetailText}" Margin="0,2,0,0"/></StackPanel>
-                                                            <TextBlock Grid.Column="3" Text="{Binding CategoryLabel}" Style="{StaticResource ConversationMetadataText}" Margin="8,2,0,0"/>
-                                                        </Grid>
-                                                    </Border>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </Expander>
-                                </Border>
-
                                 <Border Style="{StaticResource ConversationAssistantSurface}" Margin="0,0,48,0" AutomationProperties.Name="Assistant message">
                                     <StackPanel>
+                                        <Border BorderBrush="{DynamicResource LineBrush}"
+                                                BorderThickness="0,0,0,1"
+                                                Padding="0,0,0,10"
+                                                Margin="0,0,0,10"
+                                                Visibility="{Binding HasActivity, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                AutomationProperties.Name="Turn activities">
+                                            <Expander Header="{Binding ActivitySummary}" IsExpanded="{Binding IsActivityExpanded, Mode=TwoWay}" AutomationProperties.Name="Turn activity">
+                                                <ItemsControl ItemsSource="{Binding Activity}" Margin="8,5,0,0">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1" Padding="0,7">
+                                                                <Grid>
+                                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="8"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                                    <Ellipse Width="7" Height="7" Fill="{DynamicResource SignalBrush}" VerticalAlignment="Top" Margin="0,5,0,0"/>
+                                                                    <StackPanel Grid.Column="2"><TextBlock Text="{Binding Title}" Style="{StaticResource ConversationActivityTitleText}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource ConversationActivityDetailText}" Margin="0,2,0,0"/></StackPanel>
+                                                                    <TextBlock Grid.Column="3" Text="{Binding CategoryLabel}" Style="{StaticResource ConversationMetadataText}" Margin="8,2,0,0"/>
+                                                                </Grid>
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </Expander>
+                                        </Border>
                                         <TextBlock Text="Assistant" Style="{StaticResource ConversationRoleText}" Foreground="{DynamicResource CreateActionBrush}" Margin="0,0,0,6"/>
                                         <controls:MarkdownTextBlock Markdown="{Binding AssistantResponseDisplay}"
                                                                     LinkCommand="{Binding DataContext.TaskWorkspace.OpenExternalUriCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"

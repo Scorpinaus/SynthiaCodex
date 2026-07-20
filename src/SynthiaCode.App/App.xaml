@@ -47,10 +47,6 @@
         <Style x:Key="ConversationAssistantSurface" TargetType="Border" BasedOn="{StaticResource ConversationMessageSurface}">
             <Setter Property="Background" Value="{DynamicResource ConversationAssistantBrush}" />
         </Style>
-        <Style x:Key="ConversationActivitySurface" TargetType="Border" BasedOn="{StaticResource ConversationMessageSurface}">
-            <Setter Property="Background" Value="{DynamicResource ConversationActivityBrush}" />
-            <Setter Property="Padding" Value="10,8" />
-        </Style>
         <Style x:Key="ConversationBodyText" TargetType="TextBlock">
             <Setter Property="FontSize" Value="14" />
             <Setter Property="LineHeight" Value="22" />

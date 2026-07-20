@@ -20,6 +20,8 @@ internal static class Phase5CMultiTurnTests
         ("Unicode repair is conservative and idempotent", UnicodeRepairIsConservativeAsync),
         ("streamed and restored mojibake is repaired for presentation", StreamedAndRestoredMojibakeIsRepairedAsync),
         ("supported work items project friendly activity", SupportedWorkItemsProjectFriendlyActivityAsync),
+        ("activity details preserve complete source text", ActivityDetailsPreserveCompleteSourceTextAsync),
+        ("web search activity prefers complete structured queries", WebSearchActivityPrefersCompleteStructuredQueriesAsync),
         ("restored activity removes legacy protocol noise", RestoredActivityRemovesLegacyNoiseAsync)
     ];
 
@@ -426,6 +428,137 @@ internal static class Phase5CMultiTurnTests
         Assert(activity[0].Title == "Changed 2 files" && activity[0].Detail.Contains("src/App.xaml", StringComparison.Ordinal), "file activity is summarized");
         Assert(activity[1].Detail == "Codex app-server items", "search query is shown");
         Assert(activity[2].Detail == "Implementation is complete; verification remains.", "stable plan update replaces the experimental plan item");
+        return Task.CompletedTask;
+    }
+
+    private static Task ActivityDetailsPreserveCompleteSourceTextAsync()
+    {
+        var service = CreateRunningService("turn-full-activity");
+        var longCommand = $"dotnet test --filter {new string('c', 700)}";
+        var longPlan = $"Inspect and verify {new string('p', 700)}";
+        var longCommentary = $"Checking the implementation {new string('u', 700)}";
+        var longToolError = $"Tool failure detail {new string('e', 700)}";
+        var longDelegationPrompt = $"Review every relevant branch {new string('d', 700)}";
+        var longStandaloneError = $"Runtime failure detail {new string('r', 700)}";
+        var longGuidance = $"Please retain this complete guidance {new string('g', 700)}";
+        var paths = Enumerable.Range(1, 6).Select(index => $"src/Feature{index}/VeryLongActivityFile{index}.cs").ToArray();
+
+        service.ApplyNotification(NotificationWithItem(
+            "item/completed", "turn-full-activity", "command-full", "commandExecution", item =>
+            {
+                item["command"] = longCommand;
+                item["status"] = "completed";
+                item["exitCode"] = 0;
+            }));
+        service.ApplyNotification(NotificationWithItem(
+            "item/completed", "turn-full-activity", "files-full", "fileChange", item =>
+            {
+                item["status"] = "completed";
+                item["changes"] = new JsonArray(paths.Select(path => (JsonNode)new JsonObject { ["path"] = path }).ToArray());
+            }));
+        service.ApplyNotification(NotificationWithItem(
+            "item/completed", "turn-full-activity", "plan-full", "plan", item => item["text"] = longPlan));
+        service.ApplyNotification(NotificationWithItem(
+            "item/completed", "turn-full-activity", "tool-full", "mcpToolCall", item =>
+            {
+                item["server"] = "docs";
+                item["tool"] = "search";
+                item["status"] = "failed";
+                item["error"] = new JsonObject { ["message"] = longToolError };
+            }));
+        service.ApplyNotification(NotificationWithItem(
+            "item/completed", "turn-full-activity", "collaboration-full", "collabAgentToolCall", item =>
+            {
+                item["tool"] = "spawn_agent";
+                item["prompt"] = longDelegationPrompt;
+                item["status"] = "completed";
+            }));
+        service.ApplyNotification(NotificationWithItem(
+            "item/completed", "turn-full-activity", "commentary-full", "agentMessage", item =>
+            {
+                item["phase"] = "commentary";
+                item["text"] = longCommentary;
+            }));
+        service.AddGuidance(longGuidance);
+        service.ApplyNotification(new AppServerNotification(
+            "runtime/error",
+            Params("turn-full-activity", "error-full", message: longStandaloneError)));
+
+        var activity = service.ActiveConversationTurn!.Activity;
+        Assert(activity.Single(item => item.ItemId == "command-full").Detail == $"{longCommand} (exit 0)", "complete command text is retained");
+        var fileDetail = activity.Single(item => item.ItemId == "files-full").Detail;
+        Assert(paths.All(path => fileDetail.Contains(path, StringComparison.Ordinal)), "every changed path is retained");
+        Assert(!fileDetail.Contains(" more", StringComparison.Ordinal), "file activity does not replace paths with a count summary");
+        Assert(activity.Single(item => item.ItemId == "plan-full").Detail == longPlan, "complete plan text is retained");
+        Assert(activity.Single(item => item.ItemId == "tool-full").Detail == $"docs/search — {longToolError}", "complete tool error is retained");
+        Assert(activity.Single(item => item.ItemId == "collaboration-full").Detail == $"spawn_agent: {longDelegationPrompt}", "complete collaboration prompt is retained");
+        Assert(activity.Single(item => item.ItemId == "commentary-full").Detail == longCommentary, "complete commentary text is retained");
+        Assert(activity.Single(item => item.Kind == CodexTimelineItemKind.UserGuidance).Detail == longGuidance, "complete guidance text is retained");
+        Assert(activity.Single(item => item.ItemId == "error-full").Detail == longStandaloneError, "complete standalone error is retained");
+        Assert(activity.All(item => !item.Detail.EndsWith('…')), "activity projection does not add an ellipsis");
+
+        var snapshot = service.SnapshotConversation();
+        var restored = new CodexThreadService();
+        restored.Restore("thread-restored-full", null, null, null, conversationTurns: snapshot);
+        Assert(
+            restored.ConversationTurns[0].Activity.Single(item => item.ItemId == "command-full").Detail == $"{longCommand} (exit 0)",
+            "complete activity text survives persistence and restoration");
+        return Task.CompletedTask;
+    }
+
+    private static Task WebSearchActivityPrefersCompleteStructuredQueriesAsync()
+    {
+        var service = CreateRunningService("turn-full-search");
+        var firstQuery = $"site:example.com {new string('a', 650)}";
+        var secondQuery = $"site:docs.example.com {new string('b', 650)}";
+
+        service.ApplyNotification(NotificationWithItem(
+            "item/started", "turn-full-search", "search-full", "webSearch", item =>
+            {
+                item["query"] = "Abbreviated search ...";
+            }));
+        service.ApplyNotification(NotificationWithItem(
+            "item/completed", "turn-full-search", "search-full", "webSearch", item =>
+            {
+                item["query"] = "Abbreviated search ...";
+                item["action"] = new JsonObject
+                {
+                    ["type"] = "search",
+                    ["queries"] = new JsonArray(firstQuery, secondQuery)
+                };
+            }));
+        service.ApplyNotification(NotificationWithItem(
+            "item/completed", "turn-full-search", "open-full", "webSearch", item =>
+            {
+                item["query"] = "Opening a page ...";
+                item["action"] = new JsonObject
+                {
+                    ["type"] = "openPage",
+                    ["url"] = "https://example.com/a/complete/path?with=query"
+                };
+            }));
+        service.ApplyNotification(NotificationWithItem(
+            "item/completed", "turn-full-search", "find-full", "webSearch", item =>
+            {
+                item["query"] = "Finding text ...";
+                item["action"] = new JsonObject
+                {
+                    ["type"] = "findInPage",
+                    ["pattern"] = "complete pattern text",
+                    ["url"] = "https://example.com/complete-document"
+                };
+            }));
+
+        var activity = service.ActiveConversationTurn!.Activity;
+        var detail = activity.Single(item => item.ItemId == "search-full").Detail;
+        Assert(detail == $"{firstQuery}{Environment.NewLine}{secondQuery}", "completed search row uses every complete structured query");
+        Assert(!detail.Contains("Abbreviated search ...", StringComparison.Ordinal), "structured queries replace the abbreviated display query");
+        Assert(
+            activity.Single(item => item.ItemId == "open-full").Detail == "https://example.com/a/complete/path?with=query",
+            "open-page search activity shows the complete URL");
+        Assert(
+            activity.Single(item => item.ItemId == "find-full").Detail == $"complete pattern text{Environment.NewLine}https://example.com/complete-document",
+            "find-in-page activity shows the complete pattern and URL");
         return Task.CompletedTask;
     }
 

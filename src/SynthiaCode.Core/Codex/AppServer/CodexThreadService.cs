@@ -544,7 +544,7 @@ public sealed class CodexThreadService
                 new CodexTimelineItem(
                     CodexTimelineItemKind.AssistantCommentary,
                     "Assistant update",
-                    LimitDetail(commentary),
+                    NormalizeActivityDetail(commentary),
                     "item/agentMessage",
                     DateTimeOffset.Now)
                 {
@@ -638,7 +638,7 @@ public sealed class CodexThreadService
         return CreateActivity(
             completed ? CodexTimelineItemKind.CommandCompleted : CodexTimelineItemKind.CommandStarted,
             title,
-            $"{LimitDetail(command)}{suffix}",
+            $"{NormalizeActivityDetail(command)}{suffix}",
             "item/commandExecution",
             itemId,
             $"command:{itemId}");
@@ -652,11 +652,7 @@ public sealed class CodexThreadService
         var title = !completed
             ? "Changing files"
             : failed ? "File changes failed" : paths.Count == 0 ? "Changed files" : paths.Count == 1 ? "Changed 1 file" : $"Changed {paths.Count} files";
-        var detail = paths.Count == 0 ? "Workspace files" : string.Join(", ", paths.Take(4));
-        if (paths.Count > 4)
-        {
-            detail += $" and {paths.Count - 4} more";
-        }
+        var detail = paths.Count == 0 ? "Workspace files" : string.Join(Environment.NewLine, paths);
         return CreateActivity(CodexTimelineItemKind.FileChange, title, detail, "item/fileChange", itemId, $"file:{itemId}");
     }
 
@@ -670,7 +666,7 @@ public sealed class CodexThreadService
         var failed = IsFailureStatus(status) || error is not null;
         var title = !completed ? "Using tool" : failed ? "Tool failed" : "Used tool";
         var detail = string.IsNullOrWhiteSpace(error) ? label : $"{label} — {error}";
-        return CreateActivity(CodexTimelineItemKind.ToolCall, title, LimitDetail(detail), "item/toolCall", itemId, $"tool:{itemId}");
+        return CreateActivity(CodexTimelineItemKind.ToolCall, title, NormalizeActivityDetail(detail), "item/toolCall", itemId, $"tool:{itemId}");
     }
 
     private static CodexTimelineItem CreateCollaborationActivity(JsonObject parameters, string itemId, bool completed)
@@ -680,19 +676,60 @@ public sealed class CodexThreadService
         var status = ReadString(parameters, "item.status");
         var title = !completed ? "Delegating work" : IsFailureStatus(status) ? "Delegated work failed" : "Delegated work";
         var detail = string.IsNullOrWhiteSpace(prompt) ? tool : $"{tool}: {prompt}";
-        return CreateActivity(CodexTimelineItemKind.Collaboration, title, LimitDetail(detail), "item/collaboration", itemId, $"collaboration:{itemId}");
+        return CreateActivity(CodexTimelineItemKind.Collaboration, title, NormalizeActivityDetail(detail), "item/collaboration", itemId, $"collaboration:{itemId}");
     }
 
     private static CodexTimelineItem CreateWebSearchActivity(JsonObject parameters, string itemId, bool completed)
     {
-        var query = ReadString(parameters, "item.query") ?? "Web search";
         return CreateActivity(
             CodexTimelineItemKind.WebSearch,
             completed ? "Searched the web" : "Searching the web",
-            LimitDetail(query),
+            ReadWebSearchActivityDetail(parameters),
             "item/webSearch",
             itemId,
             $"search:{itemId}");
+    }
+
+    private static string ReadWebSearchActivityDetail(JsonObject parameters)
+    {
+        var fallback = ReadString(parameters, "item.query") ?? "Web search";
+        if (parameters["item"]?["action"] is not JsonObject action)
+        {
+            return NormalizeActivityDetail(fallback);
+        }
+
+        var detail = ReadString(action, "type") switch
+        {
+            "search" => ReadSearchQueries(action),
+            "openPage" => ReadString(action, "url"),
+            "findInPage" => JoinActivityDetail(ReadString(action, "pattern"), ReadString(action, "url")),
+            _ => null
+        };
+        return NormalizeActivityDetail(string.IsNullOrWhiteSpace(detail) ? fallback : detail);
+    }
+
+    private static string? ReadSearchQueries(JsonObject action)
+    {
+        if (action["queries"] is JsonArray queries)
+        {
+            var values = queries
+                .Select(query => query is JsonValue value && value.TryGetValue<string>(out var text) ? text : null)
+                .Where(query => !string.IsNullOrWhiteSpace(query))
+                .Cast<string>()
+                .ToList();
+            if (values.Count > 0)
+            {
+                return string.Join(Environment.NewLine, values);
+            }
+        }
+
+        return ReadString(action, "query");
+    }
+
+    private static string? JoinActivityDetail(params string?[] values)
+    {
+        var present = values.Where(value => !string.IsNullOrWhiteSpace(value)).Cast<string>().ToList();
+        return present.Count == 0 ? null : string.Join(Environment.NewLine, present);
     }
 
     private static CodexTimelineItem CreatePlanActivity(JsonObject parameters, string itemId, bool completed)
@@ -701,7 +738,7 @@ public sealed class CodexThreadService
         return CreateActivity(
             CodexTimelineItemKind.PlanUpdate,
             completed ? "Updated plan" : "Updating plan",
-            LimitDetail(text),
+            NormalizeActivityDetail(text),
             "item/plan",
             itemId,
             "plan:turn");
@@ -731,7 +768,7 @@ public sealed class CodexThreadService
 
         var existing = turn.Activity[index];
         var baseDetail = existing.Detail.Split(" — ", 2, StringSplitOptions.None)[0];
-        turn.Activity[index] = existing with { Detail = LimitDetail($"{baseDetail} — {progress}") };
+        turn.Activity[index] = existing with { Detail = NormalizeActivityDetail($"{baseDetail} — {progress}") };
     }
 
     private void ProjectTurnPlanUpdate(AppServerNotification notification)
@@ -757,7 +794,7 @@ public sealed class CodexThreadService
             CreateActivity(
                 CodexTimelineItemKind.PlanUpdate,
                 "Updated plan",
-                LimitDetail(detail),
+                NormalizeActivityDetail(detail),
                 notification.Method,
                 "turn-plan",
                 "plan:turn"));
@@ -776,7 +813,7 @@ public sealed class CodexThreadService
             CreateActivity(
                 CodexTimelineItemKind.Error,
                 "Action needed",
-                LimitDetail(detail),
+                NormalizeActivityDetail(detail),
                 notification.Method,
                 itemId,
                 $"error:{itemId}"));
@@ -821,11 +858,7 @@ public sealed class CodexThreadService
         status?.Contains("cancel", StringComparison.OrdinalIgnoreCase) == true ||
         status?.Contains("declin", StringComparison.OrdinalIgnoreCase) == true;
 
-    private static string LimitDetail(string? detail, int maximumLength = 600)
-    {
-        var value = detail?.Trim() ?? string.Empty;
-        return value.Length <= maximumLength ? value : $"{value[..maximumLength]}…";
-    }
+    private static string NormalizeActivityDetail(string? detail) => detail?.Trim() ?? string.Empty;
 
     private static string? ReadItemId(JsonObject parameters) =>
         ReadString(parameters, "item.id") ?? ReadString(parameters, "itemId");

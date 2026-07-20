@@ -404,7 +404,6 @@ internal static class AttachmentInputTests
         resources["ConversationTurnCard"] = new Style(typeof(Border));
         resources["ConversationUserSurface"] = new Style(typeof(Border));
         resources["ConversationAssistantSurface"] = new Style(typeof(Border));
-        resources["ConversationActivitySurface"] = new Style(typeof(Border));
         resources["CompactButton"] = new Style(typeof(Button));
         resources["RunTaskButton"] = new Style(typeof(Button));
         resources["SectionLabel"] = new Style(typeof(TextBlock));

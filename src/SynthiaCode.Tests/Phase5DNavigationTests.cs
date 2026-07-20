@@ -7,6 +7,7 @@ internal static class Phase5DNavigationTests
     public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
     [
         ("project navigation groups threads and expands selection", NavigationGroupsThreadsAsync),
+        ("chat and project sections toggle independently", NavigationSectionsToggleIndependentlyAsync),
         ("project navigation preserves compact actionable statuses", CompactStatusesAreActionableAsync),
         ("project plus creates current-checkout threads", ProjectCreationActionsChooseWorkspaceAsync)
     ];
@@ -79,6 +80,31 @@ internal static class Phase5DNavigationTests
         thread.TurnStatus = "Completed";
         thread.IsArchived = true;
         Assert(thread.HasActionableStatus && thread.ActivityLabel == "Archived", "archived status remains visible");
+        return Task.CompletedTask;
+    }
+
+    private static Task NavigationSectionsToggleIndependentlyAsync()
+    {
+        var viewModel = CreateViewModel(_ => Task.CompletedTask);
+
+        Assert(viewModel.IsChatsExpanded, "Chats starts expanded");
+        Assert(viewModel.IsProjectsExpanded, "Projects starts expanded");
+        Assert(viewModel.ChatsChevron == "▾", "expanded Chats uses a down disclosure indicator");
+        Assert(viewModel.ProjectsChevron == "▾", "expanded Projects uses a down disclosure indicator");
+
+        viewModel.ToggleChatsCommand.Execute(null);
+        Assert(!viewModel.IsChatsExpanded, "Chats collapses from its header");
+        Assert(viewModel.IsProjectsExpanded, "collapsing Chats does not collapse Projects");
+        Assert(viewModel.ChatsChevron == "▸", "collapsed Chats uses a right disclosure indicator");
+
+        viewModel.ToggleProjectsCommand.Execute(null);
+        Assert(!viewModel.IsProjectsExpanded, "Projects collapses from its header");
+        Assert(!viewModel.IsChatsExpanded, "collapsing Projects does not expand Chats");
+        Assert(viewModel.ProjectsChevron == "▸", "collapsed Projects uses a right disclosure indicator");
+
+        viewModel.ToggleChatsCommand.Execute(null);
+        viewModel.ToggleProjectsCommand.Execute(null);
+        Assert(viewModel.IsChatsExpanded && viewModel.IsProjectsExpanded, "both sections can be reopened independently");
         return Task.CompletedTask;
     }
 

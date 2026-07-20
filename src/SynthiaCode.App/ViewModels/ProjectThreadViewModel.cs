@@ -12,6 +12,8 @@ public sealed class ProjectThreadViewModel : ObservableObject
     private readonly IReadOnlyList<AsyncRelayCommand> statefulCommands;
     private string? selectedProjectPath;
     private string? generalWorkspacePath;
+    private bool isChatsExpanded = true;
+    private bool isProjectsExpanded = true;
     private string newThreadWorkspaceMode = "Current checkout";
     private ProjectThreadState? selectedThread;
 
@@ -35,6 +37,8 @@ public sealed class ProjectThreadViewModel : ObservableObject
         Action<ProjectThreadState?> selectionChanged)
     {
         this.selectionChanged = selectionChanged;
+        ToggleChatsCommand = new RelayCommand(() => IsChatsExpanded = !IsChatsExpanded);
+        ToggleProjectsCommand = new RelayCommand(() => IsProjectsExpanded = !IsProjectsExpanded);
         BrowseProjectCommand = new AsyncRelayCommand(browseProject);
         OpenRecentProjectCommand = new AsyncRelayCommand(async parameter =>
         {
@@ -87,6 +91,8 @@ public sealed class ProjectThreadViewModel : ObservableObject
 
     public ObservableCollection<ProjectNavigationItemViewModel> Projects { get; } = [];
 
+    public ICommand ToggleChatsCommand { get; }
+    public ICommand ToggleProjectsCommand { get; }
     public ICommand BrowseProjectCommand { get; }
     public ICommand OpenRecentProjectCommand { get; }
     public ICommand NewThreadCommand { get; }
@@ -100,6 +106,34 @@ public sealed class ProjectThreadViewModel : ObservableObject
     public ICommand RemoveWorktreeCommand { get; }
 
     public IReadOnlyList<string> WorkspaceModeOptions { get; } = ["Current checkout", "New worktree"];
+
+    public bool IsChatsExpanded
+    {
+        get => isChatsExpanded;
+        set
+        {
+            if (SetProperty(ref isChatsExpanded, value))
+            {
+                OnPropertyChanged(nameof(ChatsChevron));
+            }
+        }
+    }
+
+    public bool IsProjectsExpanded
+    {
+        get => isProjectsExpanded;
+        set
+        {
+            if (SetProperty(ref isProjectsExpanded, value))
+            {
+                OnPropertyChanged(nameof(ProjectsChevron));
+            }
+        }
+    }
+
+    public string ChatsChevron => IsChatsExpanded ? "\u25be" : "\u25b8";
+
+    public string ProjectsChevron => IsProjectsExpanded ? "\u25be" : "\u25b8";
 
     public string? SelectedProjectPath
     {
@@ -161,7 +195,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
     public string ActiveWorkspaceLabel => SelectedThread?.WorkspaceModeLabel
         ?? (string.IsNullOrWhiteSpace(SelectedProjectPath) ? "General workspace" : "Current checkout");
 
-    public string SelectedThreadTitle => SelectedThread?.DisplayTitle ?? "No thread selected";
+    public string SelectedThreadTitle => SelectedThread?.DisplayTitle ?? "No chat selected";
 
     public void SetSelectedProjectPath(string? path) => SelectedProjectPath = path;
 

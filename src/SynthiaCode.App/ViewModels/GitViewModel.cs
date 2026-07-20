@@ -146,7 +146,7 @@ public sealed class GitViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(context.ProjectPath))
         {
             Reset(context.IsGeneral
-                ? "General threads are not attached to a Git project"
+                ? "Chats are not attached to a Git project"
                 : "Select a project to inspect Git changes");
             return;
         }

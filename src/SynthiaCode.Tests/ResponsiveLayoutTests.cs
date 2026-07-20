@@ -30,6 +30,7 @@ internal static class ResponsiveLayoutTests
         VerifyDarkLinkToolTip(Application.Current.Resources);
         VerifyTextOnlyContextMenu(Application.Current.Resources);
         VerifyWindowCloseIsDeferred();
+        VerifyCollapsibleNavigationSections();
         VerifyProjectNavigationWraps();
         VerifyTranscriptWrapsAndScrolls();
         VerifyQueuedFollowUpControls();
@@ -173,6 +174,55 @@ internal static class ResponsiveLayoutTests
     {
         var value = channel / 255d;
         return value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
+    }
+
+    private static void VerifyCollapsibleNavigationSections()
+    {
+        var workspace = CreateProjectViewModel();
+        var generalChat = new ProjectThreadState
+        {
+            ScopeKind = ThreadScopeKind.General,
+            ThreadId = "general-chat",
+            Title = "General chat"
+        };
+        workspace.RefreshProjectNavigation(
+            [new RecentProject(@"C:\Work\CollapsibleProject", "Collapsible project", DateTimeOffset.UtcNow)],
+            [generalChat]);
+
+        var view = new ProjectThreadView
+        {
+            DataContext = new ProjectContext(workspace),
+            Width = 268,
+            Height = 420
+        };
+
+        PumpLayout(view);
+        var text = FindVisualDescendants<TextBlock>(view).Select(block => block.Text).ToList();
+        Assert(text.Contains("Chats"), "General navigation is labelled Chats");
+        Assert(!text.Contains("General"), "the legacy General section label is absent");
+
+        var chatsToggle = FindVisualDescendants<Button>(view)
+            .Single(button => AutomationProperties.GetName(button) == "Toggle Chats");
+        var projectsToggle = FindVisualDescendants<Button>(view)
+            .Single(button => AutomationProperties.GetName(button) == "Toggle Projects");
+        var chatsList = FindVisualDescendants<ListBox>(view)
+            .Single(listBox => ReferenceEquals(listBox.ItemsSource, workspace.GeneralThreads));
+        var projectsList = FindVisualDescendants<ListBox>(view)
+            .Single(listBox => ReferenceEquals(listBox.ItemsSource, workspace.Projects));
+
+        Assert(chatsList.Visibility == Visibility.Visible, "Chats content starts visible");
+        Assert(projectsList.Visibility == Visibility.Visible, "Projects content starts visible");
+        Assert(ReferenceEquals(chatsToggle.Command, workspace.ToggleChatsCommand), "Chats header is wired to the Chats toggle command");
+        Assert(ReferenceEquals(projectsToggle.Command, workspace.ToggleProjectsCommand), "Projects header is wired to the Projects toggle command");
+
+        chatsToggle.Command.Execute(null);
+        PumpLayout(view);
+        Assert(chatsList.Visibility == Visibility.Collapsed, "Chats header collapses its chat list");
+        Assert(projectsList.Visibility == Visibility.Visible, "Chats collapse leaves Projects visible");
+
+        projectsToggle.Command.Execute(null);
+        PumpLayout(view);
+        Assert(projectsList.Visibility == Visibility.Collapsed, "Projects header collapses its project list");
     }
 
     private static void VerifyProjectNavigationWraps()

@@ -1,7 +1,7 @@
 # SynthiaCode and ChatGPT Desktop Feature Parity
 
 - **Audit date:** 20 July 2026
-- **SynthiaCode baseline:** commit `5e7e2ee` (`Improved support for markdown rendering`) plus the completed activity presentation work recorded below
+- **SynthiaCode baseline:** working tree based on commit `b2f384f` (`Combine activity item to assistant window`), including the completed navigation work recorded below
 - **Comparison surface:** ChatGPT desktop app with Codex/local-project capabilities
 - **Scope:** User-visible desktop functionality, local Codex workflows, and capabilities inherited through `codex app-server`
 
@@ -34,7 +34,7 @@
 | --- | --- | --- | --- |
 | Start a chat without a project | First-class General scope with a managed app-data workspace, explicit and implicit creation, persistence, resume/fork/archive, attachments, queues, permissions, and per-thread terminal context | **Full** | General intentionally has no Git or assistant-worktree operations until a project is attached. |
 | Open a local project/folder | Folder picker, recent projects, project grouping, and project-scoped app-server work | **Full** | None material for the local coding loop. |
-| Multiple local chats per project | Project/thread navigation with independently persisted threads | **Full** | ChatGPT has broader chat-management and search controls. |
+| Multiple local chats per project | Collapsible Chats and Projects groups, per-project disclosure, and independently persisted chats | **Full** | ChatGPT has broader chat-management and search controls. |
 | Multi-turn conversations | Restored history, follow-up turns, per-turn transcript/activity, cancellation, and recovery | **Full** | None material for normal local follow-ups. |
 | Resume, fork, archive, unarchive | Typed app-server lifecycle flows and UI actions | **Full** | Permanent delete is not exposed. |
 | Pin, delete, and search chats | Archive state exists; no complete pin/delete/search UI | **Partial** | Add sidebar pin/delete, cross-chat search, and find-in-chat. |
@@ -113,6 +113,14 @@
 
 ## What changed in this recheck
 
+Chat and project navigation now follows the compact Codex-style disclosure pattern:
+
+1. The former General navigation group is presented as **Chats**, matching the user-facing conversation terminology while retaining the protocol's internal thread model.
+2. Chats and Projects have independent, accessible disclosure controls and live chevrons; both start expanded and can be collapsed or reopened without changing selection or data.
+3. Individual projects retain their existing per-project disclosure, creation actions, counts, running indicators, and chat lists inside the top-level Projects group.
+4. Navigation tooltips, empty states, action labels, Git guidance, and the no-selection title now use chat-oriented wording consistently.
+5. Focused view-model tests and rendered-WPF tests cover independent toggling, command wiring, labels, disclosure state, and content visibility as part of the 153-test suite.
+
 Assistant answer Markdown moved from basic text/link rendering to **Near** parity for common technical responses:
 
 1. Inline rendering now supports bold, italic, combined bold/italic, strikethrough, styled inline code, safe links/autolinks, and backslash-escaped Markdown punctuation.
@@ -127,11 +135,11 @@ Activity presentation now follows the combined Codex-style assistant outcome mor
 2. The activity expander retains live auto-expansion, historical collapse, stable lifecycle rows, and a divider from the final answer.
 3. User-facing activity no longer receives a 600-character ellipsis, and file changes retain every reported path rather than replacing paths after the fourth with a count.
 4. Completed web-search rows prefer the protocol's complete structured query list, page URL, or find-in-page pattern and URL, with the display query retained as a compatibility fallback.
-5. Long details wrap within the transcript; reducer, persistence, visual-containment, responsive-width, timestamp, and copy-action regressions are covered by the 152-test behavioral suite.
+5. Long details wrap within the transcript; reducer, persistence, visual-containment, responsive-width, timestamp, and copy-action regressions are covered by the 153-test behavioral suite.
 
 Projectless threads moved from **Missing** to **Full** for the local conversation outcome:
 
-1. A dedicated General group and New action create threads without adding or selecting a project; first prompt submission also creates General implicitly.
+1. A dedicated collapsible Chats group and New action create chats without adding or selecting a project; first prompt submission also creates the General scope implicitly.
 2. General threads use a contained shared `%LOCALAPPDATA%\SynthiaCode\workspaces\general` root, and every thread/turn lifecycle request receives the correct absolute `cwd`.
 3. Explicit scope identity keeps General persistence, active selection, drafts, queued follow-ups, notifications, and navigation separate from project threads while legacy settings default to Project.
 4. Resume, fork, archive, unarchive, attachments, permission discovery, and isolated terminal sessions work in General; Git and assistant-worktree mutations remain project-only with a clear empty state.

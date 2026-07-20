@@ -235,7 +235,8 @@ internal static class ResponsiveLayoutTests
     private static void VerifyTranscriptWrapsAndScrolls()
     {
         var longLine = string.Join(' ', Enumerable.Repeat("A responsive assistant response with [release notes](https://example.com/releases) must stay inside the transcript column.", 18));
-        var tallResponse = string.Join(Environment.NewLine, Enumerable.Repeat(longLine, 12));
+        var table = "| Model | Availability | Best suited for |\n|---|---|---|\n| **Qwen3.7-Max** | Hosted/API | Long-running agents |";
+        var tallResponse = $"{table}{Environment.NewLine}{Environment.NewLine}{string.Join(Environment.NewLine, Enumerable.Repeat(longLine, 12))}";
         var turns = new ObservableCollection<CodexConversationTurn>
         {
             new()
@@ -266,6 +267,9 @@ internal static class ResponsiveLayoutTests
         Assert(responseText.ActualWidth <= scroller.ViewportWidth + 0.5, "assistant response stays within transcript viewport");
         Assert(responseText.ActualHeight > responseText.FontSize * 3, "assistant response wraps to multiple lines");
         Assert(responseText.Inlines.OfType<Hyperlink>().Any(), "assistant response renders a clickable markdown link");
+        var markdownTable = (Grid)responseText.Inlines.OfType<InlineUIContainer>().Single().Child;
+        Assert(markdownTable.ActualWidth > 0, "assistant markdown table participates in layout");
+        Assert(markdownTable.ActualWidth <= responseText.ActualWidth + 0.5, "assistant markdown table stays within the message width");
         var transcriptText = FindVisualDescendants<TextBlock>(conversationList).ToList();
         var userTimestamp = transcriptText.Single(block =>
             AutomationProperties.GetName(block) == "User message date and time");

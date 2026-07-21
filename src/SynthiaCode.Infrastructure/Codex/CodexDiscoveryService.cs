@@ -4,7 +4,9 @@ using SynthiaCode.Core.Logging;
 
 namespace SynthiaCode.Infrastructure.Codex;
 
-public sealed class CodexDiscoveryService(IAppLogger logger) : ICodexDiscoveryService
+public sealed class CodexDiscoveryService(
+    IAppLogger logger,
+    CodexRuntimeEnvironment? runtimeEnvironment = null) : ICodexDiscoveryService
 {
     private static readonly string[] WindowsExecutableNames =
     [
@@ -30,7 +32,7 @@ public sealed class CodexDiscoveryService(IAppLogger logger) : ICodexDiscoverySe
                     executable,
                     version,
                     $"Codex CLI {version}",
-                    "Codex executable was resolved from the configured path, PATH, or the OpenAI Codex app bin folder.");
+                    "Codex executable was resolved from the configured path, the standalone install, PATH, or the OpenAI Codex app bin folder.");
             }
         }
 
@@ -56,6 +58,14 @@ public sealed class CodexDiscoveryService(IAppLogger logger) : ICodexDiscoverySe
             }
         }
 
+        foreach (var directory in EnumerateStandaloneCodexBinDirectories())
+        {
+            foreach (var candidate in EnumerateDirectoryCandidates(directory, seen))
+            {
+                yield return candidate;
+            }
+        }
+
         var pathValue = Environment.GetEnvironmentVariable("PATH");
         if (!string.IsNullOrWhiteSpace(pathValue))
         {
@@ -74,6 +84,20 @@ public sealed class CodexDiscoveryService(IAppLogger logger) : ICodexDiscoverySe
             {
                 yield return candidate;
             }
+        }
+    }
+
+    private static IEnumerable<string> EnumerateStandaloneCodexBinDirectories()
+    {
+        var localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            yield return Path.Combine(
+                Environment.ExpandEnvironmentVariables(localAppData),
+                "Programs",
+                "OpenAI",
+                "Codex",
+                "bin");
         }
     }
 
@@ -121,6 +145,7 @@ public sealed class CodexDiscoveryService(IAppLogger logger) : ICodexDiscoverySe
         try
         {
             using var process = CreateProcess(executablePath, "--version");
+            runtimeEnvironment?.ApplyTo(process.StartInfo);
             process.Start();
 
             var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);

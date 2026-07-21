@@ -4,7 +4,9 @@ using SynthiaCode.Core.Logging;
 
 namespace SynthiaCode.Infrastructure.Codex;
 
-public sealed class CodexProcessService(IAppLogger logger) : ICodexProcessService
+public sealed class CodexProcessService(
+    IAppLogger logger,
+    CodexRuntimeEnvironment? runtimeEnvironment = null) : ICodexProcessService
 {
     public async Task<IAppServerTransport> StartAppServerTransportAsync(
         CodexInstallation installation,
@@ -15,7 +17,10 @@ public sealed class CodexProcessService(IAppLogger logger) : ICodexProcessServic
             throw new InvalidOperationException("Codex CLI is not available.");
         }
 
-        var transport = new CodexAppServerProcessTransport(installation.ExecutablePath, logger);
+        var transport = new CodexAppServerProcessTransport(
+            installation.ExecutablePath,
+            logger,
+            runtimeEnvironment);
         await transport.StartAsync(cancellationToken).ConfigureAwait(false);
         return transport;
     }

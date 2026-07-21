@@ -2,10 +2,13 @@ using System.Diagnostics;
 using SynthiaCode.Core.Auth;
 using SynthiaCode.Core.Codex;
 using SynthiaCode.Core.Logging;
+using SynthiaCode.Infrastructure.Codex;
 
 namespace SynthiaCode.Infrastructure.Auth;
 
-public sealed class CodexAuthService(IAppLogger logger) : IAuthService
+public sealed class CodexAuthService(
+    IAppLogger logger,
+    CodexRuntimeEnvironment? runtimeEnvironment = null) : IAuthService
 {
     public Task<AuthenticationState> GetAuthenticationStateAsync(
         CodexInstallation installation,
@@ -87,13 +90,7 @@ public sealed class CodexAuthService(IAppLogger logger) : IAuthService
     {
         try
         {
-            var quotedCommand = $"\"{executablePath}\" {arguments}";
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "cmd.exe",
-                Arguments = $"/k {quotedCommand}",
-                UseShellExecute = true
-            });
+            Process.Start(CreateStartInfo(executablePath, arguments));
 
             logger.Log(AppLogLevel.Information, eventName, "Started a visible Codex authentication command.");
             return true;
@@ -105,8 +102,27 @@ public sealed class CodexAuthService(IAppLogger logger) : IAuthService
         }
     }
 
-    private static string? GetCodexHome()
+    private ProcessStartInfo CreateStartInfo(string executablePath, string arguments)
     {
+        var quotedCommand = $"\"{executablePath}\" {arguments}";
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = $"/k {quotedCommand}",
+            UseShellExecute = false,
+            CreateNoWindow = false
+        };
+        runtimeEnvironment?.ApplyTo(startInfo);
+        return startInfo;
+    }
+
+    private string? GetCodexHome()
+    {
+        if (runtimeEnvironment is not null)
+        {
+            return runtimeEnvironment.HomePath;
+        }
+
         var configured = Environment.GetEnvironmentVariable("CODEX_HOME");
         if (!string.IsNullOrWhiteSpace(configured))
         {

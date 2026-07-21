@@ -4,7 +4,9 @@ using SynthiaCode.Core.Logging;
 
 namespace SynthiaCode.Infrastructure.Codex;
 
-public sealed class CodexCliUtilityRunner(IAppLogger logger) : ICodexCliUtilityRunner
+public sealed class CodexCliUtilityRunner(
+    IAppLogger logger,
+    CodexRuntimeEnvironment? runtimeEnvironment = null) : ICodexCliUtilityRunner
 {
     public Task<CodexCliUtilityResult> RunDoctorAsync(
         CodexInstallation installation,
@@ -25,6 +27,7 @@ public sealed class CodexCliUtilityRunner(IAppLogger logger) : ICodexCliUtilityR
         {
             StartInfo = CreateStartInfo(installation.ExecutablePath, command)
         };
+        runtimeEnvironment?.ApplyTo(process.StartInfo);
 
         logger.Log(
             AppLogLevel.Information,

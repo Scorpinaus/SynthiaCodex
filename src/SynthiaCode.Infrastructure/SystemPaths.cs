@@ -2,6 +2,8 @@ namespace SynthiaCode.Infrastructure;
 
 public static class SystemPaths
 {
+    public static string CodexHomeDirectory => Path.Combine(AppDataDirectory, "codex-home");
+
     public static string AppDataDirectory
     {
         get

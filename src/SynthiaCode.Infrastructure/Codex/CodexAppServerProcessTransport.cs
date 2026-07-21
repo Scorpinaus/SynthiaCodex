@@ -6,7 +6,10 @@ using SynthiaCode.Core.Logging;
 
 namespace SynthiaCode.Infrastructure.Codex;
 
-public sealed class CodexAppServerProcessTransport(string executablePath, IAppLogger logger) : IAppServerTransport
+public sealed class CodexAppServerProcessTransport(
+    string executablePath,
+    IAppLogger logger,
+    CodexRuntimeEnvironment? runtimeEnvironment = null) : IAppServerTransport
 {
     private static readonly Encoding ProtocolEncoding = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false,
@@ -27,6 +30,7 @@ public sealed class CodexAppServerProcessTransport(string executablePath, IAppLo
         {
             StartInfo = CreateStartInfo(executablePath)
         };
+        runtimeEnvironment?.ApplyTo(process.StartInfo);
 
         process.Start();
         stderrTask = Task.Run(ReadStandardErrorAsync, CancellationToken.None);

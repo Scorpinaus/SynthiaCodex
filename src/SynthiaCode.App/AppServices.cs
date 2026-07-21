@@ -111,8 +111,9 @@ public sealed class AppServices
         var settingsStore = new CoalescingSettingsStore(
             new JsonSettingsStore(appDataDirectory, logger),
             logger);
-        var codexDiscoveryService = new CodexDiscoveryService(logger);
-        var codexProcessService = new CodexProcessService(logger);
+        var codexRuntimeEnvironment = new CodexRuntimeEnvironment(SystemPaths.CodexHomeDirectory);
+        var codexDiscoveryService = new CodexDiscoveryService(logger, codexRuntimeEnvironment);
+        var codexProcessService = new CodexProcessService(logger, codexRuntimeEnvironment);
         var appServerSessionCoordinator = new AppServerSessionCoordinator(
             codexProcessService,
             logger,
@@ -120,14 +121,14 @@ public sealed class AppServices
                 "synthiacode",
                 "SynthiaCode",
                 Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.1.0"));
-        var authService = new CodexAuthService(logger);
+        var authService = new CodexAuthService(logger, codexRuntimeEnvironment);
         var gitService = new GitService(logger);
         var worktreeService = new WorktreeService(logger);
         var recentProjectService = new RecentProjectService();
         var folderPicker = new WpfFolderPicker();
         var userInteractionService = new WpfUserInteractionService();
         var themeService = new WpfThemeService();
-        var codexCliUtilityRunner = new CodexCliUtilityRunner(logger);
+        var codexCliUtilityRunner = new CodexCliUtilityRunner(logger, codexRuntimeEnvironment);
         var threadStore = new ThreadStore();
         var threadWorkspace = new CodexThreadWorkspace();
         var terminalService = new WindowsConPtyTerminalService(logger);

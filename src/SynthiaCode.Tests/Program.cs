@@ -50,10 +50,13 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("view model warms app-server after diagnostics", TestViewModelWarmsAppServerAfterDiagnosticsAsync),
     ("view model skips warm-up when sign-in is needed", TestViewModelSkipsWarmUpWhenSignInIsNeededAsync),
     ("auth detection reports file cache without reading token", TestAuthDetectionAsync),
+    ("codex runtime environment creates and applies isolated home", TestCodexRuntimeEnvironmentAsync),
     ("codex discovery skips unusable path candidates", TestCodexDiscoverySkipsUnusablePathCandidatesAsync),
+    ("codex discovery prefers the standalone install over PATH", TestCodexDiscoveryPrefersStandaloneInstallAsync),
     ("codex discovery checks OpenAI local app bin", TestCodexDiscoveryChecksOpenAiLocalAppBinAsync),
     ("app-server client writes initialize handshake", TestAppServerInitializeWritesHandshakeAsync),
     ("app-server process transport preserves UTF-8", TestAppServerProcessTransportPreservesUtf8Async),
+    ("app-server process transport uses isolated home", TestAppServerProcessTransportUsesIsolatedHomeAsync),
     ("app-server client serializes initialize writes", TestAppServerClientSerializesInitializeWritesAsync),
     ("app-server client starts thread and turn", TestAppServerStartsThreadAndTurnAsync),
     ("app-server client sends model and reasoning overrides", TestAppServerSendsModelAndReasoningOverridesAsync),
@@ -173,6 +176,23 @@ static Task TestRecentProjectsAsync()
     return Task.CompletedTask;
 }
 
+static Task TestCodexRuntimeEnvironmentAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var homePath = Path.Combine(temp.Root, "SynthiaCode", "codex-home");
+    var processCodexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+    var runtimeEnvironment = new CodexRuntimeEnvironment(homePath);
+    var startInfo = new ProcessStartInfo("codex.exe");
+
+    runtimeEnvironment.ApplyTo(startInfo);
+
+    AssertTrue(Directory.Exists(homePath), "isolated codex home is created");
+    AssertEqual(Path.GetFullPath(homePath), runtimeEnvironment.HomePath, "isolated codex home is normalized");
+    AssertEqual(runtimeEnvironment.HomePath, startInfo.Environment["CODEX_HOME"], "child CODEX_HOME is isolated");
+    AssertEqual(processCodexHome, Environment.GetEnvironmentVariable("CODEX_HOME"), "process CODEX_HOME is unchanged");
+    return Task.CompletedTask;
+}
+
 static async Task TestAppServerProcessTransportPreservesUtf8Async()
 {
     using var temp = TempWorkspace.Create();
@@ -211,6 +231,32 @@ static async Task TestAppServerProcessTransportPreservesUtf8Async()
     }
 
     AssertEqual(payload, echoed, "UTF-8 protocol round trip");
+}
+
+static async Task TestAppServerProcessTransportUsesIsolatedHomeAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var fixturePath = Path.Combine(temp.Root, "codex-home-fixture.cmd");
+    await File.WriteAllTextAsync(
+        fixturePath,
+        $"@echo off{Environment.NewLine}echo %CODEX_HOME%{Environment.NewLine}");
+    var runtimeEnvironment = new CodexRuntimeEnvironment(Path.Combine(temp.Root, "isolated-home"));
+
+    await using var transport = new CodexAppServerProcessTransport(
+        fixturePath,
+        new TestLogger(),
+        runtimeEnvironment);
+    await transport.StartAsync();
+
+    string? reportedHome = null;
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+    await foreach (var line in transport.ReadLinesAsync(timeout.Token))
+    {
+        reportedHome = line;
+        break;
+    }
+
+    AssertEqual(runtimeEnvironment.HomePath, reportedHome, "app-server child CODEX_HOME");
 }
 
 static void AssertUtf8ProtocolEncoding(Encoding? encoding, string streamName)
@@ -438,14 +484,18 @@ static async Task TestCodexUtilityRunnerExecutesDoctorAsync()
     var executable = Path.Combine(temp.Root, "fake-codex.cmd");
     await File.WriteAllTextAsync(
         executable,
-        "@echo off\r\nif \"%1\"==\"doctor\" (\r\n  echo DOCTOR_OK\r\n  echo diagnostic warning 1>&2\r\n  exit /b 0\r\n)\r\nexit /b 9\r\n");
+        "@echo off\r\nif \"%1\"==\"doctor\" (\r\n  echo DOCTOR_OK\r\n  echo CODEX_HOME=%CODEX_HOME%\r\n  echo diagnostic warning 1>&2\r\n  exit /b 0\r\n)\r\nexit /b 9\r\n");
     var installation = new CodexInstallation(true, executable, "codex-test", "Codex test", "Test installation");
-    var runner = new CodexCliUtilityRunner(new TestLogger());
+    var runtimeEnvironment = new CodexRuntimeEnvironment(Path.Combine(temp.Root, "isolated-home"));
+    var runner = new CodexCliUtilityRunner(new TestLogger(), runtimeEnvironment);
 
     var result = await runner.RunDoctorAsync(installation);
 
     AssertEqual(0, result.ExitCode, "doctor exit code");
     AssertTrue(result.StandardOutput.Contains("DOCTOR_OK", StringComparison.Ordinal), "doctor stdout captured");
+    AssertTrue(
+        result.StandardOutput.Contains($"CODEX_HOME={runtimeEnvironment.HomePath}", StringComparison.Ordinal),
+        "doctor uses isolated CODEX_HOME");
     AssertTrue(result.StandardError.Contains("diagnostic warning", StringComparison.Ordinal), "doctor stderr captured");
     AssertTrue(result.Succeeded, "doctor success state");
 }
@@ -864,18 +914,31 @@ static async Task TestAuthDetectionAsync()
 {
     using var temp = TempWorkspace.Create();
     var previousCodexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
-    Environment.SetEnvironmentVariable("CODEX_HOME", temp.Root);
+    var globalCodexHome = temp.CreateDirectory("GlobalCodexHome");
+    var runtimeEnvironment = new CodexRuntimeEnvironment(Path.Combine(temp.Root, "SynthiaCodeCodexHome"));
+    Environment.SetEnvironmentVariable("CODEX_HOME", globalCodexHome);
 
     try
     {
         var logger = new TestLogger();
-        var service = new CodexAuthService(logger);
+        File.WriteAllText(Path.Combine(globalCodexHome, "auth.json"), "{\"access_token\":\"global-token\"}");
+        var service = new CodexAuthService(logger, runtimeEnvironment);
         var installation = new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation");
 
         var missing = await service.GetAuthenticationStateAsync(installation);
         AssertEqual(AuthReadiness.Unknown, missing.Readiness, "missing auth readiness");
+        AssertEqual(runtimeEnvironment.HomePath, missing.CodexHome, "auth checks isolated codex home");
 
-        File.WriteAllText(Path.Combine(temp.Root, "auth.json"), "{\"access_token\":\"do-not-read\"}");
+        var startInfoFactory = typeof(CodexAuthService).GetMethod(
+            "CreateStartInfo",
+            BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? throw new InvalidOperationException("auth start-info factory was not found");
+        var startInfo = (ProcessStartInfo?)startInfoFactory.Invoke(service, [@"C:\Tools\codex.exe", "login"])
+            ?? throw new InvalidOperationException("auth start-info factory returned null");
+        AssertEqual(runtimeEnvironment.HomePath, startInfo.Environment["CODEX_HOME"], "login child CODEX_HOME");
+        AssertTrue(!startInfo.UseShellExecute, "login process supports an isolated environment");
+
+        File.WriteAllText(Path.Combine(runtimeEnvironment.HomePath, "auth.json"), "{\"access_token\":\"do-not-read\"}");
         var detected = await service.GetAuthenticationStateAsync(installation);
 
         AssertEqual(AuthReadiness.LikelySignedIn, detected.Readiness, "detected auth readiness");
@@ -894,7 +957,9 @@ static async Task TestCodexDiscoverySkipsUnusablePathCandidatesAsync()
     var workingDir = temp.CreateDirectory("WorkingCli");
     var brokenCodex = Path.Combine(brokenDir, "codex.cmd");
     var workingCodex = Path.Combine(workingDir, "codex.cmd");
+    var runtimeEnvironment = new CodexRuntimeEnvironment(Path.Combine(temp.Root, "SynthiaCodeCodexHome"));
     var previousPath = Environment.GetEnvironmentVariable("PATH");
+    var previousLocalAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
 
     File.WriteAllText(
         brokenCodex,
@@ -907,25 +972,74 @@ static async Task TestCodexDiscoverySkipsUnusablePathCandidatesAsync()
         workingCodex,
         """
         @echo off
-        echo codex-cli test-version
+        echo codex-cli test-version:%CODEX_HOME%
         exit /b 0
         """);
 
     try
     {
         Environment.SetEnvironmentVariable("PATH", brokenDir + Path.PathSeparator + workingDir);
+        Environment.SetEnvironmentVariable("LOCALAPPDATA", temp.CreateDirectory("LocalAppData"));
         var logger = new TestLogger();
-        var service = new CodexDiscoveryService(logger);
+        var service = new CodexDiscoveryService(logger, runtimeEnvironment);
 
         var detected = await service.DetectAsync();
 
         AssertTrue(detected.IsFound, "working codex is found");
         AssertEqual(Path.GetFullPath(workingCodex), detected.ExecutablePath, "working codex path");
-        AssertEqual("codex-cli test-version", detected.Version, "working codex version");
+        AssertEqual($"codex-cli test-version:{runtimeEnvironment.HomePath}", detected.Version, "working codex version");
     }
     finally
     {
         Environment.SetEnvironmentVariable("PATH", previousPath);
+        Environment.SetEnvironmentVariable("LOCALAPPDATA", previousLocalAppData);
+    }
+}
+
+static async Task TestCodexDiscoveryPrefersStandaloneInstallAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var localAppData = temp.CreateDirectory("LocalAppData");
+    var standaloneBin = Path.Combine(localAppData, "Programs", "OpenAI", "Codex", "bin");
+    var pathBin = temp.CreateDirectory("NpmBin");
+    Directory.CreateDirectory(standaloneBin);
+    var standaloneCodex = Path.Combine(standaloneBin, "codex.cmd");
+    var pathCodex = Path.Combine(pathBin, "codex.cmd");
+    var previousPath = Environment.GetEnvironmentVariable("PATH");
+    var previousLocalAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+
+    File.WriteAllText(
+        standaloneCodex,
+        """
+        @echo off
+        echo codex-cli standalone
+        exit /b 0
+        """);
+    File.WriteAllText(
+        pathCodex,
+        """
+        @echo off
+        echo codex-cli npm-path
+        exit /b 0
+        """);
+
+    try
+    {
+        Environment.SetEnvironmentVariable("LOCALAPPDATA", localAppData);
+        Environment.SetEnvironmentVariable("PATH", pathBin);
+        var logger = new TestLogger();
+        var service = new CodexDiscoveryService(logger);
+
+        var detected = await service.DetectAsync();
+
+        AssertTrue(detected.IsFound, "standalone codex is found");
+        AssertEqual(Path.GetFullPath(standaloneCodex), detected.ExecutablePath, "standalone codex path");
+        AssertEqual("codex-cli standalone", detected.Version, "standalone codex version");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("PATH", previousPath);
+        Environment.SetEnvironmentVariable("LOCALAPPDATA", previousLocalAppData);
     }
 }
 
@@ -2435,14 +2549,16 @@ static async Task TestLiveCodexAppServerInitializesWhenEnabledAsync()
     }
 
     var logger = new TestLogger();
-    var discovery = new CodexDiscoveryService(logger);
+    using var runtimeTemp = TempWorkspace.Create();
+    var runtimeEnvironment = new CodexRuntimeEnvironment(Path.Combine(runtimeTemp.Root, "codex-home"));
+    var discovery = new CodexDiscoveryService(logger, runtimeEnvironment);
     var installation = await discovery.DetectAsync();
 
     AssertTrue(installation.IsFound, "live codex installation is found");
     AssertTrue(!string.IsNullOrWhiteSpace(installation.ExecutablePath), "live codex executable path");
     AssertTrue(!string.IsNullOrWhiteSpace(installation.Version), "live codex version");
 
-    var processService = new CodexProcessService(logger);
+    var processService = new CodexProcessService(logger, runtimeEnvironment);
     var transport = await processService.StartAppServerTransportAsync(installation);
     await using var client = new CodexAppServerClient(
         transport,

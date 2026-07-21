@@ -14,6 +14,7 @@ internal static class ContextWindowIndicatorTests
     [
         ("context usage notifications are enabled by default", ContextUsageNotificationsAreEnabledByDefaultAsync),
         ("context usage is calculated and routed per chat", ContextUsageIsCalculatedAndRoutedPerChatAsync),
+        ("context usage handles reasoning token edge cases", ContextUsageHandlesReasoningTokenEdgeCasesAsync),
         ("context compactions count current and legacy notifications once", ContextCompactionsCountCurrentAndLegacyNotificationsOnceAsync),
         ("context usage and compactions survive chat persistence", ContextUsageAndCompactionsSurviveChatPersistenceAsync),
         ("composer shows context remaining beside send with usage tooltip", ComposerShowsContextRemainingBesideSendAsync)
@@ -49,12 +50,36 @@ internal static class ContextWindowIndicatorTests
             }
             """));
 
-        Assert(first.ContextTokensUsed == 43000, "latest context tokens are retained");
+        Assert(first.ContextTokensUsed == 42500, "reasoning output tokens are excluded from latest context usage");
         Assert(first.ContextWindowTokens == 252000, "model context window is retained");
         Assert(first.ContextUsedPercent == 17, "used percentage is rounded from the protocol values");
         Assert(first.ContextRemainingPercent == 83, "remaining percentage complements used percentage");
         Assert(first.HasContextWindowUsage, "valid token usage makes context information available");
         Assert(!second.HasContextWindowUsage, "usage stays isolated from other chats");
+        return Task.CompletedTask;
+    }
+
+    private static Task ContextUsageHandlesReasoningTokenEdgeCasesAsync()
+    {
+        var missingReasoning = new CodexThreadService();
+        missingReasoning.ApplyNotification(Notification(
+            "thread/tokenUsage/updated",
+            """{"tokenUsage":{"last":{"totalTokens":43000},"modelContextWindow":252000}}"""));
+
+        var zeroReasoning = new CodexThreadService();
+        zeroReasoning.ApplyNotification(Notification(
+            "thread/tokenUsage/updated",
+            """{"tokenUsage":{"last":{"reasoningOutputTokens":0,"totalTokens":43000},"modelContextWindow":252000}}"""));
+
+        var oversizedReasoning = new CodexThreadService();
+        oversizedReasoning.ApplyNotification(Notification(
+            "thread/tokenUsage/updated",
+            """{"tokenUsage":{"last":{"reasoningOutputTokens":44000,"totalTokens":43000},"modelContextWindow":252000}}"""));
+
+        Assert(missingReasoning.ContextTokensUsed == 43000, "missing reasoning tokens default to zero");
+        Assert(zeroReasoning.ContextTokensUsed == 43000, "zero reasoning tokens preserve total usage");
+        Assert(oversizedReasoning.ContextTokensUsed == 0, "oversized reasoning tokens clamp context usage to zero");
+        Assert(oversizedReasoning.ContextWindowTokens == 252000, "valid context window is retained for clamped usage");
         return Task.CompletedTask;
     }
 
@@ -130,7 +155,7 @@ internal static class ContextWindowIndicatorTests
 
         Assert(label.Text == "83%", "indicator shows context percentage remaining");
         Assert(indicator.ToolTip?.ToString() ==
-            string.Join(Environment.NewLine, "Context window", "17% used, 83% remaining", "43k/252k tokens used", "Compactions: 1"),
+            string.Join(Environment.NewLine, "Context window", "17% used, 83% remaining", "42.5k/252k tokens used", "Compactions: 1"),
             $"tooltip includes used, remaining, token totals, and compactions; actual: {indicator.ToolTip}");
         Assert(ReferenceEquals(indicator.Parent, send.Parent), "indicator is in the bottom action row beside send");
         Assert(AutomationProperties.GetName(indicator) == "Context window usage", "indicator has an accessible name");

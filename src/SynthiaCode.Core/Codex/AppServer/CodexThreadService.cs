@@ -417,14 +417,15 @@ public sealed class CodexThreadService
 
     private void ApplyContextTokenUsage(JsonObject parameters)
     {
-        var tokensUsed = ReadLong(parameters, "tokenUsage.last.totalTokens");
+        var totalTokens = ReadLong(parameters, "tokenUsage.last.totalTokens");
+        var reasoningOutputTokens = ReadLong(parameters, "tokenUsage.last.reasoningOutputTokens") ?? 0;
         var contextWindow = ReadLong(parameters, "tokenUsage.modelContextWindow");
-        if (tokensUsed is null or < 0 || contextWindow is null or <= 0)
+        if (totalTokens is null or < 0 || reasoningOutputTokens < 0 || contextWindow is null or <= 0)
         {
             return;
         }
 
-        ContextTokensUsed = tokensUsed.Value;
+        ContextTokensUsed = totalTokens.Value - Math.Min(reasoningOutputTokens, totalTokens.Value);
         ContextWindowTokens = contextWindow.Value;
     }
 

@@ -136,15 +136,15 @@ Activity presentation now follows the combined Codex-style assistant outcome mor
 2. The activity expander retains live auto-expansion, historical collapse, stable lifecycle rows, and a divider from the final answer.
 3. User-facing activity no longer receives a 600-character ellipsis, and file changes retain every reported path rather than replacing paths after the fourth with a count.
 4. Completed web-search rows prefer the protocol's complete structured query list, page URL, or find-in-page pattern and URL, with the display query retained as a compatibility fallback.
-5. Long details wrap within the transcript; reducer, persistence, visual-containment, responsive-width, timestamp, and copy-action regressions are covered by the 158-test behavioral suite.
+5. Long details wrap within the transcript; reducer, persistence, visual-containment, responsive-width, timestamp, and copy-action regressions are covered by the 159-test behavioral suite.
 
 Context-window visibility moved from absent to **Full** parity for the live local-chat outcome:
 
 1. A compact percentage-remaining indicator now sits in the bottom composer action row immediately beside Send.
 2. Its hover details show percentage used, percentage remaining, compact latest-context token usage versus the model context window, and the chat's compaction count.
-3. SynthiaCode now subscribes to `thread/tokenUsage/updated` and deliberately uses `tokenUsage.last.totalTokens`, matching Codex context-window semantics rather than cumulative session usage.
+3. SynthiaCode now subscribes to `thread/tokenUsage/updated` and calculates latest-context usage as `tokenUsage.last.totalTokens - tokenUsage.last.reasoningOutputTokens`, matching Codex context-window semantics rather than cumulative session usage. Missing reasoning usage defaults to zero, and oversized values clamp the result to zero.
 4. Current `contextCompaction` items and legacy `thread/compacted` notifications are counted without duplicate completed items, remain available in diagnostics, and stay isolated by chat.
-5. Token/window snapshots and cumulative compaction counts persist through settings snapshots, chat restoration, switching, shutdown saves, and forks; five focused reducer, persistence, subscription, formatting, and rendered-WPF tests protect the feature.
+5. Token/window snapshots and cumulative compaction counts persist through settings snapshots, chat restoration, switching, shutdown saves, and forks; six focused reducer, edge-case, persistence, subscription, formatting, and rendered-WPF tests protect the feature.
 
 Projectless threads moved from **Missing** to **Full** for the local conversation outcome:
 

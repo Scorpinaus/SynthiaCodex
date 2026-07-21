@@ -114,6 +114,7 @@ tests.AddRange(ApprovalProtocolTests.All);
 tests.AddRange(PermissionModeTests.All);
 tests.AddRange(ApprovalPresentationTests.All);
 tests.AddRange(AccountFeatureTests.All);
+tests.AddRange(ContextWindowIndicatorTests.All);
 tests.AddRange(ResponsiveLayoutTests.All);
 tests.AddRange(MarkdownLinkTests.All);
 tests.AddRange(ProjectlessThreadTests.All);

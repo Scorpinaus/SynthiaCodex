@@ -504,6 +504,23 @@ public sealed class TaskViewModel : ObservableObject
             ? "No final response yet"
             : threadService.FinalResponse;
 
+    public string ContextWindowIndicator => threadService.HasContextWindowUsage
+        ? $"{threadService.ContextRemainingPercent}%"
+        : "—%";
+
+    public string ContextWindowToolTip => threadService.HasContextWindowUsage
+        ? string.Join(
+            Environment.NewLine,
+            "Context window",
+            $"{threadService.ContextUsedPercent}% used, {threadService.ContextRemainingPercent}% remaining",
+            $"{FormatCompactTokenCount(threadService.ContextTokensUsed)}/{FormatCompactTokenCount(threadService.ContextWindowTokens)} tokens used",
+            $"Compactions: {threadService.ContextCompactionCount}")
+        : string.Join(
+            Environment.NewLine,
+            "Context window",
+            "Usage unavailable",
+            $"Compactions: {threadService.ContextCompactionCount}");
+
     public string ComposerActionLabel => IsTurnRunning
         ? FollowUpBehavior == FollowUpBehavior.Queue ? "Queue follow-up" : "Steer task"
         : ConversationTurns.Count == 0 ? "Run task" : "Send follow-up";
@@ -558,6 +575,8 @@ public sealed class TaskViewModel : ObservableObject
         OnPropertyChanged(nameof(FinalResponse));
         OnPropertyChanged(nameof(ComposerActionLabel));
         OnPropertyChanged(nameof(HasConversation));
+        OnPropertyChanged(nameof(ContextWindowIndicator));
+        OnPropertyChanged(nameof(ContextWindowToolTip));
     }
 
     public void UseFollowUpQueue(CodexFollowUpQueue queue)
@@ -654,6 +673,20 @@ public sealed class TaskViewModel : ObservableObject
         OnPropertyChanged(nameof(FinalResponse));
         OnPropertyChanged(nameof(ComposerActionLabel));
         OnPropertyChanged(nameof(HasConversation));
+        OnPropertyChanged(nameof(ContextWindowIndicator));
+        OnPropertyChanged(nameof(ContextWindowToolTip));
+    }
+
+    private static string FormatCompactTokenCount(long value)
+    {
+        if (value >= 1_000_000)
+        {
+            return $"{value / 1_000_000d:0.#}m";
+        }
+
+        return value >= 1_000
+            ? $"{value / 1_000d:0.#}k"
+            : value.ToString(CultureInfo.InvariantCulture);
     }
 
     public void ApplyModelCatalog(

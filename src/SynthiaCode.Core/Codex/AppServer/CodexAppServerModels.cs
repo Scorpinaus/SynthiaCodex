@@ -10,9 +10,7 @@ public sealed record CodexInitializeOptions(
     bool ExperimentalApi = false,
     IReadOnlyList<string>? OptOutNotificationMethods = null)
 {
-    public static CodexInitializeOptions Default { get; } = new(
-        ExperimentalApi: false,
-        OptOutNotificationMethods: ["thread/tokenUsage/updated"]);
+    public static CodexInitializeOptions Default { get; } = new();
 }
 
 public sealed record CodexThreadStartOptions(

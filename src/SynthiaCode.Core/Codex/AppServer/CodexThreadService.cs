@@ -17,6 +17,7 @@ public sealed class CodexThreadService
     private readonly object stateGate = new();
     private readonly Dictionary<string, AgentMessageState> agentMessages = [];
     private readonly Dictionary<CodexConversationTurn, string> responsePrefixes = [];
+    private readonly HashSet<string> recordedContextCompactions = new(StringComparer.Ordinal);
     private long nextAgentMessageSequence;
 
     public ObservableCollection<CodexTimelineItem> TimelineItems { get; } = [];
@@ -37,6 +38,25 @@ public sealed class CodexThreadService
 
     public string LastErrorDetail { get; private set; } = string.Empty;
 
+    public long ContextTokensUsed { get; private set; }
+
+    public long ContextWindowTokens { get; private set; }
+
+    public int ContextCompactionCount { get; private set; }
+
+    public bool HasContextWindowUsage => ContextWindowTokens > 0;
+
+    public int ContextUsedPercent => HasContextWindowUsage
+        ? Math.Clamp(
+            (int)Math.Round(
+                ContextTokensUsed * 100d / ContextWindowTokens,
+                MidpointRounding.AwayFromZero),
+            0,
+            100)
+        : 0;
+
+    public int ContextRemainingPercent => HasContextWindowUsage ? 100 - ContextUsedPercent : 0;
+
     public CodexConversationTurn? ActiveConversationTurn => ConversationTurns.LastOrDefault(turn =>
         turn.Status == CodexTurnStatus.Running ||
         (!string.IsNullOrWhiteSpace(ActiveTurnId) && string.Equals(turn.TurnId, ActiveTurnId, StringComparison.Ordinal)));
@@ -52,9 +72,13 @@ public sealed class CodexThreadService
         FinalResponse = string.Empty;
         RequiresAuthentication = false;
         LastErrorDetail = string.Empty;
+        ContextTokensUsed = 0;
+        ContextWindowTokens = 0;
+        ContextCompactionCount = 0;
         finalResponseBuilder.Clear();
         agentMessages.Clear();
         responsePrefixes.Clear();
+        recordedContextCompactions.Clear();
         nextAgentMessageSequence = 0;
     }
 
@@ -64,11 +88,17 @@ public sealed class CodexThreadService
         IEnumerable<CodexTimelineItem>? timelineItems,
         IEnumerable<string>? rawEvents,
         string? legacyPrompt = null,
-        IEnumerable<CodexConversationTurnSnapshot>? conversationTurns = null)
+        IEnumerable<CodexConversationTurnSnapshot>? conversationTurns = null,
+        long contextTokensUsed = 0,
+        long contextWindowTokens = 0,
+        int contextCompactionCount = 0)
     {
         Reset();
         ActiveThreadId = threadId;
         ActiveTurnStatus = CodexTurnStatus.Idle;
+        ContextWindowTokens = Math.Max(0, contextWindowTokens);
+        ContextTokensUsed = ContextWindowTokens > 0 ? Math.Max(0, contextTokensUsed) : 0;
+        ContextCompactionCount = Math.Max(0, contextCompactionCount);
 
         if (!string.IsNullOrWhiteSpace(finalResponse))
         {
@@ -344,6 +374,16 @@ public sealed class CodexThreadService
                 ApplyCompletedItem(notification);
                 break;
 
+            case "thread/tokenUsage/updated":
+                ApplyContextTokenUsage(notification.Params);
+                AddTimeline(CodexTimelineItemKind.Raw, notification.Method, ReadItemDetail(notification.Params), notification);
+                break;
+
+            case "thread/compacted":
+                RecordContextCompaction(notification.Params, "legacy");
+                AddTimeline(CodexTimelineItemKind.Raw, notification.Method, ReadItemDetail(notification.Params), notification);
+                break;
+
             default:
                 var fallbackKind = ReadFallbackKind(notification);
                 AddTimeline(fallbackKind, notification.Method, ReadItemDetail(notification.Params), notification);
@@ -359,6 +399,11 @@ public sealed class CodexThreadService
 
     private void ApplyCompletedItem(AppServerNotification notification)
     {
+        if (ReadString(notification.Params, "item.type") == "contextCompaction")
+        {
+            RecordContextCompaction(notification.Params, "item");
+        }
+
         var kind = ReadItemCompletedKind(notification.Params);
         var detail = ReadItemDetail(notification.Params);
         if (kind == CodexTimelineItemKind.AgentMessage)
@@ -368,6 +413,31 @@ public sealed class CodexThreadService
 
         AddTimeline(kind, "Item completed", detail, notification);
         ProjectItemActivity(notification, completed: true);
+    }
+
+    private void ApplyContextTokenUsage(JsonObject parameters)
+    {
+        var tokensUsed = ReadLong(parameters, "tokenUsage.last.totalTokens");
+        var contextWindow = ReadLong(parameters, "tokenUsage.modelContextWindow");
+        if (tokensUsed is null or < 0 || contextWindow is null or <= 0)
+        {
+            return;
+        }
+
+        ContextTokensUsed = tokensUsed.Value;
+        ContextWindowTokens = contextWindow.Value;
+    }
+
+    private void RecordContextCompaction(JsonObject parameters, string source)
+    {
+        var eventId = ReadString(parameters, "item.id") ?? ReadString(parameters, "turnId");
+        if (!string.IsNullOrWhiteSpace(eventId) &&
+            !recordedContextCompactions.Add($"{source}:{eventId}"))
+        {
+            return;
+        }
+
+        ContextCompactionCount++;
     }
 
     private static CodexTimelineItemKind ReadItemStartedKind(JsonObject parameters)
@@ -1140,6 +1210,33 @@ public sealed class CodexThreadService
         if (current is JsonValue stringValue &&
             stringValue.TryGetValue<string>(out var textValue) &&
             int.TryParse(textValue, out var parsedValue))
+        {
+            return parsedValue;
+        }
+
+        return null;
+    }
+
+    private static long? ReadLong(JsonObject obj, string path)
+    {
+        JsonNode? current = obj;
+        foreach (var segment in path.Split('.'))
+        {
+            current = current is JsonObject currentObject ? currentObject[segment] : null;
+            if (current is null)
+            {
+                return null;
+            }
+        }
+
+        if (current is JsonValue value && value.TryGetValue<long>(out var longValue))
+        {
+            return longValue;
+        }
+
+        if (current is JsonValue stringValue &&
+            stringValue.TryGetValue<string>(out var textValue) &&
+            long.TryParse(textValue, out var parsedValue))
         {
             return parsedValue;
         }

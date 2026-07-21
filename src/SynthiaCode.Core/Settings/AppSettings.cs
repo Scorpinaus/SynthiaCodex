@@ -106,6 +106,9 @@ public sealed class PersistedProjectThread
     public List<string> RawEvents { get; set; } = [];
     public List<CodexConversationTurnSnapshot> ConversationTurns { get; set; } = [];
     public List<QueuedFollowUpSnapshot> QueuedFollowUps { get; set; } = [];
+    public long ContextTokensUsed { get; set; }
+    public long ContextWindowTokens { get; set; }
+    public int ContextCompactionCount { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -233,6 +236,12 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
     public List<CodexConversationTurnSnapshot> ConversationTurns { get; set; } = [];
 
     public List<QueuedFollowUpSnapshot> QueuedFollowUps { get; set; } = [];
+
+    public long ContextTokensUsed { get; set; }
+
+    public long ContextWindowTokens { get; set; }
+
+    public int ContextCompactionCount { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 

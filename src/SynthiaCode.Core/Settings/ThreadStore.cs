@@ -67,6 +67,9 @@ public sealed class ThreadStore
         existing.RawEvents = state.RawEvents;
         existing.ConversationTurns = CloneTurns(state.ConversationTurns);
         existing.QueuedFollowUps = CloneQueuedFollowUps(state.QueuedFollowUps);
+        existing.ContextTokensUsed = state.ContextTokensUsed;
+        existing.ContextWindowTokens = state.ContextWindowTokens;
+        existing.ContextCompactionCount = state.ContextCompactionCount;
         existing.CreatedAt = state.CreatedAt;
         existing.UpdatedAt = state.UpdatedAt;
         return ToPresentation(existing);
@@ -165,6 +168,9 @@ public sealed class ThreadStore
         RawEvents = [.. source.RawEvents],
         ConversationTurns = CloneTurns(source.ConversationTurns),
         QueuedFollowUps = CloneQueuedFollowUps(source.QueuedFollowUps),
+        ContextTokensUsed = source.ContextTokensUsed,
+        ContextWindowTokens = source.ContextWindowTokens,
+        ContextCompactionCount = source.ContextCompactionCount,
         UpdatedAt = source.UpdatedAt
     };
 
@@ -189,6 +195,9 @@ public sealed class ThreadStore
         RawEvents = [.. source.RawEvents],
         ConversationTurns = CloneTurns(source.ConversationTurns),
         QueuedFollowUps = CloneQueuedFollowUps(source.QueuedFollowUps),
+        ContextTokensUsed = source.ContextTokensUsed,
+        ContextWindowTokens = source.ContextWindowTokens,
+        ContextCompactionCount = source.ContextCompactionCount,
         UpdatedAt = source.UpdatedAt
     };
 

@@ -51,6 +51,9 @@ public static class AppSettingsSnapshot
         RawEvents = [.. source.RawEvents],
         ConversationTurns = [.. source.ConversationTurns.Select(CloneTurn)],
         QueuedFollowUps = [.. source.QueuedFollowUps.Select(item => item.Clone())],
+        ContextTokensUsed = source.ContextTokensUsed,
+        ContextWindowTokens = source.ContextWindowTokens,
+        ContextCompactionCount = source.ContextCompactionCount,
         UpdatedAt = source.UpdatedAt
     };
 

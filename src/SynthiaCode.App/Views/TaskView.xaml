@@ -603,6 +603,23 @@
                     </Popup>
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="10,0,0,0">
+                        <Border x:Name="ContextWindowIndicator"
+                                Style="{StaticResource StatePill}"
+                                MinHeight="32"
+                                MinWidth="46"
+                                Margin="0,0,8,0"
+                                VerticalAlignment="Center"
+                                ToolTip="{Binding TaskWorkspace.ContextWindowToolTip}"
+                                ToolTipService.InitialShowDelay="250"
+                                ToolTipService.ShowDuration="60000"
+                                AutomationProperties.Name="Context window usage"
+                                AutomationProperties.HelpText="{Binding TaskWorkspace.ContextWindowToolTip}">
+                            <TextBlock Text="{Binding TaskWorkspace.ContextWindowIndicator}"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"/>
+                        </Border>
                         <Button Content="{Binding TaskWorkspace.ComposerActionLabel}"
                                 Command="{Binding TaskWorkspace.SubmitCommand}"
                                 Style="{StaticResource RunTaskButton}"

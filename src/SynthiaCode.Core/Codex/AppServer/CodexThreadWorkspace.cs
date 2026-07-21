@@ -20,7 +20,10 @@ public sealed class CodexThreadWorkspace
             state.TimelineItems,
             state.RawEvents,
             state.Preview,
-            state.ConversationTurns);
+            state.ConversationTurns,
+            state.ContextTokensUsed,
+            state.ContextWindowTokens,
+            state.ContextCompactionCount);
         return service;
     }
 

@@ -22,7 +22,7 @@
 | Safety and approvals | **Near full** | The three composer permission modes and server-request approvals now map closely to ChatGPT desktop. |
 | Git and worktree lifecycle | **Moderate** | Core isolation and file-level Git operations exist; chunk review, handoff, push, PR, snapshots, and setup actions do not. |
 | Agent orchestration | **Partial** | Parallel top-level chats and collaboration activity exist, but subagent thread inspection and management are absent. |
-| Context and multimodal input | **Near for local attachments** | Image/file/folder picker, paste/drop, previews, queued lifecycle persistence, workspace mentions, and managed external snapshots are implemented; rich artifact viewing and remaining hardening are out of scope. |
+| Context and multimodal input | **Near** | Per-chat context-window visibility plus image/file/folder picker, paste/drop, previews, queued lifecycle persistence, workspace mentions, and managed external snapshots are implemented; rich artifact viewing and remaining hardening are out of scope. |
 | Tools and integrations | **Low** | Configured MCP/web activity can flow through app-server, but Browser, Chrome, plugins, connectors, skills management, and Scheduled are not product surfaces. |
 | Desktop convenience | **Moderate** | Native Windows shell, themes, diagnostics, and core shortcuts exist; search, notifications, dictation, quick chat, deep links, and personalization do not. |
 
@@ -82,6 +82,7 @@
 | Feature | SynthiaCode | Status | Remaining difference |
 | --- | --- | --- | --- |
 | `AGENTS.md` and shared Codex configuration | Inherited by the launched Codex runtime | **Near** | No editor, provenance view, or configuration deep links. |
+| Context-window visibility | A live percentage-remaining indicator sits beside Send; hover details show used/remaining percentages, latest-context tokens versus the model window, and cumulative compactions per persisted chat | **Full** | Older settings show unavailable usage until app-server sends the first `thread/tokenUsage/updated` notification. |
 | Subagent execution | Collaboration notifications render as agent activity when Codex delegates | **Partial** | No Active/Done panel, agent-thread transcript, open/steer/stop controls, nicknames, or custom-agent management. |
 | MCP tool execution | Configured MCP tool activity and progress are parsed and shown | **Partial** | No MCP list/add/remove/auth/status UI or elicitation-specific presentation. |
 | Skills | Codex may load configured skills through its runtime | **Partial** | No Skills directory, enable/disable controls, install flow, `$skill` picker, or skill detail UI. |
@@ -119,7 +120,7 @@ Chat and project navigation now follows the compact Codex-style disclosure patte
 2. Chats and Projects have independent, accessible disclosure controls and live chevrons; both start expanded and can be collapsed or reopened without changing selection or data.
 3. Individual projects retain their existing per-project disclosure, creation actions, counts, running indicators, and chat lists inside the top-level Projects group.
 4. Navigation tooltips, empty states, action labels, Git guidance, and the no-selection title now use chat-oriented wording consistently.
-5. Focused view-model tests and rendered-WPF tests cover independent toggling, command wiring, labels, disclosure state, and content visibility as part of the 153-test suite.
+5. Focused view-model tests and rendered-WPF tests cover independent toggling, command wiring, labels, disclosure state, and content visibility as part of the 158-test suite.
 
 Assistant answer Markdown moved from basic text/link rendering to **Near** parity for common technical responses:
 
@@ -135,7 +136,15 @@ Activity presentation now follows the combined Codex-style assistant outcome mor
 2. The activity expander retains live auto-expansion, historical collapse, stable lifecycle rows, and a divider from the final answer.
 3. User-facing activity no longer receives a 600-character ellipsis, and file changes retain every reported path rather than replacing paths after the fourth with a count.
 4. Completed web-search rows prefer the protocol's complete structured query list, page URL, or find-in-page pattern and URL, with the display query retained as a compatibility fallback.
-5. Long details wrap within the transcript; reducer, persistence, visual-containment, responsive-width, timestamp, and copy-action regressions are covered by the 153-test behavioral suite.
+5. Long details wrap within the transcript; reducer, persistence, visual-containment, responsive-width, timestamp, and copy-action regressions are covered by the 158-test behavioral suite.
+
+Context-window visibility moved from absent to **Full** parity for the live local-chat outcome:
+
+1. A compact percentage-remaining indicator now sits in the bottom composer action row immediately beside Send.
+2. Its hover details show percentage used, percentage remaining, compact latest-context token usage versus the model context window, and the chat's compaction count.
+3. SynthiaCode now subscribes to `thread/tokenUsage/updated` and deliberately uses `tokenUsage.last.totalTokens`, matching Codex context-window semantics rather than cumulative session usage.
+4. Current `contextCompaction` items and legacy `thread/compacted` notifications are counted without duplicate completed items, remain available in diagnostics, and stay isolated by chat.
+5. Token/window snapshots and cumulative compaction counts persist through settings snapshots, chat restoration, switching, shutdown saves, and forks; five focused reducer, persistence, subscription, formatting, and rendered-WPF tests protect the feature.
 
 Projectless threads moved from **Missing** to **Full** for the local conversation outcome:
 

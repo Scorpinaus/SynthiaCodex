@@ -1155,6 +1155,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var sourceService = threadWorkspace.GetRequired(sourceThread.ThreadId);
             state.FinalResponse = sourceService.FinalResponse;
             state.ConversationTurns = sourceService.SnapshotConversation().Select(CloneConversationTurn).ToList();
+            state.ContextTokensUsed = sourceService.ContextTokensUsed;
+            state.ContextWindowTokens = sourceService.ContextWindowTokens;
+            state.ContextCompactionCount = sourceService.ContextCompactionCount;
             threadStore.Upsert(settings, state);
             loadedThreadIds.Add(result.ThreadId);
             RefreshProjectThreads(result.ThreadId);
@@ -2687,6 +2690,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         persisted.TimelineItems = [.. service.TimelineItems.TakeLast(100)];
         persisted.RawEvents = [.. service.RawEvents.TakeLast(100)];
         persisted.ConversationTurns = service.SnapshotConversation().Select(CloneConversationTurn).ToList();
+        persisted.ContextTokensUsed = service.ContextTokensUsed;
+        persisted.ContextWindowTokens = service.ContextWindowTokens;
+        persisted.ContextCompactionCount = service.ContextCompactionCount;
         persisted.UpdatedAt = DateTimeOffset.UtcNow;
         var presentation = ProjectThreads.FirstOrDefault(thread =>
             string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
@@ -2696,6 +2702,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             presentation.TimelineItems = [.. persisted.TimelineItems];
             presentation.RawEvents = [.. persisted.RawEvents];
             presentation.ConversationTurns = persisted.ConversationTurns.Select(CloneConversationTurn).ToList();
+            presentation.ContextTokensUsed = persisted.ContextTokensUsed;
+            presentation.ContextWindowTokens = persisted.ContextWindowTokens;
+            presentation.ContextCompactionCount = persisted.ContextCompactionCount;
             presentation.UpdatedAt = persisted.UpdatedAt;
         }
         try
@@ -2875,6 +2884,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             persisted.TimelineItems = [.. threadService.TimelineItems.TakeLast(100)];
             persisted.RawEvents = [.. threadService.RawEvents.TakeLast(100)];
             persisted.ConversationTurns = threadService.SnapshotConversation().Select(CloneConversationTurn).ToList();
+            persisted.ContextTokensUsed = threadService.ContextTokensUsed;
+            persisted.ContextWindowTokens = threadService.ContextWindowTokens;
+            persisted.ContextCompactionCount = threadService.ContextCompactionCount;
             persisted.UpdatedAt = DateTimeOffset.UtcNow;
             threadStore.Upsert(settings, persisted);
 

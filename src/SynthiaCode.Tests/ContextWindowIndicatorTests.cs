@@ -16,6 +16,8 @@ internal static class ContextWindowIndicatorTests
         ("context usage is calculated and routed per chat", ContextUsageIsCalculatedAndRoutedPerChatAsync),
         ("context usage handles reasoning token edge cases", ContextUsageHandlesReasoningTokenEdgeCasesAsync),
         ("context compactions count current and legacy notifications once", ContextCompactionsCountCurrentAndLegacyNotificationsOnceAsync),
+        ("app-server compaction notifications render as transcript activity", AppServerCompactionNotificationsRenderAsTranscriptActivityAsync),
+        ("token pressure does not trigger client-side summarization", TokenPressureDoesNotTriggerClientSideSummarizationAsync),
         ("context usage and compactions survive chat persistence", ContextUsageAndCompactionsSurviveChatPersistenceAsync),
         ("composer shows context remaining beside send with usage tooltip", ComposerShowsContextRemainingBesideSendAsync)
     ];
@@ -98,6 +100,55 @@ internal static class ContextWindowIndicatorTests
             """{"threadId":"thread-a","turnId":"turn-b"}"""));
 
         Assert(service.ContextCompactionCount == 2, "current and legacy compactions are counted without duplicate items");
+        return Task.CompletedTask;
+    }
+
+    private static Task AppServerCompactionNotificationsRenderAsTranscriptActivityAsync()
+    {
+        var current = new CodexThreadService();
+        current.BeginTurn("Continue the task.");
+        current.BindPendingTurn("turn-a");
+
+        current.ApplyNotification(Notification(
+            "item/started",
+            """{"threadId":"thread-a","turnId":"turn-a","item":{"id":"compact-1","type":"contextCompaction"}}"""));
+        current.ApplyNotification(Notification(
+            "item/completed",
+            """{"threadId":"thread-a","turnId":"turn-a","item":{"id":"compact-1","type":"contextCompaction"}}"""));
+
+        var currentActivity = current.ConversationTurns.Single().Activity.Single();
+        Assert(currentActivity.Title == "Compacted context", "current compaction lifecycle is rendered as one completed activity");
+        Assert(currentActivity.Detail.Contains("Codex app-server", StringComparison.Ordinal), "activity identifies app-server as the compaction owner");
+
+        var legacy = new CodexThreadService();
+        legacy.BeginTurn("Continue the task.");
+        legacy.BindPendingTurn("turn-b");
+        legacy.ApplyNotification(Notification(
+            "thread/compacted",
+            """{"threadId":"thread-b","turnId":"turn-b"}"""));
+
+        var legacyActivity = legacy.ConversationTurns.Single().Activity.Single();
+        Assert(legacyActivity.Title == "Compacted context", "legacy app-server notification is rendered as transcript activity");
+        Assert(legacyActivity.Method == "thread/compacted", "legacy activity retains notification provenance");
+        return Task.CompletedTask;
+    }
+
+    private static Task TokenPressureDoesNotTriggerClientSideSummarizationAsync()
+    {
+        var service = new CodexThreadService();
+        service.BeginTurn("Keep working without rewriting this prompt.");
+        service.BindPendingTurn("turn-a");
+
+        service.ApplyNotification(Notification(
+            "thread/tokenUsage/updated",
+            """{"threadId":"thread-a","turnId":"turn-a","tokenUsage":{"last":{"totalTokens":251999},"modelContextWindow":252000}}"""));
+
+        var turn = service.ConversationTurns.Single();
+        Assert(service.ContextRemainingPercent == 0, "near-full context is observed and rounded for display");
+        Assert(service.ContextCompactionCount == 0, "token pressure alone does not fabricate a compaction");
+        Assert(turn.Activity.Count == 0, "token pressure alone does not fabricate compaction activity");
+        Assert(turn.UserPrompt == "Keep working without rewriting this prompt.", "the client does not replace conversation content with a local summary");
+        Assert(string.IsNullOrEmpty(turn.AssistantResponse), "the client does not generate an automatic summary response");
         return Task.CompletedTask;
     }
 

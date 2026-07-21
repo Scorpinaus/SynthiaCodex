@@ -381,7 +381,12 @@ public sealed class CodexThreadService
 
             case "thread/compacted":
                 RecordContextCompaction(notification.Params, "legacy");
-                AddTimeline(CodexTimelineItemKind.Raw, notification.Method, ReadItemDetail(notification.Params), notification);
+                AddTimeline(
+                    CodexTimelineItemKind.ContextCompaction,
+                    "Compacted context",
+                    "Codex app-server summarized earlier conversation context.",
+                    notification);
+                ProjectLegacyContextCompactionActivity(notification);
                 break;
 
             default:
@@ -453,6 +458,7 @@ public sealed class CodexThreadService
             "collabAgentToolCall" => CodexTimelineItemKind.Collaboration,
             "webSearch" => CodexTimelineItemKind.WebSearch,
             "plan" => CodexTimelineItemKind.PlanUpdate,
+            "contextCompaction" => CodexTimelineItemKind.ContextCompaction,
             _ => CodexTimelineItemKind.Raw
         };
     }
@@ -472,6 +478,7 @@ public sealed class CodexThreadService
             "collabAgentToolCall" => CodexTimelineItemKind.Collaboration,
             "webSearch" => CodexTimelineItemKind.WebSearch,
             "plan" => CodexTimelineItemKind.PlanUpdate,
+            "contextCompaction" => CodexTimelineItemKind.ContextCompaction,
             _ => CodexTimelineItemKind.Raw
         };
     }
@@ -689,6 +696,7 @@ public sealed class CodexThreadService
             "collabAgentToolCall" => CreateCollaborationActivity(notification.Params, itemId, completed),
             "webSearch" => CreateWebSearchActivity(notification.Params, itemId, completed),
             "plan" => CreatePlanActivity(notification.Params, itemId, completed),
+            "contextCompaction" => CreateContextCompactionActivity(itemId, completed, notification.Method),
             _ => null
         };
 
@@ -697,6 +705,31 @@ public sealed class CodexThreadService
             UpsertActivity(turn, activity);
         }
     }
+
+    private void ProjectLegacyContextCompactionActivity(AppServerNotification notification)
+    {
+        if (GetNotificationTurn(notification) is not { } turn)
+        {
+            return;
+        }
+
+        var itemId = ReadString(notification.Params, "turnId") ?? $"legacy:{Guid.NewGuid():N}";
+        UpsertActivity(turn, CreateContextCompactionActivity(itemId, completed: true, notification.Method));
+    }
+
+    private static CodexTimelineItem CreateContextCompactionActivity(
+        string itemId,
+        bool completed,
+        string method) =>
+        CreateActivity(
+            CodexTimelineItemKind.ContextCompaction,
+            completed ? "Compacted context" : "Compacting context",
+            completed
+                ? "Codex app-server summarized earlier conversation context."
+                : "Codex app-server is summarizing earlier conversation context.",
+            method,
+            itemId,
+            $"compaction:{itemId}");
 
     private static CodexTimelineItem CreateCommandActivity(JsonObject parameters, string itemId, bool completed)
     {
@@ -1078,7 +1111,8 @@ public sealed class CodexThreadService
         CodexTimelineItemKind.ToolCall or
         CodexTimelineItemKind.WebSearch or
         CodexTimelineItemKind.PlanUpdate or
-        CodexTimelineItemKind.Collaboration => true,
+        CodexTimelineItemKind.Collaboration or
+        CodexTimelineItemKind.ContextCompaction => true,
         CodexTimelineItemKind.ToolProgress => item.Method.StartsWith("item/", StringComparison.Ordinal),
         _ => false
     };
@@ -1267,6 +1301,7 @@ public sealed record CodexTimelineItem(
         CodexTimelineItemKind.WebSearch => "Search",
         CodexTimelineItemKind.PlanUpdate => "Plan",
         CodexTimelineItemKind.Collaboration => "Agent",
+        CodexTimelineItemKind.ContextCompaction => "Context",
         CodexTimelineItemKind.Error => "Error",
         CodexTimelineItemKind.UserGuidance => "Guidance",
         _ => "Details"
@@ -1291,7 +1326,8 @@ public enum CodexTimelineItemKind
     ToolCall,
     WebSearch,
     PlanUpdate,
-    Collaboration
+    Collaboration,
+    ContextCompaction
 }
 
 public enum CodexTurnStatus

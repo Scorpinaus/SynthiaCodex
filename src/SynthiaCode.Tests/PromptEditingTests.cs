@@ -140,14 +140,15 @@ internal static class PromptEditingTests
         await transport.WaitForClientMessageCountAsync(4);
         transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-original"}}}""");
         await WaitUntilAsync(() => viewModel.IsTurnRunning, "original prompt running");
+        await CompleteAutomaticThreadRenameAsync(transport, "thread-edit");
         transport.ServerSend("""{"method":"item/agentMessage/delta","params":{"threadId":"thread-edit","turnId":"turn-original","itemId":"answer-original","delta":"Original answer"}}""");
         transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-edit","turn":{"id":"turn-original","status":"completed","items":[]}}}""");
         await WaitUntilAsync(() => !viewModel.IsTurnRunning, "original prompt completed");
 
         viewModel.PromptText = "Later prompt";
         viewModel.SubmitPromptCommand.Execute(null);
-        await transport.WaitForClientMessageCountAsync(5);
-        transport.ServerSend("""{"id":3,"result":{"turn":{"id":"turn-later"}}}""");
+        await transport.WaitForClientMessageCountAsync(6);
+        transport.ServerSend("""{"id":4,"result":{"turn":{"id":"turn-later"}}}""");
         await WaitUntilAsync(() => viewModel.IsTurnRunning, "later prompt running");
         transport.ServerSend("""{"method":"item/agentMessage/delta","params":{"threadId":"thread-edit","turnId":"turn-later","itemId":"answer-later","delta":"Later answer"}}""");
         transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-edit","turn":{"id":"turn-later","status":"completed","items":[]}}}""");
@@ -157,17 +158,17 @@ internal static class PromptEditingTests
         viewModel.TaskWorkspace.BeginPromptEditCommand.Execute(original);
         original.EditedPrompt = "Edited prompt";
         viewModel.TaskWorkspace.SubmitPromptEditCommand.Execute(original);
-        await transport.WaitForClientMessageCountAsync(6);
-        var rollback = ParseMessage(transport.ClientMessages[5]);
+        await transport.WaitForClientMessageCountAsync(7);
+        var rollback = ParseMessage(transport.ClientMessages[6]);
         Assert(ReadString(rollback, "method") == "thread/rollback", "editing uses thread rollback");
         Assert(ReadInt(rollback, "params.numTurns") == 2, "editing removes the selected and later active turns from server history");
-        transport.ServerSend("""{"id":4,"result":{"thread":{"id":"thread-edit","turns":[]}}}""");
+        transport.ServerSend("""{"id":5,"result":{"thread":{"id":"thread-edit","turns":[]}}}""");
 
-        await transport.WaitForClientMessageCountAsync(7);
-        var editedStart = ParseMessage(transport.ClientMessages[6]);
+        await transport.WaitForClientMessageCountAsync(8);
+        var editedStart = ParseMessage(transport.ClientMessages[7]);
         Assert(ReadString(editedStart, "method") == "turn/start", "edited prompt starts a replacement turn");
         Assert(ReadString(editedStart, "params.input.0.text") == "Edited prompt", "replacement turn uses edited text");
-        transport.ServerSend("""{"id":5,"result":{"turn":{"id":"turn-edited"}}}""");
+        transport.ServerSend("""{"id":6,"result":{"turn":{"id":"turn-edited"}}}""");
         await WaitUntilAsync(() => viewModel.IsTurnRunning, "edited prompt running");
 
         Assert(viewModel.TaskWorkspace.ConversationTurns.Count == 3, "old prompts and edited prompt remain in the transcript");
@@ -274,6 +275,25 @@ internal static class PromptEditingTests
                 throw new InvalidOperationException($"Timed out waiting for {label}.");
             }
         }
+    }
+
+    private static async Task CompleteAutomaticThreadRenameAsync(
+        FakeAppServerTransport transport,
+        string threadId)
+    {
+        await WaitUntilAsync(
+            () => transport.ClientMessages.Any(message =>
+                ReadString(ParseMessage(message), "method") == "thread/name/set" &&
+                ReadString(ParseMessage(message), "params.threadId") == threadId),
+            $"automatic rename for {threadId}");
+        var request = transport.ClientMessages
+            .Select(ParseMessage)
+            .Single(message =>
+                ReadString(message, "method") == "thread/name/set" &&
+                ReadString(message, "params.threadId") == threadId);
+        var requestId = request["id"]?.ToJsonString()
+            ?? throw new InvalidOperationException($"Automatic rename for '{threadId}' did not include an id.");
+        transport.ServerSend($"{{\"id\":{requestId},\"result\":{{}}}}");
     }
 
     private static string FindRepositoryRoot()

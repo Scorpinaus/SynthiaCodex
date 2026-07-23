@@ -1088,7 +1088,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 result.ThreadId,
                 $"Thread {ProjectThreads.Count + 1}",
                 worktree?.Path ?? workspacePath,
-                worktree?.Branch);
+                worktree?.Branch,
+                isTitlePlaceholder: true);
             loadedThreadIds.Add(result.ThreadId);
             RefreshProjectThreads(result.ThreadId);
             StatusMessage = scope.Kind == ThreadScopeKind.General
@@ -1525,7 +1526,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         string threadId,
         string title,
         string workspacePath,
-        string? worktreeBranch = null)
+        string? worktreeBranch = null,
+        bool isTitlePlaceholder = false)
     {
         var state = new ProjectThreadState
         {
@@ -1533,6 +1535,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             ProjectPath = scope.ProjectPath ?? string.Empty,
             ThreadId = threadId,
             Title = title,
+            IsTitlePlaceholder = isTitlePlaceholder,
             Mode = scope.Kind == ThreadScopeKind.General
                 ? "general"
                 : string.IsNullOrWhiteSpace(worktreeBranch) ? "local" : "worktree",
@@ -1761,6 +1764,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             TaskWorkspace.SubmittedPrompt = submittedPrompt;
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
             activeThreadId = await EnsureActiveThreadAsync().ConfigureAwait(true);
+            var automaticTitle = SelectedThread?.IsTitlePlaceholder == true &&
+                threadService.ConversationTurns.Count == 0
+                    ? CreateAutomaticThreadTitle(submittedPrompt, submittedImages)
+                    : null;
             threadService.BeginTurn(submittedPrompt, submittedImages);
             TaskWorkspace.NotifyResponseChanged();
             if (SelectedThread is not null)
@@ -1809,6 +1816,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             StatusMessage = boundTurn.Status == CodexTurnStatus.Running
                 ? "Codex turn running"
                 : $"Codex turn {boundTurn.Status.ToString().ToLowerInvariant()}";
+            if (!string.IsNullOrWhiteSpace(automaticTitle))
+            {
+                await TryAutomaticallyRenameThreadAsync(activeThreadId, automaticTitle).ConfigureAwait(true);
+            }
         }
         catch (Exception ex)
         {
@@ -1823,6 +1834,53 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             StatusMessage = ex.Message;
             logger.Log(AppLogLevel.Error, "codex_task_start_failed", "Could not start Codex task.", exception: ex);
         }
+    }
+
+    private async Task TryAutomaticallyRenameThreadAsync(string threadId, string title)
+    {
+        try
+        {
+            var persistedThread = settings.ProjectThreads.FirstOrDefault(thread =>
+                string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
+            if (persistedThread?.IsTitlePlaceholder != true)
+            {
+                return;
+            }
+
+            await appServerSessionCoordinator
+                .SetThreadNameAsync(threadId, title)
+                .ConfigureAwait(true);
+            persistedThread = settings.ProjectThreads.FirstOrDefault(thread =>
+                string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
+            if (persistedThread?.IsTitlePlaceholder != true)
+            {
+                return;
+            }
+
+            threadStore.Rename(settings, threadId, title);
+            RefreshProjectThreads(threadId);
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            logger.Log(
+                AppLogLevel.Warning,
+                "thread_auto_rename_failed",
+                "Could not automatically name the chat from its first message.",
+                new Dictionary<string, string?> { ["threadId"] = threadId },
+                ex);
+        }
+    }
+
+    private static string CreateAutomaticThreadTitle(
+        string submittedPrompt,
+        IReadOnlyList<AttachmentReference> submittedAttachments)
+    {
+        var source = string.IsNullOrWhiteSpace(submittedPrompt)
+            ? submittedAttachments.FirstOrDefault(attachment => !string.IsNullOrWhiteSpace(attachment.DisplayName))?.DisplayName
+                ?? "Attachment request"
+            : submittedPrompt;
+        return string.Join(' ', source.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
     }
 
     private async Task<bool> EditPromptAsync(CodexConversationTurn sourceTurn, string editedPrompt)
@@ -2000,7 +2058,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 thread.ThreadId,
                 $"Thread {ProjectThreads.Count + 1}",
                 worktree?.Path ?? workspacePath,
-                worktree?.Branch);
+                worktree?.Branch,
+                isTitlePlaceholder: true);
             RefreshProjectThreads(thread.ThreadId);
             loadedThreadIds.Add(thread.ThreadId);
             activeThreadLoaded = true;
@@ -2036,7 +2095,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var thread = await appServerSessionCoordinator
                 .StartThreadAsync(CreateThreadStartOptions(workspacePath))
                 .ConfigureAwait(true);
-            CreateThreadState(scope, thread.ThreadId, $"Thread {ProjectThreads.Count + 1}", workspacePath);
+            CreateThreadState(
+                scope,
+                thread.ThreadId,
+                $"Thread {ProjectThreads.Count + 1}",
+                workspacePath,
+                isTitlePlaceholder: true);
             RefreshProjectThreads(thread.ThreadId);
             loadedThreadIds.Add(thread.ThreadId);
             activeThreadLoaded = true;
@@ -3183,6 +3247,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                     ProjectPath = scope.ProjectPath ?? string.Empty,
                     ThreadId = activeThreadId,
                     Title = $"Thread {ProjectThreads.Count + 1}",
+                    IsTitlePlaceholder = true,
                     Mode = scope.Kind == ThreadScopeKind.General ? "general" : "local",
                     WorkspacePath = GetActiveWorkspacePath()
                 };

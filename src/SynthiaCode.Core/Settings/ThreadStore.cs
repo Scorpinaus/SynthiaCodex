@@ -54,6 +54,7 @@ public sealed class ThreadStore
         existing.ScopeKind = state.ScopeKind;
         existing.ProjectPath = state.ProjectPath;
         existing.Title = state.Title;
+        existing.IsTitlePlaceholder = state.IsTitlePlaceholder;
         existing.Preview = state.Preview;
         existing.IsArchived = state.IsArchived;
         existing.IsPinned = state.IsPinned;
@@ -127,6 +128,7 @@ public sealed class ThreadStore
             string.Equals(item.ThreadId, threadId, StringComparison.Ordinal))
             ?? throw new InvalidOperationException($"Thread '{threadId}' was not found.");
         thread.Title = normalizedTitle;
+        thread.IsTitlePlaceholder = false;
         thread.UpdatedAt = DateTimeOffset.UtcNow;
     }
 
@@ -187,6 +189,7 @@ public sealed class ThreadStore
         ProjectPath = source.ProjectPath,
         ThreadId = source.ThreadId,
         Title = source.Title,
+        IsTitlePlaceholder = source.IsTitlePlaceholder,
         Preview = source.Preview,
         IsArchived = source.IsArchived,
         IsPinned = source.IsPinned,
@@ -214,6 +217,7 @@ public sealed class ThreadStore
         ProjectPath = source.ProjectPath,
         ThreadId = source.ThreadId,
         Title = source.Title,
+        IsTitlePlaceholder = source.IsTitlePlaceholder,
         Preview = source.Preview,
         IsArchived = source.IsArchived,
         IsPinned = source.IsPinned,

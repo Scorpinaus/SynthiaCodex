@@ -24,7 +24,8 @@ internal static class ThreadRenameTests
         ("thread store renames chats and updates presentation titles", ThreadStoreRenamesChatsAsync),
         ("sidebar rename command supports general and project chats", SidebarRenameCommandSupportsBothScopesAsync),
         ("general and project chat menus expose rename", ChatMenusExposeRenameAsync),
-        ("main view model renames and persists general and project chats", MainViewModelRenamesBothScopesAsync)
+        ("main view model renames and persists general and project chats", MainViewModelRenamesBothScopesAsync),
+        ("first message automatically renames a new chat once", FirstMessageAutomaticallyRenamesNewChatOnceAsync)
     ];
 
     private static async Task AppServerClientSendsThreadRenameRequestsAsync()
@@ -209,6 +210,95 @@ internal static class ThreadRenameTests
             settingsStore.SavedSettings.ProjectThreads.Single(thread => thread.ThreadId == "project-thread").Title == "Renamed project",
             "project rename is saved");
         Assert(viewModel.StatusMessage == "Chat renamed", "rename reports completion");
+        await viewModel.DisposeAsync();
+    }
+
+    private static async Task FirstMessageAutomaticallyRenamesNewChatOnceAsync()
+    {
+        using var temp = TempWorkspace.Create();
+        var generalPath = temp.CreateDirectory("general");
+        var settingsStore = new FakeSettingsStore();
+        await using var transport = new FakeAppServerTransport();
+        var logger = new TestLogger();
+        var coordinator = new AppServerSessionCoordinator(
+            new FakeCodexProcessService(transport),
+            logger,
+            new CodexAppServerClientMetadata("thread_rename_tests", "Thread Rename Tests", "1.0.0"));
+        var viewModel = new MainViewModel(
+            settingsStore,
+            new FakeCodexDiscoveryService(new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation")),
+            coordinator,
+            new FakeAuthService(new AuthenticationState(AuthReadiness.LikelySignedIn, "Ready", "Test auth", @"C:\Users\Test\.codex")),
+            new FakeGitService(temp.Root),
+            new FakeWorktreeService(temp.Root, Path.Combine(temp.Root, ".test-worktree")),
+            new RecentProjectService(),
+            new FakeFolderPicker(temp.Root),
+            new FakeUserInteractionService(),
+            new FakeThemeService(),
+            new FakeCodexCliUtilityRunner(),
+            new ThreadStore(),
+            new CodexThreadWorkspace(),
+            new FakeTerminalService(),
+            logger,
+            new GeneralWorkspaceService(generalPath));
+        await viewModel.InitializeAsync();
+
+        viewModel.PromptText = "  Plan   release\r\nvalidation  ";
+        viewModel.SubmitPromptCommand.Execute(null);
+        await transport.WaitForClientMessageCountAsync(2);
+        transport.ServerSend("""{"id":0,"result":{"userAgent":"codex-test"}}""");
+        await transport.WaitForClientMessageCountAsync(3);
+        transport.ServerSend("""{"id":1,"result":{"thread":{"id":"auto-name-thread"}}}""");
+        await transport.WaitForClientMessageCountAsync(4);
+        transport.ServerSend("""{"id":2,"result":{"turn":{"id":"first-turn"}}}""");
+
+        await WaitUntilAsync(
+            () => transport.ClientMessages.Any(message =>
+                ReadString(JsonNode.Parse(message)!.AsObject(), "method") == "thread/name/set"),
+            "automatic first-message rename");
+        var rename = transport.ClientMessages
+            .Select(message => JsonNode.Parse(message)!.AsObject())
+            .Single(message => ReadString(message, "method") == "thread/name/set");
+        Assert(ReadString(rename, "params.threadId") == "auto-name-thread", "automatic rename targets the new chat");
+        Assert(ReadString(rename, "params.name") == "Plan release validation", "automatic rename normalizes the first message");
+        var renameRequestId = rename["id"]?.ToJsonString()
+            ?? throw new InvalidOperationException("automatic rename request did not include an id");
+        transport.ServerSend($"{{\"id\":{renameRequestId},\"result\":{{}}}}");
+        await WaitUntilAsync(
+            () => viewModel.SelectedThread?.Title == "Plan release validation",
+            "automatic title presentation");
+        await WaitUntilAsync(
+            () => settingsStore.SavedSettings.ProjectThreads.Single().Title == "Plan release validation",
+            "automatic title persistence");
+
+        transport.ServerSend(
+            """{"method":"turn/completed","params":{"threadId":"auto-name-thread","turn":{"id":"first-turn","status":"completed","items":[]}}}""");
+        await WaitUntilAsync(() => !viewModel.IsTurnRunning, "first named turn completion");
+        await WaitUntilAsync(() => viewModel.SubmitPromptCommand.CanExecute(null), "follow-up submission readiness");
+
+        var beforeFollowUp = transport.ClientMessages.Count;
+        viewModel.PromptText = "Run the tests";
+        viewModel.SubmitPromptCommand.Execute(null);
+        await WaitUntilAsync(
+            () => transport.ClientMessages.Skip(beforeFollowUp).Any(message =>
+                ReadString(JsonNode.Parse(message)!.AsObject(), "method") == "turn/start"),
+            "follow-up turn start");
+        var followUp = transport.ClientMessages
+            .Skip(beforeFollowUp)
+            .Select(message => JsonNode.Parse(message)!.AsObject())
+            .Single(message => ReadString(message, "method") == "turn/start");
+        var followUpRequestId = followUp["id"]?.ToJsonString()
+            ?? throw new InvalidOperationException("follow-up turn request did not include an id");
+        transport.ServerSend($"{{\"id\":{followUpRequestId},\"result\":{{\"turn\":{{\"id\":\"follow-up-turn\"}}}}}}");
+        await WaitUntilAsync(() => viewModel.IsTurnRunning, "follow-up turn running");
+        Assert(
+            transport.ClientMessages.Count(message =>
+                ReadString(JsonNode.Parse(message)!.AsObject(), "method") == "thread/name/set") == 1,
+            "follow-up does not rename the chat again");
+
+        transport.ServerSend(
+            """{"method":"turn/completed","params":{"threadId":"auto-name-thread","turn":{"id":"follow-up-turn","status":"completed","items":[]}}}""");
+        await WaitUntilAsync(() => !viewModel.IsTurnRunning, "follow-up turn completion");
         await viewModel.DisposeAsync();
     }
 

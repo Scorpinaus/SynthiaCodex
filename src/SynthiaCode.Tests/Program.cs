@@ -858,15 +858,16 @@ static async Task TestViewModelSteersActiveTurnAsync()
     await transport.WaitForClientMessageCountAsync(4);
     transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn_steer"}}}""");
     await WaitUntilAsync(() => viewModel.IsTurnRunning, "steer turn running");
+    await CompleteAutomaticThreadRenameAsync(transport, "thr_steer");
 
     viewModel.SteeringText = "Concentrate on regression tests.";
     await WaitUntilAsync(() => viewModel.SteerTurnCommand.CanExecute(null), "steer command enabled");
     viewModel.SteerTurnCommand.Execute(null);
-    await transport.WaitForClientMessageCountAsync(5);
-    var steer = ParseMessage(transport.ClientMessages[4]);
+    await transport.WaitForClientMessageCountAsync(6);
+    var steer = ParseMessage(transport.ClientMessages[5]);
     AssertJsonString("turn/steer", steer, "method", "view model steer method");
     AssertJsonString("turn_steer", steer, "params.expectedTurnId", "view model steer turn id");
-    transport.ServerSend("""{"id":3,"result":{"turnId":"turn_steer"}}""");
+    transport.ServerSend("""{"id":4,"result":{"turnId":"turn_steer"}}""");
     await WaitUntilAsync(() => string.IsNullOrWhiteSpace(viewModel.SteeringText), "steering composer cleared");
 
     viewModel.SteeringText = "Unsent follow-up guidance.";
@@ -934,11 +935,12 @@ static async Task TestViewModelRunsParallelProjectThreadsAsync()
     await transport.WaitForClientMessageCountAsync(4);
     transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn_parallel_a"}}}""");
     await WaitUntilAsync(() => viewModel.IsTurnRunning, "first parallel turn running");
+    await CompleteAutomaticThreadRenameAsync(transport, "thr_parallel_a");
 
     viewModel.SteeringText = "Guidance for the first thread.";
     viewModel.NewThreadCommand.Execute(null);
-    await transport.WaitForClientMessageCountAsync(5);
-    transport.ServerSend("""{"id":3,"result":{"thread":{"id":"thr_parallel_b"}}}""");
+    await transport.WaitForClientMessageCountAsync(6);
+    transport.ServerSend("""{"id":4,"result":{"thread":{"id":"thr_parallel_b"}}}""");
     await WaitUntilAsync(
         () => viewModel.SelectedThread?.ThreadId == "thr_parallel_b" && !viewModel.IsTurnRunning,
         "second parallel thread selected and idle");
@@ -947,9 +949,10 @@ static async Task TestViewModelRunsParallelProjectThreadsAsync()
 
     viewModel.PromptText = "Second parallel task";
     viewModel.SubmitPromptCommand.Execute(null);
-    await transport.WaitForClientMessageCountAsync(6);
-    transport.ServerSend("""{"id":4,"result":{"turn":{"id":"turn_parallel_b"}}}""");
+    await transport.WaitForClientMessageCountAsync(7);
+    transport.ServerSend("""{"id":5,"result":{"turn":{"id":"turn_parallel_b"}}}""");
     await WaitUntilAsync(() => viewModel.ProjectThreads.All(thread => thread.IsRunning), "parallel running indicators");
+    await CompleteAutomaticThreadRenameAsync(transport, "thr_parallel_b");
 
     transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thr_parallel_a","turn":{"id":"turn_parallel_a","status":"completed"}}}""");
     await WaitUntilAsync(
@@ -1578,6 +1581,7 @@ static async Task TestViewModelRunsFollowUpOnSameThreadAsync()
     transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thread-1"}}}""");
     await transport.WaitForClientMessageCountAsync(4);
     transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-1"}}}""");
+    await CompleteAutomaticThreadRenameAsync(transport, "thread-1");
     transport.ServerSend("""{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","text":"First answer"}}}""");
     transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","items":[]}}}""");
     await WaitUntilAsync(() => !viewModel.IsTurnRunning, "first turn completed");
@@ -1585,11 +1589,11 @@ static async Task TestViewModelRunsFollowUpOnSameThreadAsync()
 
     viewModel.PromptText = "Follow-up question";
     viewModel.SubmitPromptCommand.Execute(null);
-    await transport.WaitForClientMessageCountAsync(5);
-    var followUpRequest = ParseMessage(transport.ClientMessages[4]);
+    await transport.WaitForClientMessageCountAsync(6);
+    var followUpRequest = ParseMessage(transport.ClientMessages[5]);
     AssertJsonString("turn/start", followUpRequest, "method", "follow-up method");
     AssertJsonString("thread-1", followUpRequest, "params.threadId", "follow-up reuses thread");
-    transport.ServerSend("""{"id":3,"result":{"turn":{"id":"turn-2"}}}""");
+    transport.ServerSend("""{"id":4,"result":{"turn":{"id":"turn-2"}}}""");
     transport.ServerSend("""{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-2","item":{"type":"agentMessage","text":"Second answer"}}}""");
     transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-2","status":"completed","items":[]}}}""");
     await WaitUntilAsync(() =>
@@ -1631,21 +1635,22 @@ static async Task TestViewModelQueuesAndDrainsFollowUpAsync()
     await transport.WaitForClientMessageCountAsync(4);
     transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-queue-1"}}}""");
     await WaitUntilAsync(() => viewModel.IsTurnRunning, "queue initial turn running");
+    await CompleteAutomaticThreadRenameAsync(transport, "thread-queue");
 
     viewModel.SteeringText = "Run the focused queue tests next";
     viewModel.SteerTurnCommand.Execute(null);
     await WaitUntilAsync(() => viewModel.TaskWorkspace.QueuedFollowUps.Count == 1, "active message queued");
-    AssertEqual(4, transport.ClientMessages.Count, "queueing makes no app-server request");
+    AssertEqual(5, transport.ClientMessages.Count, "queueing makes no app-server request");
     AssertTrue(string.IsNullOrWhiteSpace(viewModel.SteeringText), "queueing clears active composer");
     AssertEqual("Run the focused queue tests next", settingsStore.SavedSettings.ProjectThreads.Single().QueuedFollowUps.Single().Text, "queue persists immediately");
 
     transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-queue","turn":{"id":"turn-queue-1","status":"completed","items":[]}}}""");
-    await transport.WaitForClientMessageCountAsync(5);
-    var queuedTurn = ParseMessage(transport.ClientMessages[4]);
+    await transport.WaitForClientMessageCountAsync(6);
+    var queuedTurn = ParseMessage(transport.ClientMessages[5]);
     AssertJsonString("turn/start", queuedTurn, "method", "queued follow-up starts a new turn");
     AssertJsonString("thread-queue", queuedTurn, "params.threadId", "queued follow-up stays on its thread");
     AssertJsonString("Run the focused queue tests next", queuedTurn, "params.input.0.text", "queued follow-up prompt");
-    transport.ServerSend("""{"id":3,"result":{"turn":{"id":"turn-queue-2"}}}""");
+    transport.ServerSend("""{"id":4,"result":{"turn":{"id":"turn-queue-2"}}}""");
 
     await WaitUntilAsync(() => viewModel.IsTurnRunning && viewModel.TaskWorkspace.QueuedFollowUps.Count == 0, "queued follow-up acknowledged");
     AssertEqual(2, viewModel.TaskWorkspace.ConversationTurns.Count, "queued follow-up creates a separate conversation turn");
@@ -1672,13 +1677,14 @@ static async Task TestViewModelAlternateFollowUpInvertsOnceAsync()
     await transport.WaitForClientMessageCountAsync(4);
     transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-alternate"}}}""");
     await WaitUntilAsync(() => viewModel.IsTurnRunning, "alternate initial turn running");
+    await CompleteAutomaticThreadRenameAsync(transport, "thread-alternate");
 
     viewModel.SteeringText = "Steer this once";
     viewModel.TaskWorkspace.AlternateFollowUpCommand.Execute(null);
-    await transport.WaitForClientMessageCountAsync(5);
-    var steer = ParseMessage(transport.ClientMessages[4]);
+    await transport.WaitForClientMessageCountAsync(6);
+    var steer = ParseMessage(transport.ClientMessages[5]);
     AssertJsonString("turn/steer", steer, "method", "alternate queue action steers once");
-    transport.ServerSend("""{"id":3,"result":{"turnId":"turn-alternate"}}""");
+    transport.ServerSend("""{"id":4,"result":{"turnId":"turn-alternate"}}""");
     await WaitUntilAsync(() => string.IsNullOrWhiteSpace(viewModel.SteeringText), "alternate steer acknowledged");
 
     AssertEqual(FollowUpBehavior.Queue, viewModel.TaskWorkspace.FollowUpBehavior, "alternate action does not change preference");
@@ -1709,6 +1715,7 @@ static async Task TestViewModelPausesQueuedFollowUpsAfterFailedTurnAsync()
     await transport.WaitForClientMessageCountAsync(4);
     transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-failed-queue"}}}""");
     await WaitUntilAsync(() => viewModel.IsTurnRunning, "failed queue initial turn running");
+    await CompleteAutomaticThreadRenameAsync(transport, "thread-failed-queue");
 
     viewModel.SteeringText = "Do not auto-run after failure";
     viewModel.SteerTurnCommand.Execute(null);
@@ -1717,7 +1724,7 @@ static async Task TestViewModelPausesQueuedFollowUpsAfterFailedTurnAsync()
     await WaitUntilAsync(() => !viewModel.IsTurnRunning, "failed turn completed");
     await Task.Delay(100);
 
-    AssertEqual(4, transport.ClientMessages.Count, "failed turn does not auto-start queued work");
+    AssertEqual(5, transport.ClientMessages.Count, "failed turn does not auto-start queued work");
     AssertEqual(1, viewModel.TaskWorkspace.QueuedFollowUps.Count, "failed turn retains queued work");
     AssertEqual(QueuedFollowUpState.Pending, viewModel.TaskWorkspace.QueuedFollowUps[0].State, "failed turn leaves queued work pending for explicit retry");
     AssertTrue(!viewModel.ArchiveThreadCommand.CanExecute(null), "thread with queued work cannot be archived");
@@ -1747,28 +1754,30 @@ static async Task TestViewModelDrainsQueuedFollowUpOnBackgroundThreadAsync()
     await transport.WaitForClientMessageCountAsync(4);
     transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-background-a-1"}}}""");
     await WaitUntilAsync(() => viewModel.IsTurnRunning, "background first turn running");
+    await CompleteAutomaticThreadRenameAsync(transport, "thread-background-a");
 
     viewModel.SteeringText = "Queued work for the first thread";
     viewModel.SteerTurnCommand.Execute(null);
     await WaitUntilAsync(() => viewModel.TaskWorkspace.QueuedFollowUps.Count == 1, "background follow-up queued");
 
     viewModel.NewThreadCommand.Execute(null);
-    await transport.WaitForClientMessageCountAsync(5);
-    transport.ServerSend("""{"id":3,"result":{"thread":{"id":"thread-background-b"}}}""");
+    await transport.WaitForClientMessageCountAsync(6);
+    transport.ServerSend("""{"id":4,"result":{"thread":{"id":"thread-background-b"}}}""");
     await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "thread-background-b", "background second thread selected");
     viewModel.PromptText = "Second thread task";
     viewModel.SubmitPromptCommand.Execute(null);
-    await transport.WaitForClientMessageCountAsync(6);
-    transport.ServerSend("""{"id":4,"result":{"turn":{"id":"turn-background-b-1"}}}""");
+    await transport.WaitForClientMessageCountAsync(7);
+    transport.ServerSend("""{"id":5,"result":{"turn":{"id":"turn-background-b-1"}}}""");
     await WaitUntilAsync(() => viewModel.IsTurnRunning, "background second turn running");
+    await CompleteAutomaticThreadRenameAsync(transport, "thread-background-b");
 
     transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-background-a","turn":{"id":"turn-background-a-1","status":"completed","items":[]}}}""");
-    await transport.WaitForClientMessageCountAsync(7);
-    var queuedTurn = ParseMessage(transport.ClientMessages[6]);
+    await transport.WaitForClientMessageCountAsync(9);
+    var queuedTurn = ParseMessage(transport.ClientMessages[8]);
     AssertJsonString("turn/start", queuedTurn, "method", "background queued follow-up starts a turn");
     AssertJsonString("thread-background-a", queuedTurn, "params.threadId", "background queued follow-up stays on its owning thread");
     AssertJsonString("Queued work for the first thread", queuedTurn, "params.input.0.text", "background queued prompt");
-    transport.ServerSend("""{"id":5,"result":{"turn":{"id":"turn-background-a-2"}}}""");
+    transport.ServerSend("""{"id":7,"result":{"turn":{"id":"turn-background-a-2"}}}""");
 
     await WaitUntilAsync(
         () => settingsStore.SavedSettings.ProjectThreads.Single(thread => thread.ThreadId == "thread-background-a").QueuedFollowUps.Count == 0,
@@ -1839,18 +1848,19 @@ static async Task TestViewModelCancellationSendsActiveThreadAndTurnAsync()
         """);
 
     await WaitUntilAsync(() => viewModel.CancelTurnCommand.CanExecute(null), "cancel enabled");
+    await CompleteAutomaticThreadRenameAsync(transport, "thr_123");
 
     viewModel.CancelTurnCommand.Execute(null);
-    await transport.WaitForClientMessageCountAsync(5);
+    await transport.WaitForClientMessageCountAsync(6);
 
-    var cancelRequest = ParseMessage(transport.ClientMessages[4]);
+    var cancelRequest = ParseMessage(transport.ClientMessages[5]);
     AssertJsonString("turn/interrupt", cancelRequest, "method", "view model cancel method");
     AssertJsonString("thr_123", cancelRequest, "params.threadId", "view model cancel thread id");
     AssertJsonString("turn_456", cancelRequest, "params.turnId", "view model cancel turn id");
 
     transport.ServerSend(
         """
-        {"id":3,"result":{"ok":true}}
+        {"id":4,"result":{"ok":true}}
         """);
 
     await viewModel.DisposeAsync();
@@ -2088,18 +2098,19 @@ static async Task TestViewModelShutdownCancelsRunningTurnAndDisposesTransportAsy
         """);
 
     await WaitUntilAsync(() => viewModel.IsTurnRunning, "turn running");
+    await CompleteAutomaticThreadRenameAsync(transport, "thr_123");
 
     var shutdownTask = viewModel.ShutdownAsync();
-    await transport.WaitForClientMessageCountAsync(5);
+    await transport.WaitForClientMessageCountAsync(6);
 
-    var cancelRequest = ParseMessage(transport.ClientMessages[4]);
+    var cancelRequest = ParseMessage(transport.ClientMessages[5]);
     AssertJsonString("turn/interrupt", cancelRequest, "method", "shutdown cancel method");
     AssertJsonString("thr_123", cancelRequest, "params.threadId", "shutdown cancel thread id");
     AssertJsonString("turn_456", cancelRequest, "params.turnId", "shutdown cancel turn id");
 
     transport.ServerSend(
         """
-        {"id":3,"result":{"ok":true}}
+        {"id":4,"result":{"ok":true}}
         """);
 
     await shutdownTask;
@@ -2740,6 +2751,25 @@ static async Task WaitUntilAsync(Func<bool> condition, string label)
     {
         await Task.Delay(20, timeout.Token);
     }
+}
+
+static async Task CompleteAutomaticThreadRenameAsync(
+    FakeAppServerTransport transport,
+    string threadId)
+{
+    await WaitUntilAsync(
+        () => transport.ClientMessages.Any(message =>
+            ResolvePath(ParseMessage(message), "method")?.GetValue<string>() == "thread/name/set" &&
+            ResolvePath(ParseMessage(message), "params.threadId")?.GetValue<string>() == threadId),
+        $"automatic rename for {threadId}");
+    var request = transport.ClientMessages
+        .Select(ParseMessage)
+        .Single(message =>
+            ResolvePath(message, "method")?.GetValue<string>() == "thread/name/set" &&
+            ResolvePath(message, "params.threadId")?.GetValue<string>() == threadId);
+    var requestId = request["id"]?.ToJsonString()
+        ?? throw new InvalidOperationException($"Automatic rename for '{threadId}' did not include an id.");
+    transport.ServerSend($"{{\"id\":{requestId},\"result\":{{}}}}");
 }
 
 static void AssertJsonString(string expected, JsonNode node, string path, string label)

@@ -91,6 +91,7 @@ public sealed class PersistedProjectThread
     public string ProjectPath { get; set; } = string.Empty;
     public string ThreadId { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
+    public bool IsTitlePlaceholder { get; set; }
     public string Preview { get; set; } = string.Empty;
     public bool IsArchived { get; set; }
     public bool IsPinned { get; set; }
@@ -149,6 +150,8 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
             OnPropertyChanged(nameof(DisplayTitle));
         }
     }
+
+    public bool IsTitlePlaceholder { get; set; }
 
     public string Preview { get; set; } = string.Empty;
 

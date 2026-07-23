@@ -63,6 +63,9 @@
         </Style.Triggers>
     </Style>
 
+    <Style TargetType="{x:Type MenuItem}"
+           BasedOn="{StaticResource TextOnlyContextMenuItem}" />
+
     <Style TargetType="{x:Type ContextMenu}">
         <Setter Property="OverridesDefaultStyle" Value="True" />
         <Setter Property="SnapsToDevicePixels" Value="True" />
@@ -71,7 +74,6 @@
         <Setter Property="BorderBrush" Value="{DynamicResource ButtonBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Padding" Value="4" />
-        <Setter Property="ItemContainerStyle" Value="{StaticResource TextOnlyContextMenuItem}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type ContextMenu}">

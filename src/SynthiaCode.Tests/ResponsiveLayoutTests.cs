@@ -124,15 +124,21 @@ internal static class ResponsiveLayoutTests
             ?? throw new InvalidOperationException("text-only menu item style was not registered");
         var contextMenuStyle = resources[typeof(ContextMenu)] as Style
             ?? throw new InvalidOperationException("context menu style was not registered");
-        var itemContainerSetter = contextMenuStyle.Setters
-            .OfType<Setter>()
-            .SingleOrDefault(setter => setter.Property == ItemsControl.ItemContainerStyleProperty);
-
-        Assert(ReferenceEquals(itemContainerSetter?.Value, itemStyle), "context menus select the text-only item template");
+        var implicitMenuItemStyle = resources[typeof(MenuItem)] as Style
+            ?? throw new InvalidOperationException("implicit context-menu item style was not registered");
+        Assert(
+            ReferenceEquals(implicitMenuItemStyle.BasedOn, itemStyle),
+            "menu items inherit the text-only item template without styling separators");
+        Assert(
+            contextMenuStyle.Setters.OfType<Setter>().All(setter => setter.Property != ItemsControl.ItemContainerStyleProperty),
+            "context menus do not force a MenuItem style onto mixed item containers");
 
         var contextMenu = new ContextMenu { Style = contextMenuStyle };
         var hostedItem = new MenuItem { Header = "Fork" };
+        var separator = new Separator();
         contextMenu.Items.Add(hostedItem);
+        contextMenu.Items.Add(separator);
+        contextMenu.Items.Add(new MenuItem { Header = "Delete" });
         contextMenu.ApplyTemplate();
         contextMenu.Measure(new Size(260, 120));
         contextMenu.Arrange(new Rect(contextMenu.DesiredSize));
@@ -147,7 +153,10 @@ internal static class ResponsiveLayoutTests
         Assert(
             contextMenu.Template.FindName("ContextMenuItemsHost", contextMenu) is ItemsPresenter,
             "context menu owns its complete items host");
-        Assert(ReferenceEquals(hostedItem.Style, itemStyle), "hosted menu items receive the text-only style");
+        Assert(ReferenceEquals(hostedItem.Style, implicitMenuItemStyle), "hosted menu items receive the text-only style");
+        Assert(
+            separator.Style is null || separator.Style.TargetType == typeof(Separator),
+            "separators never receive a MenuItem-targeted style");
 
         var item = new MenuItem { Header = "Resume", Style = itemStyle };
         item.ApplyTemplate();
@@ -197,6 +206,11 @@ internal static class ResponsiveLayoutTests
         };
 
         PumpLayout(view);
+        var searchBox = view.FindName("ChatSearchBox") as TextBox
+            ?? throw new InvalidOperationException("cross-chat search box was not created");
+        Assert(
+            AutomationProperties.GetName(searchBox) == "Search all chats",
+            "cross-chat search is exposed to automation");
         var text = FindVisualDescendants<TextBlock>(view).Select(block => block.Text).ToList();
         Assert(text.Contains("Chats"), "General navigation is labelled Chats");
         Assert(!text.Contains("General"), "the legacy General section label is absent");
@@ -307,6 +321,11 @@ internal static class ResponsiveLayoutTests
         var view = new TaskView { Width = 620, Height = 520 };
         var conversationList = (ListBox?)view.FindName("ConversationList")
             ?? throw new InvalidOperationException("conversation list was not found");
+        var findBox = view.FindName("FindInChatBox") as TextBox
+            ?? throw new InvalidOperationException("find-in-chat box was not created");
+        Assert(
+            AutomationProperties.GetName(findBox) == "Find text in current chat",
+            "find-in-chat is exposed to automation");
         conversationList.ItemsSource = turns;
         typeof(TaskView)
             .GetField("observedTurns", BindingFlags.Instance | BindingFlags.NonPublic)!

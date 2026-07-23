@@ -524,4 +524,6 @@ public sealed class CodexFollowUpQueueWorkspace
         queues.TryGetValue(threadId, out var queue)
             ? queue
             : throw new KeyNotFoundException($"Follow-up queue for thread '{threadId}' is not loaded.");
+
+    public bool Remove(string threadId) => queues.Remove(threadId);
 }

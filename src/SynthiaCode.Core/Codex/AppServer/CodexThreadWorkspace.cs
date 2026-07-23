@@ -49,6 +49,20 @@ public sealed class CodexThreadWorkspace
             ? service
             : throw new KeyNotFoundException($"Thread '{threadId}' is not loaded.");
 
+    public bool Remove(string threadId)
+    {
+        var removed = threads.Remove(threadId);
+        foreach (var turnId in turnThreads
+            .Where(pair => string.Equals(pair.Value, threadId, StringComparison.Ordinal))
+            .Select(pair => pair.Key)
+            .ToList())
+        {
+            turnThreads.Remove(turnId);
+        }
+
+        return removed;
+    }
+
     public void RegisterTurn(string threadId, string turnId)
     {
         turnThreads[turnId] = threadId;

@@ -11,11 +11,31 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <Grid Margin="0,0,0,8">
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="ChatSearchBox"
+                         Text="{Binding ProjectWorkspace.ChatSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         Padding="8,6"
+                         ToolTip="Search all chats (Ctrl+K)"
+                         AutomationProperties.Name="Search all chats"/>
+                <Button Grid.Column="1"
+                        Content="Clear"
+                        Command="{Binding ProjectWorkspace.ClearChatSearchCommand}"
+                        Style="{StaticResource CompactButton}"
+                        Margin="6,0,0,0"
+                        Visibility="{Binding ProjectWorkspace.HasChatSearch, Converter={StaticResource BooleanToVisibilityConverter}}"
+                        AutomationProperties.Name="Clear chat search"/>
+            </Grid>
+
+            <Grid Grid.Row="1" Margin="0,0,0,8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
@@ -38,7 +58,7 @@
                         AutomationProperties.Name="New chat"/>
             </Grid>
 
-            <ListBox Grid.Row="1"
+            <ListBox Grid.Row="2"
                      ItemsSource="{Binding ProjectWorkspace.GeneralThreads}"
                      SelectedItem="{Binding ProjectWorkspace.SelectedGeneralThread, Mode=TwoWay}"
                      Visibility="{Binding ProjectWorkspace.IsChatsExpanded, Converter={StaticResource BooleanToVisibilityConverter}}"
@@ -64,7 +84,19 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Pinned"
+                                               Foreground="{DynamicResource SignalBrush}"
+                                               FontSize="9"
+                                               FontWeight="SemiBold"
+                                               Margin="0,0,6,0"
+                                               Visibility="{Binding IsPinned, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                </Grid>
                                 <TextBlock Text="{Binding WorkspaceModeLabel}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10" TextWrapping="Wrap"/>
                             </StackPanel>
                             <Border Grid.Column="1"
@@ -89,9 +121,12 @@
                                     <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
                                         <MenuItem Header="Resume" Command="{Binding ResumeThreadCommand}"/>
                                         <MenuItem Header="Fork" Command="{Binding ForkThreadCommand}"/>
+                                        <MenuItem Header="{Binding PinActionLabel}" Command="{Binding TogglePinThreadCommand}"/>
                                         <Separator/>
                                         <MenuItem Header="Archive" Command="{Binding ArchiveThreadCommand}"/>
                                         <MenuItem Header="Unarchive" Command="{Binding UnarchiveThreadCommand}"/>
+                                        <Separator/>
+                                        <MenuItem Header="Delete" Command="{Binding DeleteThreadCommand}"/>
                                     </ContextMenu>
                                 </Button.ContextMenu>
                             </Button>
@@ -100,7 +135,7 @@
                 </ListBox.ItemTemplate>
             </ListBox>
 
-            <Grid Grid.Row="2" Margin="0,0,0,8">
+            <Grid Grid.Row="3" Margin="0,0,0,8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
@@ -123,7 +158,7 @@
                         AutomationProperties.Name="Add project"/>
             </Grid>
 
-            <ListBox Grid.Row="3"
+            <ListBox Grid.Row="4"
                      ItemsSource="{Binding ProjectWorkspace.Projects}"
                      Visibility="{Binding ProjectWorkspace.IsProjectsExpanded, Converter={StaticResource BooleanToVisibilityConverter}}"
                      Margin="0,0,0,8"
@@ -246,7 +281,19 @@
                                                     <ColumnDefinition Width="Auto"/>
                                                 </Grid.ColumnDefinitions>
                                                 <StackPanel>
-                                                    <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="Pinned"
+                                                                   Foreground="{DynamicResource SignalBrush}"
+                                                                   FontSize="9"
+                                                                   FontWeight="SemiBold"
+                                                                   Margin="0,0,6,0"
+                                                                   Visibility="{Binding IsPinned, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                                        <TextBlock Grid.Column="1" Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                    </Grid>
                                                     <TextBlock Text="{Binding WorkspaceModeLabel}" Foreground="{DynamicResource MutedInkBrush}" FontSize="10" TextWrapping="Wrap"/>
                                                 </StackPanel>
                                                 <Border Grid.Column="1"
@@ -271,10 +318,13 @@
                                                         <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
                                                             <MenuItem Header="Resume" Command="{Binding ResumeThreadCommand}"/>
                                                             <MenuItem Header="Fork" Command="{Binding ForkThreadCommand}"/>
+                                                            <MenuItem Header="{Binding PinActionLabel}" Command="{Binding TogglePinThreadCommand}"/>
                                                             <Separator/>
                                                             <MenuItem Header="Archive" Command="{Binding ArchiveThreadCommand}"/>
                                                             <MenuItem Header="Unarchive" Command="{Binding UnarchiveThreadCommand}"/>
                                                             <MenuItem Header="Remove worktree" Command="{Binding RemoveWorktreeCommand}"/>
+                                                            <Separator/>
+                                                            <MenuItem Header="Delete" Command="{Binding DeleteThreadCommand}"/>
                                                         </ContextMenu>
                                                     </Button.ContextMenu>
                                                 </Button>
@@ -289,7 +339,74 @@
                 </ListBox.ItemTemplate>
             </ListBox>
 
-            <views:UserAccountView Grid.Row="4" DataContext="{Binding Account}"/>
+            <Grid Grid.Row="1"
+                  Grid.RowSpan="4"
+                  Background="{DynamicResource RailBrush}"
+                  Panel.ZIndex="10"
+                  Visibility="{Binding ProjectWorkspace.HasChatSearch, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <TextBlock Text="{Binding ProjectWorkspace.ChatSearchSummary}"
+                           Foreground="{DynamicResource MutedInkBrush}"
+                           FontSize="11"
+                           Margin="4,0,4,6"/>
+                <ListBox Grid.Row="1"
+                         ItemsSource="{Binding ProjectWorkspace.ChatSearchResults}"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         HorizontalContentAlignment="Stretch"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         AutomationProperties.Name="Cross-chat search results">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            <Setter Property="Padding" Value="0"/>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Button Command="{Binding DataContext.ProjectWorkspace.OpenChatSearchResultCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}"
+                                    Style="{StaticResource CompactButton}"
+                                    HorizontalContentAlignment="Stretch"
+                                    Margin="0,0,0,4"
+                                    Padding="8"
+                                    AutomationProperties.Name="{Binding Title, StringFormat=Open chat {0}}">
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Pinned"
+                                                   Foreground="{DynamicResource SignalBrush}"
+                                                   FontSize="9"
+                                                   FontWeight="SemiBold"
+                                                   Margin="0,0,6,0"
+                                                   Visibility="{Binding IsPinned, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                    </Grid>
+                                    <TextBlock Text="{Binding ScopeLabel}"
+                                               Foreground="{DynamicResource SignalBrush}"
+                                               FontSize="10"
+                                               Margin="0,2,0,0"/>
+                                    <TextBlock Text="{Binding Snippet}"
+                                               Foreground="{DynamicResource MutedInkBrush}"
+                                               FontSize="11"
+                                               TextWrapping="Wrap"
+                                               MaxHeight="48"
+                                               Margin="0,3,0,0"/>
+                                </StackPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+
+            <views:UserAccountView Grid.Row="5" DataContext="{Binding Account}"/>
         </Grid>
     </Border>
 </UserControl>

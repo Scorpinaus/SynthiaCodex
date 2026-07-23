@@ -104,6 +104,24 @@ public sealed class ThreadStore
         SetArchived(thread, archived);
     }
 
+    public void SetPinned(AppSettings settings, string threadId, bool pinned)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var thread = settings.ProjectThreads.FirstOrDefault(item =>
+            string.Equals(item.ThreadId, threadId, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException($"Thread '{threadId}' was not found.");
+        thread.IsPinned = pinned;
+        thread.UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public bool Delete(AppSettings settings, string threadId)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var thread = settings.ProjectThreads.FirstOrDefault(item =>
+            string.Equals(item.ThreadId, threadId, StringComparison.Ordinal));
+        return thread is not null && settings.ProjectThreads.Remove(thread);
+    }
+
     private static void SetArchived(PersistedProjectThread thread, bool archived)
     {
         thread.IsArchived = archived;

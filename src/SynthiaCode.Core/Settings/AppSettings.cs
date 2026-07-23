@@ -115,6 +115,7 @@ public sealed class PersistedProjectThread
 public sealed class ProjectThreadState : INotifyPropertyChanged
 {
     private bool isArchived;
+    private bool isPinned;
     private bool isRunning;
     private string mode = "local";
     private string? worktreeBranch;
@@ -153,7 +154,20 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
         }
     }
 
-    public bool IsPinned { get; set; }
+    public bool IsPinned
+    {
+        get => isPinned;
+        set
+        {
+            if (isPinned == value)
+            {
+                return;
+            }
+
+            isPinned = value;
+            OnPropertyChanged();
+        }
+    }
 
     public bool IsActive { get; set; }
 

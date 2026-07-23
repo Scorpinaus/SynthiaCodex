@@ -1,5 +1,6 @@
 using System.Windows;
 using System.ComponentModel;
+using System.Windows.Input;
 using System.Windows.Threading;
 using SynthiaCode.App.ViewModels;
 
@@ -28,6 +29,31 @@ public partial class MainWindow : Window
     private void OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
         viewModel.UpdateViewportWidth(e.NewSize.Width);
+    }
+
+    private void OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.Control)
+        {
+            return;
+        }
+
+        if (e.Key == Key.K)
+        {
+            if (!viewModel.IsProjectRailOpen)
+            {
+                viewModel.ToggleProjectRailCommand.Execute(null);
+            }
+            _ = Dispatcher.BeginInvoke(
+                DispatcherPriority.Input,
+                NavigationFeature.FocusSearch);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.F)
+        {
+            TaskFeature.FocusFindInChat();
+            e.Handled = true;
+        }
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

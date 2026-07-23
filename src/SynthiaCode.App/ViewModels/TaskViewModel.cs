@@ -33,6 +33,11 @@ public sealed class TaskViewModel : ObservableObject
     private readonly RelayCommand removeAttachmentCommand;
     private readonly RelayCommand moveAttachmentLeftCommand;
     private readonly RelayCommand moveAttachmentRightCommand;
+    private readonly RelayCommand openFindInChatCommand;
+    private readonly RelayCommand closeFindInChatCommand;
+    private readonly RelayCommand findNextCommand;
+    private readonly RelayCommand findPreviousCommand;
+    private readonly List<CodexConversationTurn> findMatches = [];
     private CodexThreadService threadService = new();
     private CodexFollowUpQueue followUpQueue = new();
     private string prompt = string.Empty;
@@ -52,6 +57,9 @@ public sealed class TaskViewModel : ObservableObject
     private bool isOptionsFlyoutOpen;
     private bool isModelCatalogLoading;
     private bool isModelCatalogStale = true;
+    private bool isFindInChatOpen;
+    private string findInChatText = string.Empty;
+    private int currentFindMatchIndex = -1;
 
     public TaskViewModel(
         Func<Task> submit,
@@ -206,6 +214,15 @@ public sealed class TaskViewModel : ObservableObject
         ShowReasoningCommand = showReasoningCommand = new RelayCommand(
             () => OptionsPage = ComposerOptionsPage.Reasoning,
             () => ReasoningOptions.Count > 0);
+        OpenFindInChatCommand = openFindInChatCommand = new RelayCommand(
+            () => IsFindInChatOpen = true);
+        CloseFindInChatCommand = closeFindInChatCommand = new RelayCommand(CloseFindInChat);
+        FindNextCommand = findNextCommand = new RelayCommand(
+            () => MoveFindMatch(1),
+            () => findMatches.Count > 0);
+        FindPreviousCommand = findPreviousCommand = new RelayCommand(
+            () => MoveFindMatch(-1),
+            () => findMatches.Count > 0);
     }
 
     public ObservableCollection<CodexTimelineItem> TimelineItems => threadService.TimelineItems;
@@ -253,6 +270,10 @@ public sealed class TaskViewModel : ObservableObject
     public ICommand RemoveAttachmentCommand { get; }
     public ICommand MoveAttachmentLeftCommand { get; }
     public ICommand MoveAttachmentRightCommand { get; }
+    public ICommand OpenFindInChatCommand { get; }
+    public ICommand CloseFindInChatCommand { get; }
+    public ICommand FindNextCommand { get; }
+    public ICommand FindPreviousCommand { get; }
 
     public CodexThreadService ThreadService => threadService;
 
@@ -599,6 +620,40 @@ public sealed class TaskViewModel : ObservableObject
 
     public bool HasConversation => ConversationTurns.Count > 0;
 
+    public bool IsFindInChatOpen
+    {
+        get => isFindInChatOpen;
+        private set => SetProperty(ref isFindInChatOpen, value);
+    }
+
+    public string FindInChatText
+    {
+        get => findInChatText;
+        set
+        {
+            if (SetProperty(ref findInChatText, value ?? string.Empty))
+            {
+                RefreshFindInChatMatches();
+            }
+        }
+    }
+
+    public int FindInChatMatchCount => findMatches.Count;
+
+    public int CurrentFindInChatMatchNumber =>
+        currentFindMatchIndex >= 0 && currentFindMatchIndex < findMatches.Count
+            ? currentFindMatchIndex + 1
+            : 0;
+
+    public CodexConversationTurn? CurrentFindInChatTurn =>
+        currentFindMatchIndex >= 0 && currentFindMatchIndex < findMatches.Count
+            ? findMatches[currentFindMatchIndex]
+            : null;
+
+    public string FindInChatSummary => FindInChatMatchCount == 0
+        ? "0 results"
+        : $"{CurrentFindInChatMatchNumber} of {FindInChatMatchCount}";
+
     public bool IsTurnRunning
     {
         get => isTurnRunning;
@@ -623,6 +678,7 @@ public sealed class TaskViewModel : ObservableObject
 
     public void UseThreadService(CodexThreadService service)
     {
+        ClearFindMatchFlags();
         threadService = service;
         OnPropertyChanged(nameof(TimelineItems));
         OnPropertyChanged(nameof(ConversationTurns));
@@ -632,6 +688,7 @@ public sealed class TaskViewModel : ObservableObject
         OnPropertyChanged(nameof(HasConversation));
         OnPropertyChanged(nameof(ContextWindowIndicator));
         OnPropertyChanged(nameof(ContextWindowToolTip));
+        RefreshFindInChatMatches();
     }
 
     public void UseFollowUpQueue(CodexFollowUpQueue queue)
@@ -738,6 +795,95 @@ public sealed class TaskViewModel : ObservableObject
         OnPropertyChanged(nameof(HasConversation));
         OnPropertyChanged(nameof(ContextWindowIndicator));
         OnPropertyChanged(nameof(ContextWindowToolTip));
+        RefreshFindInChatMatches();
+    }
+
+    private void CloseFindInChat()
+    {
+        IsFindInChatOpen = false;
+        if (findInChatText.Length > 0)
+        {
+            findInChatText = string.Empty;
+            OnPropertyChanged(nameof(FindInChatText));
+        }
+        RefreshFindInChatMatches();
+    }
+
+    private void RefreshFindInChatMatches()
+    {
+        ClearFindMatchFlags();
+        findMatches.Clear();
+        currentFindMatchIndex = -1;
+        var query = FindInChatText.Trim();
+        if (query.Length > 0)
+        {
+            foreach (var turn in ConversationTurns)
+            {
+                AddFindMatches(turn, turn.UserPrompt, query);
+                AddFindMatches(turn, turn.AssistantResponse, query);
+                turn.IsFindMatch = findMatches.Contains(turn);
+            }
+        }
+
+        if (findMatches.Count > 0)
+        {
+            currentFindMatchIndex = 0;
+            findMatches[0].IsCurrentFindMatch = true;
+        }
+
+        RaiseFindStateChanged();
+    }
+
+    private void AddFindMatches(CodexConversationTurn turn, string text, string query)
+    {
+        var searchIndex = 0;
+        while (searchIndex <= text.Length - query.Length)
+        {
+            var matchIndex = text.IndexOf(query, searchIndex, StringComparison.OrdinalIgnoreCase);
+            if (matchIndex < 0)
+            {
+                break;
+            }
+
+            findMatches.Add(turn);
+            searchIndex = matchIndex + query.Length;
+        }
+    }
+
+    private void MoveFindMatch(int offset)
+    {
+        if (findMatches.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var turn in ConversationTurns)
+        {
+            turn.IsCurrentFindMatch = false;
+        }
+
+        currentFindMatchIndex = (currentFindMatchIndex + offset + findMatches.Count) % findMatches.Count;
+        findMatches[currentFindMatchIndex].IsCurrentFindMatch = true;
+        RaiseFindStateChanged();
+    }
+
+    private void ClearFindMatchFlags()
+    {
+        foreach (var turn in threadService.ConversationTurns)
+        {
+            turn.IsFindMatch = false;
+            turn.IsCurrentFindMatch = false;
+        }
+    }
+
+    private void RaiseFindStateChanged()
+    {
+        OnPropertyChanged(nameof(FindInChatMatchCount));
+        OnPropertyChanged(nameof(CurrentFindInChatMatchNumber));
+        OnPropertyChanged(nameof(CurrentFindInChatTurn));
+        OnPropertyChanged(nameof(FindInChatSummary));
+        findNextCommand.RaiseCanExecuteChanged();
+        findPreviousCommand.RaiseCanExecuteChanged();
     }
 
     private static string FormatCompactTokenCount(long value)

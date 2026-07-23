@@ -10,10 +10,13 @@ public sealed class ProjectThreadViewModel : ObservableObject
 {
     private readonly Action<ProjectThreadState?> selectionChanged;
     private readonly IReadOnlyList<AsyncRelayCommand> statefulCommands;
+    private readonly Func<object?, Task> openRecentProject;
+    private readonly List<ProjectThreadState> navigationThreads = [];
     private string? selectedProjectPath;
     private string? generalWorkspacePath;
     private bool isChatsExpanded = true;
     private bool isProjectsExpanded = true;
+    private string chatSearchText = string.Empty;
     private string newThreadWorkspaceMode = "Current checkout";
     private ProjectThreadState? selectedThread;
 
@@ -34,11 +37,18 @@ public sealed class ProjectThreadViewModel : ObservableObject
         Func<bool> canArchiveSelectedThread,
         Func<bool> canUnarchiveSelectedThread,
         Func<bool> canRemoveWorktree,
-        Action<ProjectThreadState?> selectionChanged)
+        Action<ProjectThreadState?> selectionChanged,
+        Func<Task>? togglePinThread = null,
+        Func<Task>? deleteThread = null,
+        Func<bool>? canTogglePinThread = null,
+        Func<bool>? canDeleteThread = null)
     {
         this.selectionChanged = selectionChanged;
+        this.openRecentProject = openRecentProject;
         ToggleChatsCommand = new RelayCommand(() => IsChatsExpanded = !IsChatsExpanded);
         ToggleProjectsCommand = new RelayCommand(() => IsProjectsExpanded = !IsProjectsExpanded);
+        ClearChatSearchCommand = new RelayCommand(() => ChatSearchText = string.Empty);
+        OpenChatSearchResultCommand = new AsyncRelayCommand(OpenChatSearchResultAsync);
         BrowseProjectCommand = new AsyncRelayCommand(browseProject);
         OpenRecentProjectCommand = new AsyncRelayCommand(async parameter =>
         {
@@ -71,6 +81,12 @@ public sealed class ProjectThreadViewModel : ObservableObject
         ArchiveThreadCommand = new AsyncRelayCommand(archiveThread, canArchiveSelectedThread);
         UnarchiveThreadCommand = new AsyncRelayCommand(unarchiveThread, canUnarchiveSelectedThread);
         RemoveWorktreeCommand = new AsyncRelayCommand(removeWorktree, canRemoveWorktree);
+        TogglePinThreadCommand = new AsyncRelayCommand(
+            togglePinThread ?? (() => Task.CompletedTask),
+            canTogglePinThread ?? (() => false));
+        DeleteThreadCommand = new AsyncRelayCommand(
+            deleteThread ?? (() => Task.CompletedTask),
+            canDeleteThread ?? (() => false));
         statefulCommands =
         [
             (AsyncRelayCommand)NewThreadCommand,
@@ -79,7 +95,9 @@ public sealed class ProjectThreadViewModel : ObservableObject
             (AsyncRelayCommand)ForkThreadCommand,
             (AsyncRelayCommand)ArchiveThreadCommand,
             (AsyncRelayCommand)UnarchiveThreadCommand,
-            (AsyncRelayCommand)RemoveWorktreeCommand
+            (AsyncRelayCommand)RemoveWorktreeCommand,
+            (AsyncRelayCommand)TogglePinThreadCommand,
+            (AsyncRelayCommand)DeleteThreadCommand
         ];
     }
 
@@ -91,8 +109,12 @@ public sealed class ProjectThreadViewModel : ObservableObject
 
     public ObservableCollection<ProjectNavigationItemViewModel> Projects { get; } = [];
 
+    public ObservableCollection<ChatSearchResultViewModel> ChatSearchResults { get; } = [];
+
     public ICommand ToggleChatsCommand { get; }
     public ICommand ToggleProjectsCommand { get; }
+    public ICommand ClearChatSearchCommand { get; }
+    public ICommand OpenChatSearchResultCommand { get; }
     public ICommand BrowseProjectCommand { get; }
     public ICommand OpenRecentProjectCommand { get; }
     public ICommand NewThreadCommand { get; }
@@ -104,6 +126,8 @@ public sealed class ProjectThreadViewModel : ObservableObject
     public ICommand ArchiveThreadCommand { get; }
     public ICommand UnarchiveThreadCommand { get; }
     public ICommand RemoveWorktreeCommand { get; }
+    public ICommand TogglePinThreadCommand { get; }
+    public ICommand DeleteThreadCommand { get; }
 
     public IReadOnlyList<string> WorkspaceModeOptions { get; } = ["Current checkout", "New worktree"];
 
@@ -134,6 +158,25 @@ public sealed class ProjectThreadViewModel : ObservableObject
     public string ChatsChevron => IsChatsExpanded ? "\u25be" : "\u25b8";
 
     public string ProjectsChevron => IsProjectsExpanded ? "\u25be" : "\u25b8";
+
+    public string ChatSearchText
+    {
+        get => chatSearchText;
+        set
+        {
+            if (SetProperty(ref chatSearchText, value ?? string.Empty))
+            {
+                RefreshChatSearch();
+                OnPropertyChanged(nameof(HasChatSearch));
+            }
+        }
+    }
+
+    public bool HasChatSearch => !string.IsNullOrWhiteSpace(ChatSearchText);
+
+    public string ChatSearchSummary => ChatSearchResults.Count == 1
+        ? "1 chat found"
+        : $"{ChatSearchResults.Count} chats found";
 
     public string? SelectedProjectPath
     {
@@ -166,12 +209,27 @@ public sealed class ProjectThreadViewModel : ObservableObject
         get => selectedThread;
         set
         {
+            if (ReferenceEquals(selectedThread, value))
+            {
+                return;
+            }
+
+            if (selectedThread is not null)
+            {
+                selectedThread.PropertyChanged -= OnSelectedThreadPropertyChanged;
+            }
+
             if (SetProperty(ref selectedThread, value))
             {
+                if (selectedThread is not null)
+                {
+                    selectedThread.PropertyChanged += OnSelectedThreadPropertyChanged;
+                }
                 OnPropertyChanged(nameof(ActiveWorkspacePath));
                 OnPropertyChanged(nameof(ActiveWorkspaceLabel));
                 OnPropertyChanged(nameof(SelectedThreadTitle));
                 OnPropertyChanged(nameof(SelectedGeneralThread));
+                OnPropertyChanged(nameof(PinActionLabel));
                 RaiseCommandStates();
                 selectionChanged(value);
             }
@@ -197,6 +255,8 @@ public sealed class ProjectThreadViewModel : ObservableObject
 
     public string SelectedThreadTitle => SelectedThread?.DisplayTitle ?? "No chat selected";
 
+    public string PinActionLabel => SelectedThread?.IsPinned == true ? "Unpin" : "Pin";
+
     public void SetSelectedProjectPath(string? path) => SelectedProjectPath = path;
 
     public void SetGeneralWorkspacePath(string? path)
@@ -220,6 +280,8 @@ public sealed class ProjectThreadViewModel : ObservableObject
     {
         var projectList = projects.ToList();
         var threadList = threads.ToList();
+        navigationThreads.Clear();
+        navigationThreads.AddRange(threadList);
         GeneralThreads.Clear();
         foreach (var thread in threadList
             .Where(thread => thread.ScopeKind == ThreadScopeKind.General)
@@ -257,6 +319,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
         }
 
         SynchronizeProjectSelection(expandSelected: true);
+        RefreshChatSearch();
     }
 
     public void ReplaceThreads(IEnumerable<ProjectThreadState> threads, string? selectedThreadId)
@@ -320,4 +383,135 @@ public sealed class ProjectThreadViewModel : ObservableObject
         NewThreadWorkspaceMode = workspaceMode;
         await createThread().ConfigureAwait(true);
     }
+
+    private void RefreshChatSearch()
+    {
+        ChatSearchResults.Clear();
+        var query = ChatSearchText.Trim();
+        if (query.Length == 0)
+        {
+            OnPropertyChanged(nameof(ChatSearchSummary));
+            return;
+        }
+
+        foreach (var thread in navigationThreads
+            .Where(thread => TryCreateSearchSnippet(thread, query, out _))
+            .OrderByDescending(thread => thread.IsPinned)
+            .ThenByDescending(thread => thread.UpdatedAt)
+            .Take(50))
+        {
+            _ = TryCreateSearchSnippet(thread, query, out var snippet);
+            ChatSearchResults.Add(new ChatSearchResultViewModel(
+                thread,
+                ResolveScopeLabel(thread),
+                snippet));
+        }
+
+        OnPropertyChanged(nameof(ChatSearchSummary));
+    }
+
+    private async Task OpenChatSearchResultAsync(object? parameter)
+    {
+        if (parameter is not ChatSearchResultViewModel result)
+        {
+            return;
+        }
+
+        var thread = result.Thread;
+        if (thread.ScopeKind == ThreadScopeKind.General)
+        {
+            SelectedThread = thread;
+        }
+        else
+        {
+            if (!ProjectNavigationItemViewModel.PathsEqual(SelectedProjectPath, thread.ProjectPath))
+            {
+                await openRecentProject(thread.ProjectPath).ConfigureAwait(true);
+            }
+
+            SelectedThread = Threads.FirstOrDefault(candidate =>
+                string.Equals(candidate.ThreadId, thread.ThreadId, StringComparison.Ordinal));
+        }
+
+        if (SelectedThread is not null)
+        {
+            ChatSearchText = string.Empty;
+        }
+    }
+
+    private string ResolveScopeLabel(ProjectThreadState thread)
+    {
+        if (thread.ScopeKind == ThreadScopeKind.General)
+        {
+            return "Chats";
+        }
+
+        return RecentProjects.FirstOrDefault(project =>
+            ProjectNavigationItemViewModel.PathsEqual(project.Path, thread.ProjectPath))?.Name
+            ?? new DirectoryInfo(thread.ProjectPath).Name;
+    }
+
+    private static bool TryCreateSearchSnippet(ProjectThreadState thread, string query, out string snippet)
+    {
+        var candidates = new[]
+            {
+                thread.Title,
+                thread.Preview,
+                thread.FinalResponse
+            }
+            .Concat(thread.ConversationTurns.SelectMany(turn =>
+                new[] { turn.UserPrompt, turn.AssistantResponse }));
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                continue;
+            }
+
+            var matchIndex = candidate.IndexOf(query, StringComparison.OrdinalIgnoreCase);
+            if (matchIndex < 0)
+            {
+                continue;
+            }
+
+            var normalized = string.Join(' ', candidate
+                .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+            var normalizedMatchIndex = normalized.IndexOf(query, StringComparison.OrdinalIgnoreCase);
+            var start = Math.Max(0, normalizedMatchIndex - 32);
+            var length = Math.Min(120, normalized.Length - start);
+            snippet = $"{(start > 0 ? "\u2026" : string.Empty)}{normalized.Substring(start, length)}{(start + length < normalized.Length ? "\u2026" : string.Empty)}";
+            return true;
+        }
+
+        snippet = string.Empty;
+        return false;
+    }
+
+    private void OnSelectedThreadPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName == nameof(ProjectThreadState.IsPinned))
+        {
+            OnPropertyChanged(nameof(PinActionLabel));
+        }
+    }
+}
+
+public sealed class ChatSearchResultViewModel(
+    ProjectThreadState thread,
+    string scopeLabel,
+    string snippet)
+{
+    public ProjectThreadState Thread { get; } = thread;
+
+    public string ThreadId => Thread.ThreadId;
+
+    public string Title => Thread.DisplayTitle;
+
+    public string ScopeLabel { get; } = scopeLabel;
+
+    public string Snippet { get; } = snippet;
+
+    public bool IsPinned => Thread.IsPinned;
+
+    public bool IsArchived => Thread.IsArchived;
 }

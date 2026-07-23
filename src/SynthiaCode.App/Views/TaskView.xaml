@@ -8,8 +8,66 @@
         <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <Border Style="{StaticResource Card}" AutomationProperties.Name="Task transcript">
             <Grid>
-            <TextBlock Text="Start a conversation by describing a task below." Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding TaskWorkspace.HasConversation, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <Grid Margin="2,0,2,8">
+                <Button Content="Find"
+                        Command="{Binding TaskWorkspace.OpenFindInChatCommand}"
+                        Style="{StaticResource CompactButton}"
+                        HorizontalAlignment="Right"
+                        ToolTip="Find in chat (Ctrl+F)"
+                        Visibility="{Binding TaskWorkspace.IsFindInChatOpen, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                        AutomationProperties.Name="Find in chat"/>
+                <Border Background="{DynamicResource FieldBrush}"
+                        BorderBrush="{DynamicResource LineBrush}"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Padding="6"
+                        Visibility="{Binding TaskWorkspace.IsFindInChatOpen, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="FindInChatBox"
+                                 Text="{Binding TaskWorkspace.FindInChatText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 MinWidth="180"
+                                 Padding="6,4"
+                                 PreviewKeyDown="OnFindInChatPreviewKeyDown"
+                                 AutomationProperties.Name="Find text in current chat"/>
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding TaskWorkspace.FindInChatSummary}"
+                                   Foreground="{DynamicResource MutedInkBrush}"
+                                   VerticalAlignment="Center"
+                                   Margin="8,0"/>
+                        <Button Grid.Column="2"
+                                Content="Previous"
+                                Command="{Binding TaskWorkspace.FindPreviousCommand}"
+                                Style="{StaticResource CompactButton}"
+                                Margin="0,0,4,0"
+                                AutomationProperties.Name="Previous chat match"/>
+                        <Button Grid.Column="3"
+                                Content="Next"
+                                Command="{Binding TaskWorkspace.FindNextCommand}"
+                                Style="{StaticResource CompactButton}"
+                                Margin="0,0,4,0"
+                                AutomationProperties.Name="Next chat match"/>
+                        <Button Grid.Column="4"
+                                Content="Close"
+                                Command="{Binding TaskWorkspace.CloseFindInChatCommand}"
+                                Style="{StaticResource CompactButton}"
+                                AutomationProperties.Name="Close find in chat"/>
+                    </Grid>
+                </Border>
+            </Grid>
+            <TextBlock Grid.Row="1" Text="Start a conversation by describing a task below." Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding TaskWorkspace.HasConversation, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
             <ListBox x:Name="ConversationList"
+                     Grid.Row="1"
                      ItemsSource="{Binding TaskWorkspace.ConversationTurns}"
                      BorderThickness="0"
                      Background="Transparent"
@@ -41,7 +99,21 @@
                 </ListBox.ItemContainerStyle>
                 <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <Border Style="{StaticResource ConversationTurnCard}" Margin="2,2,2,18" AutomationProperties.Name="Conversation turn">
+                        <Border Margin="2,2,2,18" AutomationProperties.Name="Conversation turn">
+                            <Border.Style>
+                                <Style TargetType="Border" BasedOn="{StaticResource ConversationTurnCard}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsFindMatch}" Value="True">
+                                            <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}"/>
+                                            <Setter Property="BorderThickness" Value="1"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsCurrentFindMatch}" Value="True">
+                                            <Setter Property="BorderBrush" Value="{DynamicResource SignalBrush}"/>
+                                            <Setter Property="BorderThickness" Value="2"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
                             <StackPanel>
                                 <Border Style="{StaticResource ConversationUserSurface}" Margin="48,0,0,12" AutomationProperties.Name="User message">
                                     <StackPanel>
@@ -195,7 +267,7 @@
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
-            <Button x:Name="JumpLatestButton" Content="Jump to latest" Style="{StaticResource CompactButton}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,14,14" Visibility="Collapsed" Click="OnJumpLatestClick"/>
+            <Button x:Name="JumpLatestButton" Grid.Row="1" Content="Jump to latest" Style="{StaticResource CompactButton}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,14,14" Visibility="Collapsed" Click="OnJumpLatestClick"/>
             </Grid>
         </Border>
         <Border x:Name="QueuedFollowUpPanel"

@@ -41,6 +41,19 @@ public partial class TaskView : UserControl
         composer.CaretIndex = composer.Text.Length;
     }
 
+    public void FocusFindInChat()
+    {
+        var workspace = taskViewModel ?? (DataContext as MainViewModel)?.TaskWorkspace;
+        workspace?.OpenFindInChatCommand.Execute(null);
+        Dispatcher.BeginInvoke(
+            () =>
+            {
+                FindInChatBox.Focus();
+                FindInChatBox.SelectAll();
+            },
+            DispatcherPriority.Input);
+    }
+
     private void OnLoaded(object sender, RoutedEventArgs e) => AttachToViewModel();
 
     private void OnUnloaded(object sender, RoutedEventArgs e) => DetachFromViewModel();
@@ -83,6 +96,12 @@ public partial class TaskView : UserControl
         {
             ObserveTurns(taskViewModel.ConversationTurns);
             FollowLatest();
+        }
+        else if (e.PropertyName == nameof(TaskViewModel.CurrentFindInChatTurn) &&
+                 taskViewModel?.CurrentFindInChatTurn is { } turn)
+        {
+            followLatest = false;
+            ConversationList.ScrollIntoView(turn);
         }
     }
 
@@ -197,6 +216,32 @@ public partial class TaskView : UserControl
         }
 
         e.Handled = true;
+    }
+
+    private void OnFindInChatPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (taskViewModel is null)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            taskViewModel.CloseFindInChatCommand.Execute(null);
+            ConversationList.Focus();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter)
+        {
+            var command = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)
+                ? taskViewModel.FindPreviousCommand
+                : taskViewModel.FindNextCommand;
+            if (command.CanExecute(null))
+            {
+                command.Execute(null);
+            }
+            e.Handled = true;
+        }
     }
 
     private void OnAttachClick(object sender, RoutedEventArgs e)

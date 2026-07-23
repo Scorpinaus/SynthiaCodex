@@ -17,6 +17,8 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
     private bool isActivityExpanded;
     private bool isSuperseded;
     private bool isPromptEditing;
+    private bool isFindMatch;
+    private bool isCurrentFindMatch;
     private string editedPrompt = string.Empty;
 
     public CodexConversationTurn()
@@ -123,6 +125,20 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
                 OnPropertyChanged(nameof(CanEditPrompt));
             }
         }
+    }
+
+    [JsonIgnore]
+    public bool IsFindMatch
+    {
+        get => isFindMatch;
+        set => SetProperty(ref isFindMatch, value);
+    }
+
+    [JsonIgnore]
+    public bool IsCurrentFindMatch
+    {
+        get => isCurrentFindMatch;
+        set => SetProperty(ref isCurrentFindMatch, value);
     }
 
     [JsonIgnore]

@@ -123,6 +123,7 @@ tests.AddRange(ResponsiveLayoutTests.All);
 tests.AddRange(MarkdownLinkTests.All);
 tests.AddRange(ProjectlessThreadTests.All);
 tests.AddRange(PromptEditingTests.All);
+tests.AddRange(ChatManagementSearchTests.All);
 
 var failures = 0;
 var testFilter = Environment.GetEnvironmentVariable("SYNTHIACODE_TEST_FILTER");

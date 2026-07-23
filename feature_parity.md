@@ -1,7 +1,7 @@
 # SynthiaCode and ChatGPT Desktop Feature Parity
 
-- **Audit date:** 21 July 2026
-- **SynthiaCode baseline:** working tree based on commit `39b40be`, including editable prompt history and the completed parity work recorded below
+- **Audit date:** 23 July 2026
+- **SynthiaCode baseline:** working tree based on commit `6a297e8`, including sidebar chat management, cross-chat search, find-in-chat, and the completed parity work recorded below
 - **Comparison surface:** ChatGPT desktop app with Codex/local-project capabilities
 - **Scope:** User-visible desktop functionality, local Codex workflows, and capabilities inherited through `codex app-server`
 
@@ -24,7 +24,7 @@
 | Agent orchestration | **Partial** | Parallel top-level chats and collaboration activity exist, but subagent thread inspection and management are absent. |
 | Context and multimodal input | **Near** | Per-chat context-window visibility plus image/file/folder picker, paste/drop, previews, queued lifecycle persistence, workspace mentions, and managed external snapshots are implemented; rich artifact viewing and remaining hardening are out of scope. |
 | Tools and integrations | **Low** | Configured MCP/web activity can flow through app-server, but Browser, Chrome, plugins, connectors, skills management, and Scheduled are not product surfaces. |
-| Desktop convenience | **Moderate** | Native Windows shell, themes, diagnostics, and core shortcuts exist; search, notifications, dictation, quick chat, deep links, and personalization do not. |
+| Desktop convenience | **Moderate** | Native Windows shell, themes, diagnostics, cross-chat search, find-in-chat, and core shortcuts exist; notifications, dictation, quick chat, deep links, and personalization do not. |
 
 ## Detailed parity matrix
 
@@ -34,11 +34,11 @@
 | --- | --- | --- | --- |
 | Start a chat without a project | First-class General scope with a managed app-data workspace, explicit and implicit creation, persistence, resume/fork/archive, attachments, queues, permissions, and per-thread terminal context | **Full** | General intentionally has no Git or assistant-worktree operations until a project is attached. |
 | Open a local project/folder | Folder picker, recent projects, project grouping, and project-scoped app-server work | **Full** | None material for the local coding loop. |
-| Multiple local chats per project | Collapsible Chats and Projects groups, per-project disclosure, and independently persisted chats | **Full** | ChatGPT has broader chat-management and search controls. |
+| Multiple local chats per project | Collapsible Chats and Projects groups, per-project disclosure, independently persisted chats, and pinned-first ordering | **Full** | ChatGPT has broader bulk chat-management controls. |
 | Multi-turn conversations | Restored history, follow-up turns, per-turn transcript/activity, cancellation, and recovery | **Full** | None material for normal local follow-ups. |
 | Edit and resubmit user prompts | Completed prompts have an inline editor; resubmission uses `thread/rollback`, keeps the selected and later prompts/responses visible as Previous versions, reuses attachments, and continues the same thread from the edited prompt | **Full** | Conversation history rewinds while existing workspace file changes are intentionally kept and clearly disclosed, matching app-server rollback semantics. |
-| Resume, fork, archive, unarchive | Typed app-server lifecycle flows and UI actions | **Full** | Permanent delete is not exposed. |
-| Pin, delete, and search chats | Archive state exists; no complete pin/delete/search UI | **Partial** | Add sidebar pin/delete, cross-chat search, and find-in-chat. |
+| Resume, fork, archive, unarchive | Typed app-server lifecycle flows and UI actions | **Full** | None material. |
+| Pin, delete, and search chats | Persisted sidebar pin/unpin with pinned-first ordering; confirmed delete; content search across General, project, and archived chats; current-chat occurrence search with next/previous wraparound and highlighting | **Full** | Because app-server has no permanent-delete method, delete first archives an active Codex thread and then removes SynthiaCode's local record; associated worktrees and branches are intentionally preserved. |
 | Steer an active run | Active-turn guidance uses `turn/steer` | **Full** | None for steering itself. |
 | Queue and manage follow-up messages | Per-thread persisted queues support Queue/Steer defaults, one-shot inversion, inline edit, reorder, manual send/steer, delete, and completion-driven FIFO dispatch | **Near** | Dispatch validates the captured workspace but does not yet refresh and re-resolve model-catalog and managed-permission policy immediately before a background start. |
 | Parallel top-level chats | Multiple project threads can run and route notifications independently | **Near** | No dedicated global running-task manager or completion notification center. |
@@ -104,7 +104,7 @@
 | --- | --- | --- | --- |
 | Native Windows application | WPF, single-process guard, responsive three-pane shell, and native file dialogs | **Full** | SynthiaCode is intentionally Windows-only. |
 | Appearance | System, light, and dark themes | **Partial** | No accent/background/foreground editor, font selection, or theme sharing. |
-| Keyboard shortcuts | Core project, submit, navigation, terminal, settings, and refresh shortcuts | **Partial** | No command palette, searchable/customizable shortcut editor, chat navigation, or find/search shortcuts. |
+| Keyboard shortcuts | Core project, submit, navigation, terminal, settings, refresh, cross-chat search (`Ctrl+K`), and find-in-chat (`Ctrl+F`) shortcuts | **Partial** | No command palette, searchable/customizable shortcut editor, or next/previous chat navigation. |
 | Account and settings pane | Account, appearance, Codex runtime, doctor, diagnostics, and about information | **Near** | ChatGPT has substantially broader settings. |
 | Notifications | Status bar and in-app state only | **Missing** | No OS completion notifications or notification preferences. |
 | Dictation/voice input | No speech input | **Missing** | ChatGPT desktop supports dictation. |
@@ -114,6 +114,15 @@
 | Chat profile, usage insights, and pets | Basic account/rate-limit view only | **Partial** | Profile analytics/cards and pets are non-core gaps. |
 
 ## What changed in this recheck
+
+Chat management and search moved from **Partial** to **Full** for the requested desktop outcome:
+
+1. General and project chat action menus expose Pin/Unpin and Delete. Pin state persists in existing settings data, updates the action label, and sorts pinned chats ahead of newer unpinned chats in both sidebar scopes.
+2. Delete requires explicit destructive confirmation. Unarchived Codex threads are archived through app-server before SynthiaCode removes the local chat, queue, draft, terminal, and in-memory routing state; assistant worktrees and Git branches are deliberately preserved.
+3. The sidebar search field searches titles, previews, final responses, and user/assistant transcript content across General, project, and archived chats. Results include scope and matching context, retain pinned-first ordering, and switch to the owning scope and chat when opened.
+4. Find-in-chat counts case-insensitive occurrences in both user and assistant messages, supports next/previous wraparound, scrolls to and highlights the current matching turn, and clears transient match state when closed.
+5. `Ctrl+K` opens/focuses cross-chat search and `Ctrl+F` opens/focuses find-in-chat; Enter/Shift+Enter navigate matches and Escape closes the find bar.
+6. Five focused persistence, command, main-lifecycle, cross-scope search, and occurrence-navigation tests plus rendered WPF automation/layout assertions protect the features in the 175-test regression suite. The full suite also caught and fixed a pinned-label layout regression so long sidebar titles remain width-constrained and wrap correctly.
 
 Editable user prompts moved from absent to **Full** parity for the Codex-style local-thread outcome:
 
@@ -213,7 +222,7 @@ P0 attachments and image input moved from **Missing** to **Near**:
 ### P1 — Make parallel and long-running work first class
 
 1. **Subagent panel:** show Active/Done agents with inspect, open, steer, and stop controls.
-2. **Chat management:** add pin, delete, cross-chat search, find-in-chat, and running-task filtering.
+2. **Chat management (core implemented):** add running-task filtering and optional bulk chat-management actions.
 3. **Notifications/background reliability:** completion notifications, prevent-sleep, and a task inbox.
 4. **Terminal integration:** expose current terminal output to Codex and add reusable project actions.
 5. **MCP and skills visibility:** show configured servers/skills, health, provenance, and enablement without owning their configuration semantics unnecessarily.

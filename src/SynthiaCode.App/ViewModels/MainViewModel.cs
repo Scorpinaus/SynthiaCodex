@@ -51,6 +51,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand forkThreadCommand;
     private readonly AsyncRelayCommand archiveThreadCommand;
     private readonly AsyncRelayCommand unarchiveThreadCommand;
+    private readonly AsyncRelayCommand togglePinThreadCommand;
+    private readonly AsyncRelayCommand deleteThreadCommand;
     private readonly AsyncRelayCommand steerTurnCommand;
     private readonly AsyncRelayCommand removeWorktreeCommand;
     private readonly RelayCommand toggleProjectRailCommand;
@@ -186,7 +188,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             CanArchiveSelectedThread,
             CanUnarchiveSelectedThread,
             CanRemoveSelectedWorktree,
-            HandleSelectedThreadChanged);
+            HandleSelectedThreadChanged,
+            ToggleSelectedThreadPinAsync,
+            DeleteSelectedThreadAsync,
+            CanToggleSelectedThreadPin,
+            CanDeleteSelectedThread);
         ProjectWorkspace.PropertyChanged += (_, args) => RelayProjectPropertyChanged(args.PropertyName);
 
         BrowseProjectCommand = ProjectWorkspace.BrowseProjectCommand;
@@ -197,6 +203,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ForkThreadCommand = forkThreadCommand = (AsyncRelayCommand)ProjectWorkspace.ForkThreadCommand;
         ArchiveThreadCommand = archiveThreadCommand = (AsyncRelayCommand)ProjectWorkspace.ArchiveThreadCommand;
         UnarchiveThreadCommand = unarchiveThreadCommand = (AsyncRelayCommand)ProjectWorkspace.UnarchiveThreadCommand;
+        TogglePinThreadCommand = togglePinThreadCommand = (AsyncRelayCommand)ProjectWorkspace.TogglePinThreadCommand;
+        DeleteThreadCommand = deleteThreadCommand = (AsyncRelayCommand)ProjectWorkspace.DeleteThreadCommand;
         SteerTurnCommand = steerTurnCommand = (AsyncRelayCommand)TaskWorkspace.SteerCommand;
         RemoveWorktreeCommand = removeWorktreeCommand = (AsyncRelayCommand)ProjectWorkspace.RemoveWorktreeCommand;
         OpenRecentProjectCommand = ProjectWorkspace.OpenRecentProjectCommand;
@@ -537,6 +545,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public ICommand ArchiveThreadCommand { get; }
 
     public ICommand UnarchiveThreadCommand { get; }
+
+    public ICommand TogglePinThreadCommand { get; }
+
+    public ICommand DeleteThreadCommand { get; }
 
     public ICommand SteerTurnCommand { get; }
 
@@ -1216,6 +1228,90 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             StatusMessage = ex.Message;
             logger.Log(AppLogLevel.Error, "thread_unarchive_failed", "Could not unarchive the selected thread.", exception: ex);
+        }
+    }
+
+    private async Task ToggleSelectedThreadPinAsync()
+    {
+        if (!CanToggleSelectedThreadPin() || SelectedThread is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var threadId = SelectedThread.ThreadId;
+            var pinned = !SelectedThread.IsPinned;
+            threadStore.SetPinned(settings, threadId, pinned);
+            RefreshProjectThreads(threadId);
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+            StatusMessage = pinned ? "Chat pinned" : "Chat unpinned";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Warning, "thread_pin_failed", "Could not update the selected chat pin.", exception: ex);
+        }
+    }
+
+    private async Task DeleteSelectedThreadAsync()
+    {
+        if (!CanDeleteSelectedThread() || SelectedThread is null)
+        {
+            return;
+        }
+
+        var thread = SelectedThread;
+        var worktreeNotice = string.Equals(thread.Mode, "worktree", StringComparison.OrdinalIgnoreCase)
+            ? "\n\nIts worktree and Git branch will be preserved."
+            : string.Empty;
+        var confirmed = userInteractionService.ConfirmDestructiveAction(
+            "Delete chat",
+            $"Permanently delete \"{thread.DisplayTitle}\" from SynthiaCode?\n\nThis cannot be undone. The Codex thread will be archived before the local chat record is removed.{worktreeNotice}");
+        if (!confirmed)
+        {
+            StatusMessage = "Chat deletion cancelled";
+            return;
+        }
+
+        try
+        {
+            if (!thread.IsArchived)
+            {
+                await EnsureAppServerSessionAsync().ConfigureAwait(true);
+                await appServerSessionCoordinator.ArchiveThreadAsync(thread.ThreadId).ConfigureAwait(true);
+            }
+
+            await Terminal.StopAndRemoveAsync(thread.ThreadId).ConfigureAwait(true);
+            loadedThreadIds.Remove(thread.ThreadId);
+            runningThreadIds.Remove(thread.ThreadId);
+            activeTurnIds.Remove(thread.ThreadId);
+            threadWorkspace.Remove(thread.ThreadId);
+            followUpQueueWorkspace.Remove(thread.ThreadId);
+            if (followUpDispatchGates.Remove(thread.ThreadId, out var dispatchGate))
+            {
+                dispatchGate.Dispose();
+            }
+            settings.ComposerAttachmentDrafts.RemoveAll(draft =>
+                string.Equals(draft.ThreadId, thread.ThreadId, StringComparison.Ordinal));
+            if (!threadStore.Delete(settings, thread.ThreadId))
+            {
+                throw new InvalidOperationException($"Chat '{thread.ThreadId}' was not found.");
+            }
+
+            activeThreadId = null;
+            activeTurnId = null;
+            activeThreadLoaded = false;
+            var nextThreadId = threadStore.GetThreads(settings, thread.ScopeKey)
+                .FirstOrDefault()?.ThreadId;
+            RefreshProjectThreads(nextThreadId, preserveCurrentSelection: false);
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+            StatusMessage = "Chat deleted";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Warning, "thread_delete_failed", "Could not delete the selected chat.", exception: ex);
         }
     }
 
@@ -2132,6 +2228,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool CanUnarchiveSelectedThread() =>
         CanUseSelectedThread() && SelectedThread?.IsArchived == true;
 
+    private bool CanToggleSelectedThreadPin() =>
+        !IsShuttingDown && SelectedThread is not null;
+
+    private bool CanDeleteSelectedThread() =>
+        !IsShuttingDown &&
+        SelectedThread is { IsRunning: false } &&
+        !IsTurnRunning &&
+        !SelectedThreadHasQueuedFollowUps();
+
     private bool CanRemoveSelectedWorktree() =>
         CanUseSelectedThread() &&
         SelectedThread?.ScopeKind == ThreadScopeKind.Project &&
@@ -2893,10 +2998,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         return SelectedThread ?? threadStore.GetActive(settings, GetCurrentScope());
     }
 
-    private void RefreshProjectThreads(string? selectedThreadId = null)
+    private void RefreshProjectThreads(
+        string? selectedThreadId = null,
+        bool preserveCurrentSelection = true)
     {
         var scope = GetCurrentScope();
-        selectedThreadId ??= SelectedThread?.ThreadId;
+        if (preserveCurrentSelection)
+        {
+            selectedThreadId ??= SelectedThread?.ThreadId;
+        }
         ProjectThreads.Clear();
         foreach (var thread in threadStore.GetThreads(settings, scope))
         {

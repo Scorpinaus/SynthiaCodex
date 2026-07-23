@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:views="clr-namespace:SynthiaCode.App.Views"
         mc:Ignorable="d" Title="SynthiaCode" Closing="OnClosing" SizeChanged="OnSizeChanged" PreviewKeyDown="OnPreviewKeyDown"
+        Icon="/SynthiaCode.App;component/Assets/Branding/SynthiaCode.ico"
         MinHeight="640" MinWidth="800" Height="800" Width="1320">
     <Window.InputBindings>
         <KeyBinding Key="O" Modifiers="Control" Command="{Binding ProjectWorkspace.BrowseProjectCommand}"/>
@@ -17,10 +18,26 @@
     </Window.InputBindings>
     <Grid Background="{DynamicResource CanvasBrush}">
         <Grid.RowDefinitions><RowDefinition Height="Auto" MinHeight="64"/><RowDefinition Height="*"/><RowDefinition Height="Auto" MinHeight="30"/></Grid.RowDefinitions>
-        <Border Grid.Row="0" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1"><Grid Margin="14,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Button Command="{Binding ToggleProjectRailCommand}" Style="{StaticResource HeaderButton}" Content="☰" ToolTip="Toggle chats and projects (Ctrl+B)"/>
-            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0"><TextBlock Text="SynthiaCode" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="{Binding ProjectWorkspace.SelectedProjectPath, TargetNullValue=Choose a project to start working}" Foreground="{DynamicResource MutedInkBrush}" FontSize="11" TextTrimming="CharacterEllipsis"/></StackPanel>
-            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+        <Border Grid.Row="0" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1"><Grid Margin="14,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Button Grid.Column="0" Command="{Binding ToggleProjectRailCommand}" Style="{StaticResource HeaderButton}" Content="☰" ToolTip="Toggle chats and projects (Ctrl+B)"/>
+            <Border Grid.Column="1"
+                    Width="38"
+                    Height="38"
+                    Margin="12,0,0,0"
+                    Padding="3"
+                    VerticalAlignment="Center"
+                    Background="White"
+                    BorderBrush="{DynamicResource LineBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                <Image x:Name="AppLogoImage"
+                       Source="/SynthiaCode.App;component/Assets/Branding/SynthiaCodeLogo.png"
+                       Stretch="Uniform"
+                       IsHitTestVisible="False"
+                       AutomationProperties.Name="SynthiaCode logo"/>
+            </Border>
+            <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="10,0"><TextBlock Text="SynthiaCode" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="{Binding ProjectWorkspace.SelectedProjectPath, TargetNullValue=Choose a project to start working}" Foreground="{DynamicResource MutedInkBrush}" FontSize="11" TextTrimming="CharacterEllipsis"/></StackPanel>
+            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                 <Border Style="{StaticResource StatePill}" Margin="0,0,8,0" ToolTip="Codex app-server connection status"><StackPanel Orientation="Horizontal"><Ellipse Width="7" Height="7" Margin="0,0,6,0"><Ellipse.Style><Style TargetType="Ellipse"><Setter Property="Fill" Value="{DynamicResource MutedInkBrush}"/><Style.Triggers><DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex connected"><Setter Property="Fill" Value="{DynamicResource SuccessBrush}"/></DataTrigger><DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex connecting"><Setter Property="Fill" Value="{DynamicResource WarningBrush}"/></DataTrigger><DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex reconnecting"><Setter Property="Fill" Value="{DynamicResource WarningBrush}"/></DataTrigger><DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex unavailable"><Setter Property="Fill" Value="{DynamicResource DangerBrush}"/></DataTrigger></Style.Triggers></Style></Ellipse.Style></Ellipse><TextBlock Text="{Binding TaskWorkspace.AppServerHealth}" FontSize="11" VerticalAlignment="Center"/></StackPanel></Border>
                 <Button Content="Terminal" Command="{Binding Terminal.ToggleCommand}" Style="{StaticResource HeaderButton}" ToolTip="Open or hide Terminal (Ctrl+Shift+T)"/>
                 <Button Content="Settings" Command="{Binding OpenSettingsCommand}" Style="{StaticResource HeaderButton}" ToolTip="Open settings and diagnostics (Ctrl+Shift+D)"/>

@@ -55,6 +55,18 @@ dotnet run --project src\SynthiaCode.Tests\SynthiaCode.Tests.csproj
 
 The test project currently uses a small console-based assertion runner, so running the test project directly verifies the actual assertions.
 
+## Branding
+
+The approved symbol source is `assets\branding\synthiacode-logo-symbol-v1.png`. SynthiaCode uses derived app-ready resources for the executable, window, header, and About card.
+
+Regenerate the cropped PNG and multi-size Windows icon after changing the approved source:
+
+```powershell
+.\scripts\generate-brand-assets.cmd
+```
+
+The generated resources are written to `src\SynthiaCode.App\Assets\Branding\`.
+
 ## Portable App Folder
 
 Use the portable publish wrapper to produce one predictable runnable folder:

@@ -5,12 +5,18 @@
     <ProjectReference Include="..\SynthiaCode.Infrastructure\SynthiaCode.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Resource Include="Assets\Branding\SynthiaCode.ico" />
+    <Resource Include="Assets\Branding\SynthiaCodeLogo.png" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <ApplicationIcon>Assets\Branding\SynthiaCode.ico</ApplicationIcon>
     <Product>SynthiaCode</Product>
     <AssemblyTitle>SynthiaCode</AssemblyTitle>
     <Description>Independent Windows desktop client for OpenAI Codex.</Description>

@@ -115,14 +115,33 @@
                     </Border>
 
                     <Border Style="{StaticResource Card}" Margin="0,0,0,10">
-                        <StackPanel>
-                            <TextBlock Text="About SynthiaCode" FontWeight="SemiBold"/>
-                            <TextBlock Text="SynthiaCode is an independent application and is not affiliated with or endorsed by OpenAI."
-                                       Foreground="{DynamicResource MutedInkBrush}"
-                                       FontSize="11"
-                                       Margin="0,6,0,0"
-                                       TextWrapping="Wrap"/>
-                        </StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Width="48"
+                                    Height="48"
+                                    Padding="3"
+                                    Background="White"
+                                    BorderBrush="{DynamicResource LineBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="10">
+                                <Image x:Name="AboutLogoImage"
+                                       Source="/SynthiaCode.App;component/Assets/Branding/SynthiaCodeLogo.png"
+                                       Stretch="Uniform"
+                                       IsHitTestVisible="False"
+                                       AutomationProperties.Name="SynthiaCode logo"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                                <TextBlock Text="About SynthiaCode" FontWeight="SemiBold"/>
+                                <TextBlock Text="SynthiaCode is an independent application and is not affiliated with or endorsed by OpenAI."
+                                           Foreground="{DynamicResource MutedInkBrush}"
+                                           FontSize="11"
+                                           Margin="0,6,0,0"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Grid>
                     </Border>
 
                     <Expander Header="Advanced diagnostics" IsExpanded="False" Margin="0,0,0,8">

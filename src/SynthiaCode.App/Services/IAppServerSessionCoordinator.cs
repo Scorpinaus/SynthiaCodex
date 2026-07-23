@@ -53,6 +53,8 @@ public interface IAppServerSessionCoordinator : IAsyncDisposable
 
     Task UnarchiveThreadAsync(string threadId, CancellationToken cancellationToken = default);
 
+    Task SetThreadNameAsync(string threadId, string name, CancellationToken cancellationToken = default);
+
     Task<CodexTurnSteerResult> SteerTurnAsync(CodexTurnSteerRequest request, CancellationToken cancellationToken = default);
 
     Task<CodexTurnStartResult> StartTurnAsync(CodexTurnStartRequest request, CancellationToken cancellationToken = default);

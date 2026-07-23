@@ -512,6 +512,31 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     public Task UnarchiveThreadAsync(string threadId, CancellationToken cancellationToken = default) =>
         SendThreadIdRequestAsync("thread/unarchive", threadId, cancellationToken);
 
+    public async Task SetThreadNameAsync(
+        string threadId,
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            throw new ArgumentException("Thread ID is required.", nameof(threadId));
+        }
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Thread name is required.", nameof(name));
+        }
+
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        await SendRequestAsync(
+            "thread/name/set",
+            new JsonObject
+            {
+                ["threadId"] = threadId,
+                ["name"] = name
+            },
+            cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<CodexTurnSteerResult> SteerTurnAsync(
         CodexTurnSteerRequest request,
         CancellationToken cancellationToken = default)

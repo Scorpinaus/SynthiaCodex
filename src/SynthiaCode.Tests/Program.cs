@@ -124,6 +124,7 @@ tests.AddRange(MarkdownLinkTests.All);
 tests.AddRange(ProjectlessThreadTests.All);
 tests.AddRange(PromptEditingTests.All);
 tests.AddRange(ChatManagementSearchTests.All);
+tests.AddRange(ThreadRenameTests.All);
 
 var failures = 0;
 var testFilter = Environment.GetEnvironmentVariable("SYNTHIACODE_TEST_FILTER");
@@ -3122,6 +3123,8 @@ internal sealed class FakeTerminalSession(string workingDirectory) : ITerminalSe
 internal sealed class FakeUserInteractionService : IUserInteractionService
 {
     public bool ConfirmDestructiveAction(string title, string message) => true;
+
+    public string? PromptForText(string title, string message, string initialValue) => null;
 
     public void OpenInEditor(string path)
     {

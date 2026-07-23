@@ -114,6 +114,22 @@ public sealed class ThreadStore
         thread.UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    public void Rename(AppSettings settings, string threadId, string title)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var normalizedTitle = title?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedTitle))
+        {
+            throw new ArgumentException("Thread title is required.", nameof(title));
+        }
+
+        var thread = settings.ProjectThreads.FirstOrDefault(item =>
+            string.Equals(item.ThreadId, threadId, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException($"Thread '{threadId}' was not found.");
+        thread.Title = normalizedTitle;
+        thread.UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public bool Delete(AppSettings settings, string threadId)
     {
         ArgumentNullException.ThrowIfNull(settings);

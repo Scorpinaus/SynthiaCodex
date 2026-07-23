@@ -41,7 +41,9 @@ public sealed class ProjectThreadViewModel : ObservableObject
         Func<Task>? togglePinThread = null,
         Func<Task>? deleteThread = null,
         Func<bool>? canTogglePinThread = null,
-        Func<bool>? canDeleteThread = null)
+        Func<bool>? canDeleteThread = null,
+        Func<Task>? renameThread = null,
+        Func<bool>? canRenameThread = null)
     {
         this.selectionChanged = selectionChanged;
         this.openRecentProject = openRecentProject;
@@ -87,6 +89,9 @@ public sealed class ProjectThreadViewModel : ObservableObject
         DeleteThreadCommand = new AsyncRelayCommand(
             deleteThread ?? (() => Task.CompletedTask),
             canDeleteThread ?? (() => false));
+        RenameThreadCommand = new AsyncRelayCommand(
+            renameThread ?? (() => Task.CompletedTask),
+            canRenameThread ?? (() => false));
         statefulCommands =
         [
             (AsyncRelayCommand)NewThreadCommand,
@@ -97,7 +102,8 @@ public sealed class ProjectThreadViewModel : ObservableObject
             (AsyncRelayCommand)UnarchiveThreadCommand,
             (AsyncRelayCommand)RemoveWorktreeCommand,
             (AsyncRelayCommand)TogglePinThreadCommand,
-            (AsyncRelayCommand)DeleteThreadCommand
+            (AsyncRelayCommand)DeleteThreadCommand,
+            (AsyncRelayCommand)RenameThreadCommand
         ];
     }
 
@@ -128,6 +134,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
     public ICommand RemoveWorktreeCommand { get; }
     public ICommand TogglePinThreadCommand { get; }
     public ICommand DeleteThreadCommand { get; }
+    public ICommand RenameThreadCommand { get; }
 
     public IReadOnlyList<string> WorkspaceModeOptions { get; } = ["Current checkout", "New worktree"];
 
@@ -492,6 +499,11 @@ public sealed class ProjectThreadViewModel : ObservableObject
         if (args.PropertyName == nameof(ProjectThreadState.IsPinned))
         {
             OnPropertyChanged(nameof(PinActionLabel));
+        }
+        else if (args.PropertyName is nameof(ProjectThreadState.Title) or nameof(ProjectThreadState.DisplayTitle))
+        {
+            OnPropertyChanged(nameof(SelectedThreadTitle));
+            RefreshChatSearch();
         }
     }
 }

@@ -118,6 +118,7 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
     private bool isPinned;
     private bool isRunning;
     private string mode = "local";
+    private string title = string.Empty;
     private string? worktreeBranch;
     private string turnStatus = "Idle";
 
@@ -133,7 +134,21 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
 
     public string ThreadId { get; set; } = string.Empty;
 
-    public string Title { get; set; } = string.Empty;
+    public string Title
+    {
+        get => title;
+        set
+        {
+            if (string.Equals(title, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            title = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(DisplayTitle));
+        }
+    }
 
     public string Preview { get; set; } = string.Empty;
 

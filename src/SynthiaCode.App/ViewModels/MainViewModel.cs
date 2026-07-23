@@ -53,6 +53,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand unarchiveThreadCommand;
     private readonly AsyncRelayCommand togglePinThreadCommand;
     private readonly AsyncRelayCommand deleteThreadCommand;
+    private readonly AsyncRelayCommand renameThreadCommand;
     private readonly AsyncRelayCommand steerTurnCommand;
     private readonly AsyncRelayCommand removeWorktreeCommand;
     private readonly RelayCommand toggleProjectRailCommand;
@@ -192,7 +193,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             ToggleSelectedThreadPinAsync,
             DeleteSelectedThreadAsync,
             CanToggleSelectedThreadPin,
-            CanDeleteSelectedThread);
+            CanDeleteSelectedThread,
+            RenameSelectedThreadAsync,
+            CanRenameSelectedThread);
         ProjectWorkspace.PropertyChanged += (_, args) => RelayProjectPropertyChanged(args.PropertyName);
 
         BrowseProjectCommand = ProjectWorkspace.BrowseProjectCommand;
@@ -205,6 +208,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         UnarchiveThreadCommand = unarchiveThreadCommand = (AsyncRelayCommand)ProjectWorkspace.UnarchiveThreadCommand;
         TogglePinThreadCommand = togglePinThreadCommand = (AsyncRelayCommand)ProjectWorkspace.TogglePinThreadCommand;
         DeleteThreadCommand = deleteThreadCommand = (AsyncRelayCommand)ProjectWorkspace.DeleteThreadCommand;
+        RenameThreadCommand = renameThreadCommand = (AsyncRelayCommand)ProjectWorkspace.RenameThreadCommand;
         SteerTurnCommand = steerTurnCommand = (AsyncRelayCommand)TaskWorkspace.SteerCommand;
         RemoveWorktreeCommand = removeWorktreeCommand = (AsyncRelayCommand)ProjectWorkspace.RemoveWorktreeCommand;
         OpenRecentProjectCommand = ProjectWorkspace.OpenRecentProjectCommand;
@@ -549,6 +553,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public ICommand TogglePinThreadCommand { get; }
 
     public ICommand DeleteThreadCommand { get; }
+
+    public ICommand RenameThreadCommand { get; }
 
     public ICommand SteerTurnCommand { get; }
 
@@ -1251,6 +1257,53 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             StatusMessage = ex.Message;
             logger.Log(AppLogLevel.Warning, "thread_pin_failed", "Could not update the selected chat pin.", exception: ex);
+        }
+    }
+
+    private async Task RenameSelectedThreadAsync()
+    {
+        if (!CanRenameSelectedThread() || SelectedThread is null)
+        {
+            return;
+        }
+
+        var thread = SelectedThread;
+        var requestedTitle = userInteractionService.PromptForText(
+            "Rename chat",
+            "Enter a new name for this chat.",
+            thread.DisplayTitle);
+        if (requestedTitle is null)
+        {
+            return;
+        }
+
+        var title = requestedTitle.Trim();
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            StatusMessage = "Chat name cannot be empty";
+            return;
+        }
+        if (string.Equals(thread.Title, title, StringComparison.Ordinal))
+        {
+            StatusMessage = "Chat name unchanged";
+            return;
+        }
+
+        try
+        {
+            await EnsureAppServerSessionAsync().ConfigureAwait(true);
+            await appServerSessionCoordinator
+                .SetThreadNameAsync(thread.ThreadId, title)
+                .ConfigureAwait(true);
+            threadStore.Rename(settings, thread.ThreadId, title);
+            RefreshProjectThreads(thread.ThreadId);
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+            StatusMessage = "Chat renamed";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Warning, "thread_rename_failed", "Could not rename the selected chat.", exception: ex);
         }
     }
 
@@ -2230,6 +2283,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private bool CanToggleSelectedThreadPin() =>
         !IsShuttingDown && SelectedThread is not null;
+
+    private bool CanRenameSelectedThread() => CanUseSelectedThread();
 
     private bool CanDeleteSelectedThread() =>
         !IsShuttingDown &&

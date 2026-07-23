@@ -132,6 +132,9 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
     public Task UnarchiveThreadAsync(string threadId, CancellationToken cancellationToken = default) =>
         GetConnectedClient().UnarchiveThreadAsync(threadId, cancellationToken);
 
+    public Task SetThreadNameAsync(string threadId, string name, CancellationToken cancellationToken = default) =>
+        GetConnectedClient().SetThreadNameAsync(threadId, name, cancellationToken);
+
     public Task<CodexTurnSteerResult> SteerTurnAsync(CodexTurnSteerRequest request, CancellationToken cancellationToken = default) =>
         GetConnectedClient().SteerTurnAsync(request, cancellationToken);
 

@@ -121,6 +121,7 @@
                                     <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
                                         <MenuItem Header="Resume" Command="{Binding ResumeThreadCommand}"/>
                                         <MenuItem Header="Fork" Command="{Binding ForkThreadCommand}"/>
+                                        <MenuItem Header="Rename" Command="{Binding RenameThreadCommand}"/>
                                         <MenuItem Header="{Binding PinActionLabel}" Command="{Binding TogglePinThreadCommand}"/>
                                         <Separator/>
                                         <MenuItem Header="Archive" Command="{Binding ArchiveThreadCommand}"/>
@@ -318,6 +319,7 @@
                                                         <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
                                                             <MenuItem Header="Resume" Command="{Binding ResumeThreadCommand}"/>
                                                             <MenuItem Header="Fork" Command="{Binding ForkThreadCommand}"/>
+                                                            <MenuItem Header="Rename" Command="{Binding RenameThreadCommand}"/>
                                                             <MenuItem Header="{Binding PinActionLabel}" Command="{Binding TogglePinThreadCommand}"/>
                                                             <Separator/>
                                                             <MenuItem Header="Archive" Command="{Binding ArchiveThreadCommand}"/>

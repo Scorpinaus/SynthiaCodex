@@ -1,7 +1,7 @@
 # SynthiaCode and ChatGPT Desktop Feature Parity
 
 - **Audit date:** 23 July 2026
-- **SynthiaCode baseline:** working tree based on commit `6a297e8`, including sidebar chat management, cross-chat search, find-in-chat, and the completed parity work recorded below
+- **SynthiaCode baseline:** working tree based on commit `81cee13`, including thread rename, sidebar chat management, cross-chat search, find-in-chat, and the completed parity work recorded below
 - **Comparison surface:** ChatGPT desktop app with Codex/local-project capabilities
 - **Scope:** User-visible desktop functionality, local Codex workflows, and capabilities inherited through `codex app-server`
 
@@ -38,6 +38,7 @@
 | Multi-turn conversations | Restored history, follow-up turns, per-turn transcript/activity, cancellation, and recovery | **Full** | None material for normal local follow-ups. |
 | Edit and resubmit user prompts | Completed prompts have an inline editor; resubmission uses `thread/rollback`, keeps the selected and later prompts/responses visible as Previous versions, reuses attachments, and continues the same thread from the edited prompt | **Full** | Conversation history rewinds while existing workspace file changes are intentionally kept and clearly disclosed, matching app-server rollback semantics. |
 | Resume, fork, archive, unarchive | Typed app-server lifecycle flows and UI actions | **Full** | None material. |
+| Rename chats | General and project-scoped chat menus open a validated rename dialog, call typed `thread/name/set`, and persist the trimmed title locally | **Full** | Project folder names remain filesystem-derived; this feature renames chats within both sidebar scopes. |
 | Pin, delete, and search chats | Persisted sidebar pin/unpin with pinned-first ordering; confirmed delete; content search across General, project, and archived chats; current-chat occurrence search with next/previous wraparound and highlighting | **Full** | Because app-server has no permanent-delete method, delete first archives an active Codex thread and then removes SynthiaCode's local record; associated worktrees and branches are intentionally preserved. |
 | Steer an active run | Active-turn guidance uses `turn/steer` | **Full** | None for steering itself. |
 | Queue and manage follow-up messages | Per-thread persisted queues support Queue/Steer defaults, one-shot inversion, inline edit, reorder, manual send/steer, delete, and completion-driven FIFO dispatch | **Near** | Dispatch validates the captured workspace but does not yet refresh and re-resolve model-catalog and managed-permission policy immediately before a background start. |
@@ -115,6 +116,14 @@
 
 ## What changed in this recheck
 
+Chat rename moved from absent to **Full** for both sidebar scopes:
+
+1. General chats under **Chats** and project-scoped chats under **Projects** now expose the same Rename action in their contextual menus.
+2. Rename opens a themed, keyboard-friendly dialog prefilled with the current display title; Cancel leaves the chat unchanged, whitespace is trimmed, blank names are rejected, and submitting the current explicit title avoids an unnecessary request.
+3. Successful changes use the typed app-server `thread/name/set` request before updating SynthiaCode persistence, recency, selected-title presentation, navigation, and cross-chat search results.
+4. Protocol serialization, storage normalization, shared command routing across both scopes, rendered WPF menu placement, and the end-to-end app-server/persistence lifecycle are protected by five focused tests in the 180-test regression suite.
+5. Project directory labels are intentionally unchanged because they remain derived from their filesystem folder names; “both Chats and Projects” refers to chat threads in those two navigation groups.
+
 Chat management and search moved from **Partial** to **Full** for the requested desktop outcome:
 
 1. General and project chat action menus expose Pin/Unpin and Delete. Pin state persists in existing settings data, updates the action label, and sorts pinned chats ahead of newer unpinned chats in both sidebar scopes.
@@ -122,7 +131,7 @@ Chat management and search moved from **Partial** to **Full** for the requested 
 3. The sidebar search field searches titles, previews, final responses, and user/assistant transcript content across General, project, and archived chats. Results include scope and matching context, retain pinned-first ordering, and switch to the owning scope and chat when opened.
 4. Find-in-chat counts case-insensitive occurrences in both user and assistant messages, supports next/previous wraparound, scrolls to and highlights the current matching turn, and clears transient match state when closed.
 5. `Ctrl+K` opens/focuses cross-chat search and `Ctrl+F` opens/focuses find-in-chat; Enter/Shift+Enter navigate matches and Escape closes the find bar.
-6. Five focused persistence, command, main-lifecycle, cross-scope search, and occurrence-navigation tests plus rendered WPF automation/layout assertions protect the features in the 175-test regression suite. The full suite also caught and fixed a pinned-label layout regression so long sidebar titles remain width-constrained and wrap correctly.
+6. Five focused persistence, command, main-lifecycle, cross-scope search, and occurrence-navigation tests plus rendered WPF automation/layout assertions protect the features in the current 180-test regression suite. The full suite also caught and fixed a pinned-label layout regression so long sidebar titles remain width-constrained and wrap correctly.
 
 Editable user prompts moved from absent to **Full** parity for the Codex-style local-thread outcome:
 

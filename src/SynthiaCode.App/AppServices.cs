@@ -112,6 +112,7 @@ public sealed class AppServices
             new JsonSettingsStore(appDataDirectory, logger),
             logger);
         var codexRuntimeEnvironment = new CodexRuntimeEnvironment(SystemPaths.CodexHomeDirectory);
+        CodexDiagnosticStoreMaintenance.TrimOversizedStore(codexRuntimeEnvironment.HomePath, logger);
         var codexDiscoveryService = new CodexDiscoveryService(logger, codexRuntimeEnvironment);
         var codexProcessService = new CodexProcessService(logger, codexRuntimeEnvironment);
         var appServerSessionCoordinator = new AppServerSessionCoordinator(

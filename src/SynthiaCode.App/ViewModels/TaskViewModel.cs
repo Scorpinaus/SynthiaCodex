@@ -15,6 +15,9 @@ public sealed class TaskViewModel : ObservableObject
     private readonly AsyncRelayCommand loadModelsCommand;
     private readonly AsyncRelayCommand steerCommand;
     private readonly AsyncRelayCommand alternateFollowUpCommand;
+    private readonly RelayCommand beginPromptEditCommand;
+    private readonly RelayCommand cancelPromptEditCommand;
+    private readonly AsyncRelayCommand submitPromptEditCommand;
     private readonly RelayCommand beginQueuedFollowUpEditCommand;
     private readonly RelayCommand cancelQueuedFollowUpEditCommand;
     private readonly AsyncRelayCommand saveQueuedFollowUpEditCommand;
@@ -60,7 +63,8 @@ public sealed class TaskViewModel : ObservableObject
         Action<Uri>? openExternalUri = null,
         Func<Task>? alternateFollowUp = null,
         Func<Task>? persistFollowUpQueue = null,
-        Func<QueuedFollowUp, Task>? sendQueuedFollowUp = null)
+        Func<QueuedFollowUp, Task>? sendQueuedFollowUp = null,
+        Func<CodexConversationTurn, string, Task<bool>>? editPrompt = null)
     {
         SubmitCommand = submitCommand = new AsyncRelayCommand(submit);
         ComposerSendCommand = composerSendCommand = new AsyncRelayCommand(
@@ -71,6 +75,54 @@ public sealed class TaskViewModel : ObservableObject
         AlternateFollowUpCommand = alternateFollowUpCommand = new AsyncRelayCommand(
             alternateFollowUp ?? (() => Task.CompletedTask),
             canSteer);
+        beginPromptEditCommand = new RelayCommand(
+            parameter =>
+            {
+                if (parameter is not CodexConversationTurn turn)
+                {
+                    return;
+                }
+
+                foreach (var other in ConversationTurns.Where(item => !ReferenceEquals(item, turn) && item.IsPromptEditing))
+                {
+                    other.CancelPromptEdit();
+                }
+                turn.BeginPromptEdit();
+                RaisePromptEditCommandStates();
+            },
+            parameter => parameter is CodexConversationTurn turn &&
+                !IsTurnRunning &&
+                turn.CanEditPrompt &&
+                !ConversationTurns.Any(item => item.IsPromptEditing));
+        cancelPromptEditCommand = new RelayCommand(
+            parameter =>
+            {
+                if (parameter is CodexConversationTurn turn)
+                {
+                    turn.CancelPromptEdit();
+                    RaisePromptEditCommandStates();
+                }
+            },
+            parameter => parameter is CodexConversationTurn { IsPromptEditing: true });
+        submitPromptEditCommand = new AsyncRelayCommand(
+            async parameter =>
+            {
+                if (parameter is not CodexConversationTurn turn || editPrompt is null || !turn.CanSubmitPromptEdit)
+                {
+                    return;
+                }
+
+                var submitted = await editPrompt(turn, turn.EditedPrompt.Trim()).ConfigureAwait(true);
+                if (submitted)
+                {
+                    turn.CancelPromptEdit();
+                }
+                RaisePromptEditCommandStates();
+            },
+            parameter => parameter is CodexConversationTurn turn &&
+                editPrompt is not null &&
+                !IsTurnRunning &&
+                turn.IsPromptEditing);
         RemoveAttachmentCommand = removeAttachmentCommand = new RelayCommand(
             parameter =>
             {
@@ -183,6 +235,9 @@ public sealed class TaskViewModel : ObservableObject
     public ICommand LoadModelsCommand { get; }
     public ICommand SteerCommand { get; }
     public ICommand AlternateFollowUpCommand { get; }
+    public ICommand BeginPromptEditCommand => beginPromptEditCommand;
+    public ICommand CancelPromptEditCommand => cancelPromptEditCommand;
+    public ICommand SubmitPromptEditCommand => submitPromptEditCommand;
     public ICommand BeginQueuedFollowUpEditCommand => beginQueuedFollowUpEditCommand;
     public ICommand CancelQueuedFollowUpEditCommand => cancelQueuedFollowUpEditCommand;
     public ICommand SaveQueuedFollowUpEditCommand => saveQueuedFollowUpEditCommand;
@@ -635,6 +690,13 @@ public sealed class TaskViewModel : ObservableObject
         sendQueuedFollowUpCommand.RaiseCanExecuteChanged();
     }
 
+    private void RaisePromptEditCommandStates()
+    {
+        beginPromptEditCommand.RaiseCanExecuteChanged();
+        cancelPromptEditCommand.RaiseCanExecuteChanged();
+        submitPromptEditCommand.RaiseCanExecuteChanged();
+    }
+
     private void MoveAttachment(AttachmentReference? attachment, int offset)
     {
         if (attachment is null)
@@ -666,6 +728,7 @@ public sealed class TaskViewModel : ObservableObject
         composerSendCommand.RaiseCanExecuteChanged();
         steerCommand.RaiseCanExecuteChanged();
         alternateFollowUpCommand.RaiseCanExecuteChanged();
+        RaisePromptEditCommandStates();
     }
 
     public void NotifyResponseChanged()
@@ -764,6 +827,7 @@ public sealed class TaskViewModel : ObservableObject
         removeAttachmentCommand.RaiseCanExecuteChanged();
         moveAttachmentLeftCommand.RaiseCanExecuteChanged();
         moveAttachmentRightCommand.RaiseCanExecuteChanged();
+        RaisePromptEditCommandStates();
         RaiseQueuedFollowUpCommandStates();
         openExternalUriCommand.RaiseCanExecuteChanged();
         openOptionsCommand.RaiseCanExecuteChanged();

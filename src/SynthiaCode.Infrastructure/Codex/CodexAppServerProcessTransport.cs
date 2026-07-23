@@ -11,6 +11,8 @@ public sealed class CodexAppServerProcessTransport(
     IAppLogger logger,
     CodexRuntimeEnvironment? runtimeEnvironment = null) : IAppServerTransport
 {
+    private const string RustLogEnvironmentVariable = "RUST_LOG";
+    private const string ProductionRustLogFilter = "warn";
     private static readonly Encoding ProtocolEncoding = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false,
         throwOnInvalidBytes: true);
@@ -31,6 +33,7 @@ public sealed class CodexAppServerProcessTransport(
             StartInfo = CreateStartInfo(executablePath)
         };
         runtimeEnvironment?.ApplyTo(process.StartInfo);
+        process.StartInfo.Environment[RustLogEnvironmentVariable] = ProductionRustLogFilter;
 
         process.Start();
         stderrTask = Task.Run(ReadStandardErrorAsync, CancellationToken.None);

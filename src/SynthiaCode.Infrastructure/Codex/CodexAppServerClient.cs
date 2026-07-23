@@ -157,6 +157,40 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             ParseActivePermissionProfile(result));
     }
 
+    public async Task<CodexThreadRollbackResult> RollbackThreadAsync(
+        CodexThreadRollbackRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.ThreadId))
+        {
+            throw new ArgumentException("Thread ID is required.", nameof(request));
+        }
+        if (request.NumTurns < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "At least one turn must be rolled back.");
+        }
+
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var result = await SendRequestAsync(
+            "thread/rollback",
+            new JsonObject
+            {
+                ["threadId"] = request.ThreadId,
+                ["numTurns"] = request.NumTurns
+            },
+            cancellationToken).ConfigureAwait(false) as JsonObject;
+        var threadId = ReadString(result, "thread.id");
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            throw new CodexAppServerProtocolException("thread/rollback response did not include result.thread.id.");
+        }
+
+        return new CodexThreadRollbackResult(
+            threadId,
+            ParseConversationTurns(result?["thread"]?["turns"] as JsonArray));
+    }
+
     public async Task<CodexThreadReadResult> ReadThreadAsync(
         CodexThreadReadRequest request,
         CancellationToken cancellationToken = default)

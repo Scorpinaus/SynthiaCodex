@@ -42,6 +42,12 @@ public sealed record CodexThreadResumeResult(
     IReadOnlyList<CodexConversationTurnSnapshot>? Turns = null,
     CodexActivePermissionProfile? ActivePermissionProfile = null);
 
+public sealed record CodexThreadRollbackRequest(string ThreadId, int NumTurns);
+
+public sealed record CodexThreadRollbackResult(
+    string ThreadId,
+    IReadOnlyList<CodexConversationTurnSnapshot> Turns);
+
 public sealed record CodexThreadReadRequest(string ThreadId, bool IncludeTurns = true);
 
 public sealed record CodexThreadReadResult(

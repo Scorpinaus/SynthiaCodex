@@ -258,6 +258,39 @@ public sealed class CodexThreadService
         AddBounded(TimelineItems, item, MaximumTimelineItems);
     }
 
+    public int GetActiveRollbackTurnCount(CodexConversationTurn turn)
+    {
+        ArgumentNullException.ThrowIfNull(turn);
+        var startIndex = ConversationTurns.IndexOf(turn);
+        if (startIndex < 0 || turn.IsSuperseded || string.IsNullOrWhiteSpace(turn.TurnId))
+        {
+            return 0;
+        }
+
+        return ConversationTurns
+            .Skip(startIndex)
+            .Count(item => !item.IsSuperseded && !string.IsNullOrWhiteSpace(item.TurnId));
+    }
+
+    public void SupersedeTurnsFrom(CodexConversationTurn turn)
+    {
+        ArgumentNullException.ThrowIfNull(turn);
+        var startIndex = ConversationTurns.IndexOf(turn);
+        if (startIndex < 0 || turn.IsSuperseded)
+        {
+            throw new InvalidOperationException("Only an active turn in this conversation can be superseded.");
+        }
+
+        for (var index = startIndex; index < ConversationTurns.Count; index++)
+        {
+            if (!ConversationTurns[index].IsSuperseded)
+            {
+                ConversationTurns[index].IsSuperseded = true;
+            }
+        }
+        RefreshCompatibilityResponse();
+    }
+
     public void ReconcileHistory(IEnumerable<CodexConversationTurnSnapshot> history)
     {
         var snapshots = history.TakeLast(MaximumConversationTurns).ToList();
@@ -295,6 +328,7 @@ public sealed class CodexThreadService
             turn.Status = snapshot.Status;
             turn.StartedAt = snapshot.StartedAt;
             turn.CompletedAt = snapshot.CompletedAt;
+            turn.IsSuperseded = snapshot.IsSuperseded;
         }
 
         while (ConversationTurns.Count > MaximumConversationTurns)
@@ -1179,7 +1213,7 @@ public sealed class CodexThreadService
 
     private void RefreshCompatibilityResponse()
     {
-        FinalResponse = ConversationTurns.LastOrDefault()?.AssistantResponse ?? FinalResponse;
+        FinalResponse = ConversationTurns.LastOrDefault(turn => !turn.IsSuperseded)?.AssistantResponse ?? string.Empty;
         finalResponseBuilder.Clear();
         finalResponseBuilder.Append(FinalResponse);
     }

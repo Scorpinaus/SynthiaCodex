@@ -1,7 +1,7 @@
 # SynthiaCode and ChatGPT Desktop Feature Parity
 
 - **Audit date:** 21 July 2026
-- **SynthiaCode baseline:** working tree based on commit `6daa166`, including the completed app-server-owned compaction presentation work recorded below
+- **SynthiaCode baseline:** working tree based on commit `39b40be`, including editable prompt history and the completed parity work recorded below
 - **Comparison surface:** ChatGPT desktop app with Codex/local-project capabilities
 - **Scope:** User-visible desktop functionality, local Codex workflows, and capabilities inherited through `codex app-server`
 
@@ -36,6 +36,7 @@
 | Open a local project/folder | Folder picker, recent projects, project grouping, and project-scoped app-server work | **Full** | None material for the local coding loop. |
 | Multiple local chats per project | Collapsible Chats and Projects groups, per-project disclosure, and independently persisted chats | **Full** | ChatGPT has broader chat-management and search controls. |
 | Multi-turn conversations | Restored history, follow-up turns, per-turn transcript/activity, cancellation, and recovery | **Full** | None material for normal local follow-ups. |
+| Edit and resubmit user prompts | Completed prompts have an inline editor; resubmission uses `thread/rollback`, keeps the selected and later prompts/responses visible as Previous versions, reuses attachments, and continues the same thread from the edited prompt | **Full** | Conversation history rewinds while existing workspace file changes are intentionally kept and clearly disclosed, matching app-server rollback semantics. |
 | Resume, fork, archive, unarchive | Typed app-server lifecycle flows and UI actions | **Full** | Permanent delete is not exposed. |
 | Pin, delete, and search chats | Archive state exists; no complete pin/delete/search UI | **Partial** | Add sidebar pin/delete, cross-chat search, and find-in-chat. |
 | Steer an active run | Active-turn guidance uses `turn/steer` | **Full** | None for steering itself. |
@@ -113,6 +114,14 @@
 | Chat profile, usage insights, and pets | Basic account/rate-limit view only | **Partial** | Profile analytics/cards and pets are non-core gaps. |
 
 ## What changed in this recheck
+
+Editable user prompts moved from absent to **Full** parity for the Codex-style local-thread outcome:
+
+1. Every completed active user prompt exposes an inline Edit action with change-aware Resubmit and Cancel controls.
+2. Resubmission calls the typed `thread/rollback` app-server flow for the selected turn plus every later active turn, then starts the edited prompt on the same thread with the original prompt attachments.
+3. Rolled-back prompts, assistant responses, activity, attachments, and timestamps remain visible and persisted as **Previous version** transcript entries; later follow-ups continue from the replacement turn rather than the superseded history.
+4. Previous versions cannot be edited again, active runs disable editing, unchanged or blank edits cannot submit, and rollback failures leave the original history active.
+5. The editor explains Codex rollback semantics before submission: conversational context rewinds, but workspace file changes remain. Protocol, reducer, view-model, two-turn integration, persistence metadata, and WPF-surface coverage are included in the 169-test regression suite.
 
 Chat and project navigation now follows the compact Codex-style disclosure pattern:
 

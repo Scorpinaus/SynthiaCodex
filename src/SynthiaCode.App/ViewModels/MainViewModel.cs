@@ -160,7 +160,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             userInteractionService.OpenExternalUri,
             SendAlternateFollowUpAsync,
             PersistSelectedFollowUpQueueAsync,
-            SendQueuedFollowUpNowAsync);
+            SendQueuedFollowUpNowAsync,
+            EditPromptAsync);
         TaskWorkspace.PropertyChanged += (_, args) => RelayTaskPropertyChanged(args.PropertyName);
 
         ApprovalQueue = new ApprovalQueueViewModel(appServerSessionCoordinator.RespondToServerRequestAsync);
@@ -1675,6 +1676,150 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    private async Task<bool> EditPromptAsync(CodexConversationTurn sourceTurn, string editedPrompt)
+    {
+        if (IsShuttingDown || IsTurnRunning || sourceTurn.IsSuperseded)
+        {
+            StatusMessage = IsShuttingDown ? "Application is closing" : "Wait for the active Codex turn to finish before editing a prompt";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(editedPrompt) ||
+            string.Equals(editedPrompt.Trim(), sourceTurn.UserPrompt, StringComparison.Ordinal))
+        {
+            StatusMessage = "Change the prompt before resubmitting it";
+            return false;
+        }
+        if (!currentCodex.IsFound)
+        {
+            StatusMessage = "Install Codex CLI before editing a prompt";
+            return false;
+        }
+        if (currentAuth.Readiness is AuthReadiness.Unavailable or AuthReadiness.NotSignedIn)
+        {
+            StatusMessage = "Sign in with Codex before editing a prompt";
+            return false;
+        }
+        var threadId = activeThreadId;
+        var editingService = threadService;
+        if (string.IsNullOrWhiteSpace(threadId) ||
+            !editingService.ConversationTurns.Any(turn => ReferenceEquals(turn, sourceTurn)))
+        {
+            StatusMessage = "The prompt is no longer part of the selected thread";
+            return false;
+        }
+
+        var rollbackCount = editingService.GetActiveRollbackTurnCount(sourceTurn);
+        if (rollbackCount < 1)
+        {
+            StatusMessage = "The selected prompt cannot be edited";
+            return false;
+        }
+
+        var submittedPrompt = editedPrompt.Trim();
+        var submittedAttachments = sourceTurn.UserAttachments.Select(attachment => attachment.Clone()).ToList();
+        var workspacePath = GetActiveWorkspacePath();
+        CodexTurnStartRequest startRequest;
+        try
+        {
+            startRequest = CreateTurnStartRequest(threadId, submittedPrompt, submittedAttachments, workspacePath);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+            return false;
+        }
+
+        var editCommitted = false;
+        StatusMessage = "Rewinding Codex thread for edited prompt";
+        try
+        {
+            await EnsureAppServerSessionAsync().ConfigureAwait(true);
+            var rollback = await appServerSessionCoordinator
+                .RollbackThreadAsync(new CodexThreadRollbackRequest(threadId, rollbackCount))
+                .ConfigureAwait(true);
+            if (!string.Equals(rollback.ThreadId, threadId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Codex returned a different thread after editing the prompt.");
+            }
+
+            editingService.SupersedeTurnsFrom(sourceTurn);
+            editingService.ReconcileHistory(rollback.Turns);
+            editingService.BeginTurn(submittedPrompt, submittedAttachments);
+            editCommitted = true;
+            var remainsSelected = string.Equals(activeThreadId, threadId, StringComparison.Ordinal) &&
+                ReferenceEquals(threadService, editingService);
+            if (remainsSelected)
+            {
+                TaskWorkspace.SubmittedPrompt = submittedPrompt;
+                TaskWorkspace.NotifyResponseChanged();
+            }
+
+            if (SelectedThread is not null && string.Equals(SelectedThread.ThreadId, threadId, StringComparison.Ordinal))
+            {
+                SelectedThread.Preview = submittedPrompt;
+            }
+            var persistedThread = settings.ProjectThreads.FirstOrDefault(thread =>
+                string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
+            if (persistedThread is not null)
+            {
+                persistedThread.Preview = submittedPrompt;
+            }
+
+            settings.LastModelOverride = NormalizeOverride(ModelOverride);
+            settings.LastReasoningEffortOverride = NormalizeOverride(ReasoningEffortOverride);
+            settings.LastServiceTierOverride = ToSettingsValue(TaskWorkspace.ServiceTierSelection);
+            var startedTurn = await appServerSessionCoordinator.StartTurnAsync(startRequest).ConfigureAwait(true);
+            var boundTurn = editingService.BindPendingTurn(startedTurn.TurnId);
+            threadWorkspace.RegisterTurn(threadId, startedTurn.TurnId);
+            var isSelectedAfterStart = string.Equals(activeThreadId, threadId, StringComparison.Ordinal) &&
+                ReferenceEquals(threadService, editingService);
+            if (boundTurn.Status == CodexTurnStatus.Running)
+            {
+                runningThreadIds.Add(threadId);
+                UpdateThreadActivity(threadId, isRunning: true, "Running");
+                activeTurnIds[threadId] = startedTurn.TurnId;
+                if (isSelectedAfterStart)
+                {
+                    IsTurnRunning = true;
+                    activeTurnId = startedTurn.TurnId;
+                }
+            }
+            else
+            {
+                activeTurnIds.Remove(threadId);
+                runningThreadIds.Remove(threadId);
+                if (isSelectedAfterStart)
+                {
+                    activeTurnId = null;
+                    IsTurnRunning = false;
+                }
+            }
+            cancelTurnCommand.RaiseCanExecuteChanged();
+            StatusMessage = boundTurn.Status == CodexTurnStatus.Running
+                ? "Edited prompt running"
+                : $"Edited prompt {boundTurn.Status.ToString().ToLowerInvariant()}";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (editCommitted)
+            {
+                editingService.FailPendingTurn(ex.Message);
+                await SaveThreadStateAsync(threadId, editingService).ConfigureAwait(true);
+            }
+            runningThreadIds.Remove(threadId);
+            activeTurnIds.Remove(threadId);
+            if (string.Equals(activeThreadId, threadId, StringComparison.Ordinal) && ReferenceEquals(threadService, editingService))
+            {
+                IsTurnRunning = false;
+                TaskWorkspace.NotifyResponseChanged();
+            }
+            StatusMessage = ex.Message;
+            logger.Log(AppLogLevel.Error, "prompt_edit_failed", "Could not edit and resubmit the selected prompt.", exception: ex);
+            return editCommitted;
+        }
+    }
+
     private async Task<string> EnsureActiveThreadAsync()
     {
         var scope = GetCurrentScope();
@@ -2949,6 +3094,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         Status = source.Status,
         StartedAt = source.StartedAt,
         CompletedAt = source.CompletedAt,
+        IsSuperseded = source.IsSuperseded,
         Activity = [.. source.Activity],
         UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())]
     };

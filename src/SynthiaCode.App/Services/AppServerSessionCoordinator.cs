@@ -117,6 +117,9 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
     public Task<CodexThreadResumeResult> ResumeThreadAsync(CodexThreadResumeRequest request, CancellationToken cancellationToken = default) =>
         GetConnectedClient().ResumeThreadAsync(request, cancellationToken);
 
+    public Task<CodexThreadRollbackResult> RollbackThreadAsync(CodexThreadRollbackRequest request, CancellationToken cancellationToken = default) =>
+        GetConnectedClient().RollbackThreadAsync(request, cancellationToken);
+
     public Task<CodexThreadReadResult> ReadThreadAsync(CodexThreadReadRequest request, CancellationToken cancellationToken = default) =>
         GetConnectedClient().ReadThreadAsync(request, cancellationToken);
 

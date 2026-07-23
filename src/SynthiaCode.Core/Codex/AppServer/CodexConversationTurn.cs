@@ -15,6 +15,9 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
     private CodexTurnStatus status = CodexTurnStatus.Idle;
     private DateTimeOffset? completedAt;
     private bool isActivityExpanded;
+    private bool isSuperseded;
+    private bool isPromptEditing;
+    private string editedPrompt = string.Empty;
 
     public CodexConversationTurn()
     {
@@ -27,7 +30,13 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
     public string TurnId
     {
         get => turnId;
-        set => SetProperty(ref turnId, value ?? string.Empty);
+        set
+        {
+            if (SetProperty(ref turnId, value ?? string.Empty))
+            {
+                OnPropertyChanged(nameof(CanEditPrompt));
+            }
+        }
     }
 
     public string UserPrompt
@@ -65,6 +74,7 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
                 IsActivityExpanded = value == CodexTurnStatus.Running;
                 OnPropertyChanged(nameof(StatusLabel));
                 OnPropertyChanged(nameof(AssistantResponseDisplay));
+                OnPropertyChanged(nameof(CanEditPrompt));
             }
         }
     }
@@ -99,6 +109,79 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
 
     public bool HasUserImages => HasUserAttachments;
 
+    public bool IsSuperseded
+    {
+        get => isSuperseded;
+        set
+        {
+            if (SetProperty(ref isSuperseded, value))
+            {
+                if (value)
+                {
+                    CancelPromptEdit();
+                }
+                OnPropertyChanged(nameof(CanEditPrompt));
+            }
+        }
+    }
+
+    [JsonIgnore]
+    public bool IsPromptEditing
+    {
+        get => isPromptEditing;
+        private set
+        {
+            if (SetProperty(ref isPromptEditing, value))
+            {
+                OnPropertyChanged(nameof(CanEditPrompt));
+                OnPropertyChanged(nameof(CanSubmitPromptEdit));
+            }
+        }
+    }
+
+    [JsonIgnore]
+    public string EditedPrompt
+    {
+        get => editedPrompt;
+        set
+        {
+            if (SetProperty(ref editedPrompt, value ?? string.Empty))
+            {
+                OnPropertyChanged(nameof(CanSubmitPromptEdit));
+            }
+        }
+    }
+
+    [JsonIgnore]
+    public bool CanEditPrompt =>
+        !IsSuperseded &&
+        !IsPromptEditing &&
+        Status != CodexTurnStatus.Running &&
+        !string.IsNullOrWhiteSpace(TurnId);
+
+    [JsonIgnore]
+    public bool CanSubmitPromptEdit =>
+        IsPromptEditing &&
+        !string.IsNullOrWhiteSpace(EditedPrompt) &&
+        !string.Equals(EditedPrompt.Trim(), UserPrompt, StringComparison.Ordinal);
+
+    public void BeginPromptEdit()
+    {
+        if (!CanEditPrompt)
+        {
+            return;
+        }
+
+        EditedPrompt = UserPrompt;
+        IsPromptEditing = true;
+    }
+
+    public void CancelPromptEdit()
+    {
+        EditedPrompt = UserPrompt;
+        IsPromptEditing = false;
+    }
+
     public bool IsActivityExpanded
     {
         get => isActivityExpanded;
@@ -117,6 +200,7 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
         Status = Status,
         StartedAt = StartedAt,
         CompletedAt = CompletedAt,
+        IsSuperseded = IsSuperseded,
         Activity = [.. Activity],
         UserAttachments = [.. UserAttachments.Select(attachment => attachment.Clone())]
     };
@@ -130,7 +214,8 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
             AssistantResponse = UnicodeTextNormalizer.RepairLegacyMojibake(snapshot.AssistantResponse),
             Status = snapshot.Status,
             StartedAt = snapshot.StartedAt,
-            CompletedAt = snapshot.CompletedAt
+            CompletedAt = snapshot.CompletedAt,
+            IsSuperseded = snapshot.IsSuperseded
         };
         foreach (var item in snapshot.Activity)
         {
@@ -180,6 +265,7 @@ public sealed class CodexConversationTurnSnapshot
     public CodexTurnStatus Status { get; set; } = CodexTurnStatus.Idle;
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAt { get; set; }
+    public bool IsSuperseded { get; set; }
     public List<CodexTimelineItem> Activity { get; set; } = [];
     public List<AttachmentReference> UserAttachments { get; set; } = [];
 

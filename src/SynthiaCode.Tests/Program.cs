@@ -51,6 +51,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("view model skips warm-up when sign-in is needed", TestViewModelSkipsWarmUpWhenSignInIsNeededAsync),
     ("auth detection reports file cache without reading token", TestAuthDetectionAsync),
     ("codex runtime environment creates and applies isolated home", TestCodexRuntimeEnvironmentAsync),
+    ("codex diagnostic SQLite cleanup is bounded and targeted", TestCodexDiagnosticStoreMaintenanceAsync),
     ("codex discovery skips unusable path candidates", TestCodexDiscoverySkipsUnusablePathCandidatesAsync),
     ("codex discovery prefers the standalone install over PATH", TestCodexDiscoveryPrefersStandaloneInstallAsync),
     ("codex discovery checks OpenAI local app bin", TestCodexDiscoveryChecksOpenAiLocalAppBinAsync),
@@ -121,6 +122,7 @@ tests.AddRange(ContextWindowIndicatorTests.All);
 tests.AddRange(ResponsiveLayoutTests.All);
 tests.AddRange(MarkdownLinkTests.All);
 tests.AddRange(ProjectlessThreadTests.All);
+tests.AddRange(PromptEditingTests.All);
 
 var failures = 0;
 var testFilter = Environment.GetEnvironmentVariable("SYNTHIACODE_TEST_FILTER");
@@ -193,6 +195,47 @@ static Task TestCodexRuntimeEnvironmentAsync()
     return Task.CompletedTask;
 }
 
+static async Task TestCodexDiagnosticStoreMaintenanceAsync()
+{
+    AssertEqual(32L * 1024 * 1024, CodexDiagnosticStoreMaintenance.DefaultMaximumBytes, "default diagnostic store limit");
+    using var temp = TempWorkspace.Create();
+    var codexHome = temp.CreateDirectory("codex-home");
+    var logger = new TestLogger();
+    var logDatabase = Path.Combine(codexHome, "logs_2.sqlite");
+    var logWal = Path.Combine(codexHome, "logs_2.sqlite-wal");
+    var logShm = Path.Combine(codexHome, "logs_2.sqlite-shm");
+    var stateDatabase = Path.Combine(codexHome, "state_5.sqlite");
+    var unrelatedDatabase = Path.Combine(codexHome, "logs_notes.sqlite");
+    await File.WriteAllBytesAsync(logDatabase, new byte[8]);
+    await File.WriteAllBytesAsync(logWal, new byte[8]);
+    await File.WriteAllBytesAsync(logShm, new byte[8]);
+    await File.WriteAllBytesAsync(stateDatabase, new byte[32]);
+    await File.WriteAllBytesAsync(unrelatedDatabase, new byte[32]);
+
+    var cleanup = CodexDiagnosticStoreMaintenance.TrimOversizedStore(codexHome, logger, maximumBytes: 20);
+
+    AssertEqual(24L, cleanup.ObservedBytes, "diagnostic cleanup observed bytes");
+    AssertEqual(24L, cleanup.RemovedBytes, "diagnostic cleanup removed bytes");
+    AssertEqual(3, cleanup.RemovedFileCount, "diagnostic cleanup removed file count");
+    AssertEqual(0, cleanup.FailedFileCount, "diagnostic cleanup failure count");
+    AssertTrue(!File.Exists(logDatabase), "oversized log database is removed");
+    AssertTrue(!File.Exists(logWal), "oversized log WAL is removed");
+    AssertTrue(!File.Exists(logShm), "oversized log shared memory is removed");
+    AssertTrue(File.Exists(stateDatabase), "Codex state database is preserved");
+    AssertTrue(File.Exists(unrelatedDatabase), "unrelated similarly named database is preserved");
+    AssertTrue(
+        logger.Entries.Any(entry => entry.EventName == "codex_diagnostic_store_trimmed"),
+        "diagnostic cleanup is logged");
+
+    var boundedLogDatabase = Path.Combine(codexHome, "logs_3.sqlite");
+    await File.WriteAllBytesAsync(boundedLogDatabase, new byte[8]);
+    var boundedCleanup = CodexDiagnosticStoreMaintenance.TrimOversizedStore(codexHome, logger, maximumBytes: 20);
+
+    AssertEqual(8L, boundedCleanup.ObservedBytes, "bounded diagnostic store observed bytes");
+    AssertEqual(0, boundedCleanup.RemovedFileCount, "bounded diagnostic store is not removed");
+    AssertTrue(File.Exists(boundedLogDatabase), "bounded log database is preserved");
+}
+
 static async Task TestAppServerProcessTransportPreservesUtf8Async()
 {
     using var temp = TempWorkspace.Create();
@@ -239,8 +282,9 @@ static async Task TestAppServerProcessTransportUsesIsolatedHomeAsync()
     var fixturePath = Path.Combine(temp.Root, "codex-home-fixture.cmd");
     await File.WriteAllTextAsync(
         fixturePath,
-        $"@echo off{Environment.NewLine}echo %CODEX_HOME%{Environment.NewLine}");
+        $"@echo off{Environment.NewLine}echo %CODEX_HOME%{Environment.NewLine}echo %RUST_LOG%{Environment.NewLine}");
     var runtimeEnvironment = new CodexRuntimeEnvironment(Path.Combine(temp.Root, "isolated-home"));
+    var processRustLog = Environment.GetEnvironmentVariable("RUST_LOG");
 
     await using var transport = new CodexAppServerProcessTransport(
         fixturePath,
@@ -248,15 +292,21 @@ static async Task TestAppServerProcessTransportUsesIsolatedHomeAsync()
         runtimeEnvironment);
     await transport.StartAsync();
 
-    string? reportedHome = null;
+    var reportedEnvironment = new List<string>();
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
     await foreach (var line in transport.ReadLinesAsync(timeout.Token))
     {
-        reportedHome = line;
-        break;
+        reportedEnvironment.Add(line);
+        if (reportedEnvironment.Count == 2)
+        {
+            break;
+        }
     }
 
-    AssertEqual(runtimeEnvironment.HomePath, reportedHome, "app-server child CODEX_HOME");
+    AssertEqual(2, reportedEnvironment.Count, "app-server child environment output count");
+    AssertEqual(runtimeEnvironment.HomePath, reportedEnvironment[0], "app-server child CODEX_HOME");
+    AssertEqual("warn", reportedEnvironment[1], "app-server child RUST_LOG");
+    AssertEqual(processRustLog, Environment.GetEnvironmentVariable("RUST_LOG"), "process RUST_LOG is unchanged");
 }
 
 static void AssertUtf8ProtocolEncoding(Encoding? encoding, string streamName)

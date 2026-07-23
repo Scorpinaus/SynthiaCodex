@@ -45,8 +45,50 @@
                             <StackPanel>
                                 <Border Style="{StaticResource ConversationUserSurface}" Margin="48,0,0,12" AutomationProperties.Name="User message">
                                     <StackPanel>
-                                        <TextBlock Text="You" Style="{StaticResource ConversationRoleText}" Foreground="{DynamicResource SignalBrush}" Margin="0,0,0,6"/>
-                                        <TextBlock Text="{Binding UserPrompt}" Style="{StaticResource ConversationBodyText}"/>
+                                        <Grid Margin="0,0,0,6">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Text="You" Style="{StaticResource ConversationRoleText}" Foreground="{DynamicResource SignalBrush}"/>
+                                            <Border Grid.Column="1"
+                                                    Style="{StaticResource StatePill}"
+                                                    Visibility="{Binding IsSuperseded, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <TextBlock Text="Previous version" FontSize="10"/>
+                                            </Border>
+                                        </Grid>
+                                        <TextBlock Text="{Binding UserPrompt}"
+                                                   Style="{StaticResource ConversationBodyText}"
+                                                   Visibility="{Binding IsPromptEditing, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
+                                        <Border BorderBrush="{DynamicResource LineBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="6"
+                                                Padding="8"
+                                                Visibility="{Binding IsPromptEditing, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <StackPanel>
+                                                <TextBox Text="{Binding EditedPrompt, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                         AcceptsReturn="True"
+                                                         TextWrapping="Wrap"
+                                                         MinHeight="72"
+                                                         VerticalScrollBarVisibility="Auto"
+                                                         AutomationProperties.Name="Edit user prompt"/>
+                                                <TextBlock Text="Resubmitting rewinds conversation context; workspace file changes are kept."
+                                                           Style="{StaticResource ConversationMetadataText}"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,6,0,0"/>
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                                                    <Button Content="Cancel"
+                                                            Command="{Binding DataContext.TaskWorkspace.CancelPromptEditCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                            CommandParameter="{Binding}"
+                                                            Style="{StaticResource CompactButton}"
+                                                            Margin="0,0,6,0"
+                                                            AutomationProperties.Name="Cancel prompt edit"/>
+                                                    <Button Content="Resubmit"
+                                                            Command="{Binding DataContext.TaskWorkspace.SubmitPromptEditCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                            CommandParameter="{Binding}"
+                                                            IsEnabled="{Binding CanSubmitPromptEdit}"
+                                                            Style="{StaticResource CompactButton}"
+                                                            AutomationProperties.Name="Resubmit edited prompt"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
                                         <ItemsControl ItemsSource="{Binding UserAttachments}"
                                                       Margin="0,8,0,0"
                                                       Visibility="{Binding HasUserAttachments, Converter={StaticResource BooleanToVisibilityConverter}}">
@@ -66,7 +108,7 @@
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
                                         <Grid Margin="0,10,0,0">
-                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                             <TextBlock Grid.Column="1"
                                                        Text="{Binding StartedAtLocalTime, StringFormat={}{0:g}}"
                                                        Style="{StaticResource ConversationMetadataText}"
@@ -74,6 +116,17 @@
                                                        Margin="0,0,8,0"
                                                        AutomationProperties.Name="User message date and time"/>
                                             <Button Grid.Column="2"
+                                                    Content="Edit"
+                                                    Command="{Binding DataContext.TaskWorkspace.BeginPromptEditCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                    CommandParameter="{Binding}"
+                                                    Visibility="{Binding CanEditPrompt, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                    Style="{StaticResource CompactButton}"
+                                                    MinHeight="24"
+                                                    Padding="7,2"
+                                                    Margin="0,0,6,0"
+                                                    ToolTip="Edit and resubmit this prompt"
+                                                    AutomationProperties.Name="Edit user prompt"/>
+                                            <Button Grid.Column="3"
                                                     Content="Copy"
                                                     CommandParameter="{Binding UserPrompt}"
                                                     Style="{StaticResource CompactButton}"

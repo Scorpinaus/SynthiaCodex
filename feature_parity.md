@@ -24,7 +24,7 @@
 | Agent orchestration | **Partial** | Parallel top-level chats and collaboration activity exist, but subagent thread inspection and management are absent. |
 | Context and multimodal input | **Near** | Per-chat context-window visibility plus image/file/folder picker, paste/drop, previews, queued lifecycle persistence, workspace mentions, and managed external snapshots are implemented; rich artifact viewing and remaining hardening are out of scope. |
 | Tools and integrations | **Low** | Configured MCP/web activity can flow through app-server, but Browser, Chrome, plugins, connectors, skills management, and Scheduled are not product surfaces. |
-| Desktop convenience | **Moderate** | Native Windows shell, themes, diagnostics, cross-chat search, find-in-chat, and core shortcuts exist; notifications, dictation, quick chat, deep links, and personalization do not. |
+| Desktop convenience | **Moderate** | Native Windows shell, themes, diagnostics, custom Codex instruction defaults, cross-chat search, find-in-chat, and core shortcuts exist; notifications, dictation, quick chat, deep links, and broader personalization do not. |
 
 ## Detailed parity matrix
 
@@ -53,6 +53,7 @@
 | Authenticated model catalog | Reads `model/list`, hides unavailable models, and uses server-advertised capabilities | **Full** | None material. |
 | Reasoning selection | Filters reasoning options by the selected model and persists the preference | **Full** | ChatGPT may expose additional intelligence labels for eligible models. |
 | Fast mode | Uses advertised service tiers and keeps Fast distinct from model choice | **Full** | None material for supported models. |
+| Custom developer and base instructions | Settings provides validated multiline developer instructions plus an advanced base-instruction replacement; enabled values are captured per chat and sent through typed `thread/start`, `thread/resume`, and `thread/fork` fields | **Full** | Changes intentionally apply to future chats only. Base instructions remain off by default so Codex resolves the selected model's runtime-owned default. |
 | Ask for approval | Composer mode resolves to `:workspace`, `on-request`, and `user`; legacy fallback is `workspace-write` | **Full** | None material. |
 | Approve for me | Uses the same workspace boundary and `on-request`, with `auto_review` | **Full** | None material. |
 | Custom permissions | Follows the `config.toml` default or selects a named profile from `permissionProfile/list` | **Full** | SynthiaCode deliberately does not edit profile rules. |
@@ -106,15 +107,24 @@
 | Native Windows application | WPF, single-process guard, responsive three-pane shell, and native file dialogs | **Full** | SynthiaCode is intentionally Windows-only. |
 | Appearance | System, light, and dark themes | **Partial** | No accent/background/foreground editor, font selection, or theme sharing. |
 | Keyboard shortcuts | Core project, submit, navigation, terminal, settings, refresh, cross-chat search (`Ctrl+K`), and find-in-chat (`Ctrl+F`) shortcuts | **Partial** | No command palette, searchable/customizable shortcut editor, or next/previous chat navigation. |
-| Account and settings pane | Account, appearance, Codex runtime, doctor, diagnostics, and about information | **Near** | ChatGPT has substantially broader settings. |
+| Account and settings pane | Custom Codex instructions, account, appearance, Codex runtime, doctor, diagnostics, and about information | **Near** | ChatGPT has substantially broader settings. |
 | Notifications | Status bar and in-app state only | **Missing** | No OS completion notifications or notification preferences. |
 | Dictation/voice input | No speech input | **Missing** | ChatGPT desktop supports dictation. |
 | Quick chat, pop-out, always-on-top | No compact or detached chat window | **Missing** | ChatGPT can keep a chat beside another app. |
 | Deep links | No registered SynthiaCode URL scheme | **Missing** | ChatGPT supports links to chats, settings, skills, Scheduled, plugins, and connections. |
-| Personalization and memories | No personality, custom-instruction editor, suggested prompts, or cross-chat memories | **Missing** | Codex can still inherit repository/user instructions from files. |
+| Personalization and memories | Custom developer instructions and an advanced base-instruction override are editable and persisted; no personality, suggested prompts, or cross-chat memories | **Partial** | Instruction defaults are Codex-specific and apply to future chats rather than providing the broader ChatGPT personalization surface. |
 | Chat profile, usage insights, and pets | Basic account/rate-limit view only | **Partial** | Profile analytics/cards and pets are non-core gaps. |
 
 ## What changed in this recheck
+
+Custom Codex instructions moved from absent to **Full** for the local app-server outcome:
+
+1. Settings now provides explicit, multiline developer instructions and a separately gated advanced base-instruction replacement, with validation, a 64 KiB UTF-8 limit per field, save/reset actions, and a warning that values are stored as plain text.
+2. Disabled or blank overrides are omitted. In particular, leaving base instructions disabled preserves the selected model's normal Codex base instructions instead of reading or rewriting `models_cache.json`.
+3. New chats capture the currently saved defaults; resume and fork reuse the source chat's captured values, so later settings edits never silently alter existing conversations. Legacy chats continue with no explicit override.
+4. Typed `thread/start`, `thread/resume`, and `thread/fork` requests serialize `developerInstructions` and `baseInstructions`; older runtimes that reject these fields receive an actionable update-or-disable error.
+5. Settings JSON round trips, coalesced snapshots, thread storage/presentation conversions, General/project creation paths, implicit first-prompt creation, resume-failure recovery, and forks all retain instruction state without logging instruction contents.
+6. Protocol, persistence, lifecycle, validation, legacy-compatibility, unsupported-runtime, and rendered-WPF regressions are included in the 187-test suite.
 
 Chat rename moved from absent to **Full** for both sidebar scopes:
 

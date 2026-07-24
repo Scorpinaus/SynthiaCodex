@@ -99,8 +99,9 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         AddPermissionProfile(parameters, options.PermissionProfileId);
 
         AddApprovalPolicyOverrides(parameters, options.ApprovalPolicy, options.ApprovalsReviewer);
+        AddInstructionOverrides(parameters, options.DeveloperInstructions, options.BaseInstructions);
 
-        var result = await SendRequestAsync("thread/start", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
+        var result = await SendThreadLifecycleRequestAsync("thread/start", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
         var threadId = ReadString(result, "thread.id");
         if (string.IsNullOrWhiteSpace(threadId))
         {
@@ -143,8 +144,9 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
 
         AddApprovalPolicyOverrides(parameters, request.ApprovalPolicy, request.ApprovalsReviewer);
+        AddInstructionOverrides(parameters, request.DeveloperInstructions, request.BaseInstructions);
 
-        var result = await SendRequestAsync("thread/resume", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
+        var result = await SendThreadLifecycleRequestAsync("thread/resume", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
         var threadId = ReadString(result, "thread.id");
         if (string.IsNullOrWhiteSpace(threadId))
         {
@@ -495,8 +497,9 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
 
         AddApprovalPolicyOverrides(parameters, request.ApprovalPolicy, request.ApprovalsReviewer);
+        AddInstructionOverrides(parameters, request.DeveloperInstructions, request.BaseInstructions);
 
-        var result = await SendRequestAsync("thread/fork", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
+        var result = await SendThreadLifecycleRequestAsync("thread/fork", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
         var threadId = ReadString(result, "thread.id");
         if (string.IsNullOrWhiteSpace(threadId))
         {
@@ -705,6 +708,31 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         var response = await SendRequestForResponseAsync(method, parameters, cancellationToken).ConfigureAwait(false);
         await using var registration = cancellationToken.Register(() => CancelPendingResponse(response, cancellationToken));
         return await response.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<JsonNode?> SendThreadLifecycleRequestAsync(
+        string method,
+        JsonObject parameters,
+        CancellationToken cancellationToken)
+    {
+        var hasInstructionOverrides =
+            parameters.ContainsKey("developerInstructions") ||
+            parameters.ContainsKey("baseInstructions");
+        try
+        {
+            return await SendRequestAsync(method, parameters, cancellationToken).ConfigureAwait(false);
+        }
+        catch (CodexAppServerProtocolException ex) when (
+            hasInstructionOverrides &&
+            ex.Code == -32602 &&
+            (ex.Message.Contains("developerInstructions", StringComparison.OrdinalIgnoreCase) ||
+             ex.Message.Contains("baseInstructions", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new CodexAppServerProtocolException(
+                "The installed Codex runtime does not support custom instruction overrides. " +
+                "Update Codex or disable custom instructions in SynthiaCode Settings.",
+                ex);
+        }
     }
 
     private async Task<PendingResponse> SendRequestForResponseAsync(
@@ -1154,6 +1182,22 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         if (approvalsReviewer is not null)
         {
             parameters["approvalsReviewer"] = approvalsReviewer.Value.ToProtocolValue();
+        }
+    }
+
+    private static void AddInstructionOverrides(
+        JsonObject parameters,
+        string? developerInstructions,
+        string? baseInstructions)
+    {
+        if (!string.IsNullOrWhiteSpace(developerInstructions))
+        {
+            parameters["developerInstructions"] = developerInstructions;
+        }
+
+        if (!string.IsNullOrWhiteSpace(baseInstructions))
+        {
+            parameters["baseInstructions"] = baseInstructions;
         }
     }
 

@@ -13,6 +13,8 @@ internal static class ApprovalProtocolTests
         ("permission profiles list with pagination and compatibility fallback", ListsPermissionProfilesAsync),
         ("permission profiles serialize exclusively on lifecycle requests", PermissionProfilesSerializeExclusivelyAsync),
         ("execution policies serialize on thread and turn requests", ExecutionPoliciesSerializeAsync),
+        ("instruction overrides serialize on thread lifecycle requests", InstructionOverridesSerializeOnThreadLifecycleAsync),
+        ("unsupported instruction overrides explain the Codex runtime requirement", UnsupportedInstructionOverridesExplainRuntimeRequirementAsync),
         ("execution policy config and requirements are read", ReadsExecutionPolicyConfigAndRequirementsAsync)
     ];
 
@@ -263,6 +265,96 @@ internal static class ApprovalProtocolTests
         Assert(!inheritedParams.ContainsKey("sandbox") && !inheritedParams.ContainsKey("approvalPolicy") && !inheritedParams.ContainsKey("approvalsReviewer"), "inherit omits policy overrides");
         transport.ServerSend("""{"id":3,"result":{"thread":{"id":"thr_inherit"}}}""");
         await inherited;
+    }
+
+    private static async Task InstructionOverridesSerializeOnThreadLifecycleAsync()
+    {
+        await using var transport = new FakeAppServerTransport();
+        await using var client = CreateClient(transport);
+        await CompleteInitializeAsync(client, transport);
+
+        var start = client.StartThreadAsync(new CodexThreadStartOptions(
+            DeveloperInstructions: "Prefer small, verified changes.",
+            BaseInstructions: "You are a focused coding agent."));
+        await transport.WaitForClientMessageCountAsync(3);
+        var startParameters = ParseMessage(transport.ClientMessages[2])["params"]!.AsObject();
+        Assert(startParameters["developerInstructions"]?.GetValue<string>() == "Prefer small, verified changes.",
+            "thread start serializes developer instructions");
+        Assert(startParameters["baseInstructions"]?.GetValue<string>() == "You are a focused coding agent.",
+            "thread start serializes base instructions");
+        transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thr_instructions"}}}""");
+        await start;
+
+        var resume = client.ResumeThreadAsync(new CodexThreadResumeRequest(
+            "thr_instructions",
+            @"D:\Repo",
+            Sandbox: null,
+            DeveloperInstructions: "Resume with the captured developer instructions.",
+            BaseInstructions: "Resume with the captured base instructions."));
+        await transport.WaitForClientMessageCountAsync(4);
+        var resumeParameters = ParseMessage(transport.ClientMessages[3])["params"]!.AsObject();
+        Assert(resumeParameters["developerInstructions"]?.GetValue<string>() ==
+               "Resume with the captured developer instructions.",
+            "thread resume serializes developer instructions");
+        Assert(resumeParameters["baseInstructions"]?.GetValue<string>() ==
+               "Resume with the captured base instructions.",
+            "thread resume serializes base instructions");
+        transport.ServerSend("""{"id":2,"result":{"thread":{"id":"thr_instructions","turns":[]}}}""");
+        await resume;
+
+        var fork = client.ForkThreadAsync(new CodexThreadForkRequest(
+            "thr_instructions",
+            @"D:\Repo",
+            Sandbox: null,
+            DeveloperInstructions: "Fork with the source developer instructions.",
+            BaseInstructions: "Fork with the source base instructions."));
+        await transport.WaitForClientMessageCountAsync(5);
+        var forkParameters = ParseMessage(transport.ClientMessages[4])["params"]!.AsObject();
+        Assert(forkParameters["developerInstructions"]?.GetValue<string>() ==
+               "Fork with the source developer instructions.",
+            "thread fork serializes developer instructions");
+        Assert(forkParameters["baseInstructions"]?.GetValue<string>() == "Fork with the source base instructions.",
+            "thread fork serializes base instructions");
+        transport.ServerSend("""{"id":3,"result":{"thread":{"id":"thr_instruction_fork"}}}""");
+        await fork;
+
+        var inherited = client.StartThreadAsync(new CodexThreadStartOptions(
+            DeveloperInstructions: " ",
+            BaseInstructions: null));
+        await transport.WaitForClientMessageCountAsync(6);
+        var inheritedParameters = ParseMessage(transport.ClientMessages[5])["params"]!.AsObject();
+        Assert(!inheritedParameters.ContainsKey("developerInstructions") &&
+               !inheritedParameters.ContainsKey("baseInstructions"),
+            "blank instruction overrides are omitted so Codex resolves model defaults");
+        transport.ServerSend("""{"id":4,"result":{"thread":{"id":"thr_default_instructions"}}}""");
+        await inherited;
+    }
+
+    private static async Task UnsupportedInstructionOverridesExplainRuntimeRequirementAsync()
+    {
+        await using var transport = new FakeAppServerTransport();
+        await using var client = CreateClient(transport);
+        await CompleteInitializeAsync(client, transport);
+
+        var start = client.StartThreadAsync(new CodexThreadStartOptions(
+            DeveloperInstructions: "Use custom guidance."));
+        await transport.WaitForClientMessageCountAsync(3);
+        transport.ServerSend(
+            """{"id":1,"error":{"code":-32602,"message":"unknown field `developerInstructions`"}}""");
+
+        try
+        {
+            await start;
+        }
+        catch (CodexAppServerProtocolException ex)
+        {
+            Assert(
+                ex.Message.Contains("does not support custom instruction overrides", StringComparison.OrdinalIgnoreCase),
+                "unsupported instruction fields produce an actionable runtime message");
+            return;
+        }
+
+        throw new InvalidOperationException("unsupported instruction overrides should fail");
     }
 
     private static async Task ReadsExecutionPolicyConfigAndRequirementsAsync()

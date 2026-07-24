@@ -19,7 +19,9 @@ public sealed record CodexThreadStartOptions(
     CodexApprovalPolicy? ApprovalPolicy = null,
     CodexApprovalsReviewer? ApprovalsReviewer = null,
     string? PermissionProfileId = null,
-    string? Cwd = null)
+    string? Cwd = null,
+    string? DeveloperInstructions = null,
+    string? BaseInstructions = null)
 {
     public static CodexThreadStartOptions Default { get; } = new();
 }
@@ -35,7 +37,9 @@ public sealed record CodexThreadResumeRequest(
     string? Model = null,
     CodexApprovalPolicy? ApprovalPolicy = null,
     CodexApprovalsReviewer? ApprovalsReviewer = null,
-    string? PermissionProfileId = null);
+    string? PermissionProfileId = null,
+    string? DeveloperInstructions = null,
+    string? BaseInstructions = null);
 
 public sealed record CodexThreadResumeResult(
     string ThreadId,
@@ -80,7 +84,9 @@ public sealed record CodexThreadForkRequest(
     string? Model = null,
     CodexApprovalPolicy? ApprovalPolicy = null,
     CodexApprovalsReviewer? ApprovalsReviewer = null,
-    string? PermissionProfileId = null);
+    string? PermissionProfileId = null,
+    string? DeveloperInstructions = null,
+    string? BaseInstructions = null);
 
 public sealed record CodexThreadForkResult(
     string ThreadId,

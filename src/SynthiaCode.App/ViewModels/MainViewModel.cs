@@ -20,6 +20,7 @@ namespace SynthiaCode.App.ViewModels;
 
 public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 {
+    private const int MaximumInstructionBytes = 64 * 1024;
     private readonly ISettingsStore settingsStore;
     private readonly IAppServerSessionCoordinator appServerSessionCoordinator;
     private readonly IGitService gitService;
@@ -56,9 +57,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand renameThreadCommand;
     private readonly AsyncRelayCommand steerTurnCommand;
     private readonly AsyncRelayCommand removeWorktreeCommand;
+    private readonly AsyncRelayCommand saveInstructionSettingsCommand;
     private readonly RelayCommand toggleProjectRailCommand;
     private readonly RelayCommand toggleDetailsPaneCommand;
     private readonly RelayCommand openSettingsCommand;
+    private readonly RelayCommand resetInstructionSettingsCommand;
 
     private AppSettings settings = new();
     private CodexInstallation currentCodex => DiagnosticsViewModel.Installation;
@@ -67,6 +70,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string? activeTurnId;
     private string selectedTheme = "System";
     private string statusMessage = "Starting";
+    private string developerInstructions = string.Empty;
+    private string baseInstructions = string.Empty;
+    private string instructionSettingsValidationMessage = string.Empty;
+    private bool developerInstructionsEnabled;
+    private bool baseInstructionsEnabled;
+    private bool instructionSettingsInitialized;
     private bool isProjectRailOpen = true;
     private bool isDetailsPaneOpen;
     private bool isCompactLayout;
@@ -219,6 +228,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         CancelTurnCommand = cancelTurnCommand = (AsyncRelayCommand)TaskWorkspace.CancelCommand;
         LoadModelsCommand = loadModelsCommand = (AsyncRelayCommand)TaskWorkspace.LoadModelsCommand;
         ExitApplicationCommand = exitApplicationCommand = new AsyncRelayCommand(RequestApplicationExitAsync, () => !isShuttingDown);
+        SaveInstructionSettingsCommand = saveInstructionSettingsCommand =
+            new AsyncRelayCommand(SaveInstructionSettingsAsync, CanSaveInstructionSettings);
+        ResetInstructionSettingsCommand = resetInstructionSettingsCommand =
+            new RelayCommand(ResetInstructionSettings, () => !IsShuttingDown);
         RefreshGitCommand = Git.RefreshCommand;
         ShowWorkingDiffCommand = Git.ShowWorkingDiffCommand;
         ShowStagedDiffCommand = Git.ShowStagedDiffCommand;
@@ -610,6 +623,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public ICommand OpenSettingsCommand { get; }
 
+    public ICommand SaveInstructionSettingsCommand { get; }
+
+    public ICommand ResetInstructionSettingsCommand { get; }
+
     public string? SelectedProjectPath
     {
         get => ProjectWorkspace.SelectedProjectPath;
@@ -735,6 +752,66 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    public bool DeveloperInstructionsEnabled
+    {
+        get => developerInstructionsEnabled;
+        set
+        {
+            if (SetProperty(ref developerInstructionsEnabled, value))
+            {
+                RefreshInstructionSettingsState();
+            }
+        }
+    }
+
+    public string DeveloperInstructions
+    {
+        get => developerInstructions;
+        set
+        {
+            if (SetProperty(ref developerInstructions, value ?? string.Empty))
+            {
+                RefreshInstructionSettingsState();
+            }
+        }
+    }
+
+    public bool BaseInstructionsEnabled
+    {
+        get => baseInstructionsEnabled;
+        set
+        {
+            if (SetProperty(ref baseInstructionsEnabled, value))
+            {
+                RefreshInstructionSettingsState();
+            }
+        }
+    }
+
+    public string BaseInstructions
+    {
+        get => baseInstructions;
+        set
+        {
+            if (SetProperty(ref baseInstructions, value ?? string.Empty))
+            {
+                RefreshInstructionSettingsState();
+            }
+        }
+    }
+
+    public string InstructionSettingsValidationMessage
+    {
+        get => instructionSettingsValidationMessage;
+        private set => SetProperty(ref instructionSettingsValidationMessage, value);
+    }
+
+    public bool HasInstructionSettingsChanges =>
+        DeveloperInstructionsEnabled != settings.CustomDeveloperInstructionsEnabled ||
+        !string.Equals(DeveloperInstructions, settings.CustomDeveloperInstructions, StringComparison.Ordinal) ||
+        BaseInstructionsEnabled != settings.CustomBaseInstructionsEnabled ||
+        !string.Equals(BaseInstructions, settings.CustomBaseInstructions, StringComparison.Ordinal);
+
     public ProjectThreadState? SelectedThread
     {
         get => ProjectWorkspace.SelectedThread;
@@ -857,6 +934,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ReasoningEffortOverride = settings.LastReasoningEffortOverride ?? string.Empty;
         TaskWorkspace.ServiceTierSelection = ParseServiceTierSelection(settings.LastServiceTierOverride);
         TaskWorkspace.FollowUpBehavior = settings.FollowUpBehavior.ParseFollowUpBehavior();
+        LoadInstructionSettings();
         var permissionSettingsMigrated = AppSettingsPermissionMigration.Migrate(settings);
         ExecutionPolicy.Initialize(
             settings.PermissionMode,
@@ -1063,9 +1141,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             var workspacePath = GetWorkspacePath(scope);
+            var instructionSnapshot = ResolveDefaultInstructionSnapshot();
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
             var result = await appServerSessionCoordinator
-                .StartThreadAsync(CreateThreadStartOptions(workspacePath))
+                .StartThreadAsync(CreateThreadStartOptions(workspacePath, instructionSnapshot))
                 .ConfigureAwait(true);
             AssistantWorktree? worktree = null;
             if (scope.Kind == ThreadScopeKind.Project &&
@@ -1089,7 +1168,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 $"Thread {ProjectThreads.Count + 1}",
                 worktree?.Path ?? workspacePath,
                 worktree?.Branch,
-                isTitlePlaceholder: true);
+                isTitlePlaceholder: true,
+                instructionSnapshot: instructionSnapshot);
             loadedThreadIds.Add(result.ThreadId);
             RefreshProjectThreads(result.ThreadId);
             StatusMessage = scope.Kind == ThreadScopeKind.General
@@ -1145,8 +1225,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
             var sourceThread = SelectedThread;
             var sourceWorkspace = GetActiveWorkspacePath();
+            var instructionSnapshot = ResolveInstructionSnapshot(sourceThread.ThreadId);
             var result = await appServerSessionCoordinator
-                .ForkThreadAsync(CreateThreadForkRequest(sourceThread.ThreadId, sourceWorkspace))
+                .ForkThreadAsync(CreateThreadForkRequest(sourceThread.ThreadId, sourceWorkspace, instructionSnapshot))
                 .ConfigureAwait(true);
             AssistantWorktree? worktree = null;
             if (sourceThread.ScopeKind == ThreadScopeKind.Project &&
@@ -1170,7 +1251,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 result.ThreadId,
                 $"Fork of {sourceThread.DisplayTitle}",
                 worktree?.Path ?? sourceWorkspace,
-                worktree?.Branch);
+                worktree?.Branch,
+                instructionSnapshot: instructionSnapshot);
             state.Preview = sourceThread.Preview;
             var sourceService = threadWorkspace.GetRequired(sourceThread.ThreadId);
             state.FinalResponse = sourceService.FinalResponse;
@@ -1527,7 +1609,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         string title,
         string workspacePath,
         string? worktreeBranch = null,
-        bool isTitlePlaceholder = false)
+        bool isTitlePlaceholder = false,
+        CodexInstructionSnapshot instructionSnapshot = default)
     {
         var state = new ProjectThreadState
         {
@@ -1541,6 +1624,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 : string.IsNullOrWhiteSpace(worktreeBranch) ? "local" : "worktree",
             WorkspacePath = Path.GetFullPath(workspacePath),
             WorktreeBranch = worktreeBranch,
+            AppliedDeveloperInstructions = instructionSnapshot.DeveloperInstructions,
+            AppliedBaseInstructions = instructionSnapshot.BaseInstructions,
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
@@ -1696,6 +1781,115 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         SelectedProjectPath,
         GetActiveWorkspacePathIfAvailable(),
         IsGeneral: string.IsNullOrWhiteSpace(SelectedProjectPath));
+
+    private void LoadInstructionSettings()
+    {
+        settings.CustomDeveloperInstructions ??= string.Empty;
+        settings.CustomBaseInstructions ??= string.Empty;
+        developerInstructionsEnabled = settings.CustomDeveloperInstructionsEnabled;
+        developerInstructions = settings.CustomDeveloperInstructions;
+        baseInstructionsEnabled = settings.CustomBaseInstructionsEnabled;
+        baseInstructions = settings.CustomBaseInstructions;
+        instructionSettingsInitialized = true;
+        OnPropertyChanged(nameof(DeveloperInstructionsEnabled));
+        OnPropertyChanged(nameof(DeveloperInstructions));
+        OnPropertyChanged(nameof(BaseInstructionsEnabled));
+        OnPropertyChanged(nameof(BaseInstructions));
+        RefreshInstructionSettingsState();
+    }
+
+    private bool CanSaveInstructionSettings() =>
+        !IsShuttingDown &&
+        instructionSettingsInitialized &&
+        HasInstructionSettingsChanges &&
+        string.IsNullOrEmpty(GetInstructionSettingsValidationMessage());
+
+    private async Task SaveInstructionSettingsAsync()
+    {
+        var validationMessage = GetInstructionSettingsValidationMessage();
+        if (!string.IsNullOrEmpty(validationMessage))
+        {
+            InstructionSettingsValidationMessage = validationMessage;
+            return;
+        }
+
+        var previousDeveloperEnabled = settings.CustomDeveloperInstructionsEnabled;
+        var previousDeveloperInstructions = settings.CustomDeveloperInstructions;
+        var previousBaseEnabled = settings.CustomBaseInstructionsEnabled;
+        var previousBaseInstructions = settings.CustomBaseInstructions;
+        settings.CustomDeveloperInstructionsEnabled = DeveloperInstructionsEnabled;
+        settings.CustomDeveloperInstructions = DeveloperInstructions;
+        settings.CustomBaseInstructionsEnabled = BaseInstructionsEnabled;
+        settings.CustomBaseInstructions = BaseInstructions;
+
+        try
+        {
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+            StatusMessage = "Codex instruction defaults saved for future threads";
+        }
+        catch (Exception ex)
+        {
+            settings.CustomDeveloperInstructionsEnabled = previousDeveloperEnabled;
+            settings.CustomDeveloperInstructions = previousDeveloperInstructions;
+            settings.CustomBaseInstructionsEnabled = previousBaseEnabled;
+            settings.CustomBaseInstructions = previousBaseInstructions;
+            StatusMessage = "Could not save Codex instruction defaults";
+            logger.Log(
+                AppLogLevel.Warning,
+                "instruction_settings_save_failed",
+                "Could not save custom Codex instruction defaults.",
+                exception: ex);
+        }
+        finally
+        {
+            RefreshInstructionSettingsState();
+        }
+    }
+
+    private void ResetInstructionSettings()
+    {
+        DeveloperInstructionsEnabled = false;
+        DeveloperInstructions = string.Empty;
+        BaseInstructionsEnabled = false;
+        BaseInstructions = string.Empty;
+    }
+
+    private void RefreshInstructionSettingsState()
+    {
+        if (!instructionSettingsInitialized)
+        {
+            return;
+        }
+
+        InstructionSettingsValidationMessage = GetInstructionSettingsValidationMessage();
+        OnPropertyChanged(nameof(HasInstructionSettingsChanges));
+        saveInstructionSettingsCommand.RaiseCanExecuteChanged();
+    }
+
+    private string GetInstructionSettingsValidationMessage()
+    {
+        if (DeveloperInstructionsEnabled && string.IsNullOrWhiteSpace(DeveloperInstructions))
+        {
+            return "Enter developer instructions or turn off the override.";
+        }
+
+        if (BaseInstructionsEnabled && string.IsNullOrWhiteSpace(BaseInstructions))
+        {
+            return "Enter base instructions or turn off the advanced override.";
+        }
+
+        if (System.Text.Encoding.UTF8.GetByteCount(DeveloperInstructions) > MaximumInstructionBytes)
+        {
+            return "Developer instructions must be 64 KiB or smaller.";
+        }
+
+        if (System.Text.Encoding.UTF8.GetByteCount(BaseInstructions) > MaximumInstructionBytes)
+        {
+            return "Base instructions must be 64 KiB or smaller.";
+        }
+
+        return string.Empty;
+    }
 
     private async Task SaveThemeSelectionAsync()
     {
@@ -2034,8 +2228,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         if (string.IsNullOrWhiteSpace(activeThreadId))
         {
+            var instructionSnapshot = ResolveDefaultInstructionSnapshot();
             var thread = await appServerSessionCoordinator
-                .StartThreadAsync(CreateThreadStartOptions(workspacePath))
+                .StartThreadAsync(CreateThreadStartOptions(workspacePath, instructionSnapshot))
                 .ConfigureAwait(true);
             AssistantWorktree? worktree = null;
             if (scope.Kind == ThreadScopeKind.Project &&
@@ -2059,7 +2254,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 $"Thread {ProjectThreads.Count + 1}",
                 worktree?.Path ?? workspacePath,
                 worktree?.Branch,
-                isTitlePlaceholder: true);
+                isTitlePlaceholder: true,
+                instructionSnapshot: instructionSnapshot);
             RefreshProjectThreads(thread.ThreadId);
             loadedThreadIds.Add(thread.ThreadId);
             activeThreadLoaded = true;
@@ -2071,6 +2267,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return activeThreadId;
         }
 
+        var existingInstructionSnapshot = ResolveInstructionSnapshot(activeThreadId);
         try
         {
             var resumed = await appServerSessionCoordinator
@@ -2093,14 +2290,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 ex);
 
             var thread = await appServerSessionCoordinator
-                .StartThreadAsync(CreateThreadStartOptions(workspacePath))
+                .StartThreadAsync(CreateThreadStartOptions(workspacePath, existingInstructionSnapshot))
                 .ConfigureAwait(true);
             CreateThreadState(
                 scope,
                 thread.ThreadId,
                 $"Thread {ProjectThreads.Count + 1}",
                 workspacePath,
-                isTitlePlaceholder: true);
+                isTitlePlaceholder: true,
+                instructionSnapshot: existingInstructionSnapshot);
             RefreshProjectThreads(thread.ThreadId);
             loadedThreadIds.Add(thread.ThreadId);
             activeThreadLoaded = true;
@@ -2444,7 +2642,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         return path;
     }
 
-    private CodexThreadStartOptions CreateThreadStartOptions(string cwd)
+    private CodexThreadStartOptions CreateThreadStartOptions(
+        string cwd,
+        CodexInstructionSnapshot instructionSnapshot)
     {
         var permissions = ResolvePermissionPolicy();
         return new CodexThreadStartOptions(
@@ -2453,12 +2653,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             permissions.ApprovalPolicy,
             permissions.ApprovalsReviewer,
             permissions.PermissionProfileId,
-            cwd);
+            cwd,
+            instructionSnapshot.DeveloperInstructions,
+            instructionSnapshot.BaseInstructions);
     }
 
     private CodexThreadResumeRequest CreateThreadResumeRequest(string threadId, string cwd)
     {
         var permissions = ResolvePermissionPolicy();
+        var instructionSnapshot = ResolveInstructionSnapshot(threadId);
         return new CodexThreadResumeRequest(
             threadId,
             cwd,
@@ -2466,10 +2669,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             NormalizeOverride(ModelOverride),
             permissions.ApprovalPolicy,
             permissions.ApprovalsReviewer,
-            permissions.PermissionProfileId);
+            permissions.PermissionProfileId,
+            instructionSnapshot.DeveloperInstructions,
+            instructionSnapshot.BaseInstructions);
     }
 
-    private CodexThreadForkRequest CreateThreadForkRequest(string threadId, string cwd)
+    private CodexThreadForkRequest CreateThreadForkRequest(
+        string threadId,
+        string cwd,
+        CodexInstructionSnapshot instructionSnapshot)
     {
         var permissions = ResolvePermissionPolicy();
         return new CodexThreadForkRequest(
@@ -2479,8 +2687,32 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             NormalizeOverride(ModelOverride),
             permissions.ApprovalPolicy,
             permissions.ApprovalsReviewer,
-            permissions.PermissionProfileId);
+            permissions.PermissionProfileId,
+            instructionSnapshot.DeveloperInstructions,
+            instructionSnapshot.BaseInstructions);
     }
+
+    private CodexInstructionSnapshot ResolveDefaultInstructionSnapshot() => new(
+        settings.CustomDeveloperInstructionsEnabled
+            ? NormalizeInstructionOverride(settings.CustomDeveloperInstructions)
+            : null,
+        settings.CustomBaseInstructionsEnabled
+            ? NormalizeInstructionOverride(settings.CustomBaseInstructions)
+            : null);
+
+    private CodexInstructionSnapshot ResolveInstructionSnapshot(string threadId)
+    {
+        var persisted = settings.ProjectThreads.FirstOrDefault(thread =>
+            string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
+        return persisted is null
+            ? default
+            : new CodexInstructionSnapshot(
+                persisted.AppliedDeveloperInstructions,
+                persisted.AppliedBaseInstructions);
+    }
+
+    private static string? NormalizeInstructionOverride(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value;
 
     private IReadOnlyList<CodexUserInput> BuildUserInputs(
         string text,
@@ -3483,4 +3715,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         CodexServiceTierSelection.Fast => "fast",
         _ => throw new ArgumentOutOfRangeException(nameof(selection), selection, "Unknown service tier selection.")
     };
+
+    private readonly record struct CodexInstructionSnapshot(
+        string? DeveloperInstructions,
+        string? BaseInstructions);
 }

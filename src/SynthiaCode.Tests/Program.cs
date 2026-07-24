@@ -43,6 +43,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("settings saves are snapshotted and coalesced", TestSettingsSavesAreSnapshottedAndCoalescedAsync),
     ("settings recover interrupted atomic writes", TestSettingsRecoverInterruptedAtomicWritesAsync),
     ("view model applies and persists selected theme", TestViewModelAppliesAndPersistsThemeAsync),
+    ("view model validates and persists custom Codex instructions", TestViewModelPersistsCustomInstructionsAsync),
     ("view model persists responsive shell state", TestViewModelPersistsResponsiveShellStateAsync),
     ("view model terminal toggle selects terminal workspace", TestViewModelTerminalToggleSelectsTerminalWorkspaceAsync),
     ("codex utility runner executes doctor", TestCodexUtilityRunnerExecutesDoctorAsync),
@@ -85,6 +86,8 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("view model sends selected model and reasoning", TestViewModelSendsSelectedModelAndReasoningAsync),
     ("view model loads model options", TestViewModelLoadsModelOptionsAsync),
     ("view model manages multiple threads", TestViewModelManagesMultipleThreadsAsync),
+    ("view model captures custom instructions per thread", TestViewModelCapturesInstructionsPerThreadAsync),
+    ("view model keeps legacy threads on Codex instruction defaults", TestViewModelKeepsLegacyThreadInstructionDefaultsAsync),
     ("view model forks archives and unarchives threads", TestViewModelForksArchivesAndUnarchivesThreadsAsync),
     ("view model steers an active turn", TestViewModelSteersActiveTurnAsync),
     ("view model runs parallel project threads", TestViewModelRunsParallelProjectThreadsAsync),
@@ -331,6 +334,10 @@ static async Task TestSettingsRoundTripAsync()
         LastModelOverride = "gpt-test",
         LastReasoningEffortOverride = "high",
         LastServiceTierOverride = "fast",
+        CustomDeveloperInstructionsEnabled = true,
+        CustomDeveloperInstructions = "Prefer focused tests.",
+        CustomBaseInstructionsEnabled = true,
+        CustomBaseInstructions = "You are a SynthiaCode coding agent.",
         IsProjectRailOpen = false,
         IsDetailsPaneOpen = true
     };
@@ -341,6 +348,8 @@ static async Task TestSettingsRoundTripAsync()
         ThreadId = "thr_saved",
         Mode = "worktree",
         WorkspacePath = temp.CreateDirectory("ThreadWorkspace"),
+        AppliedDeveloperInstructions = "Prefer focused tests.",
+        AppliedBaseInstructions = "You are a SynthiaCode coding agent.",
         FinalResponse = "Saved final response",
         TimelineItems =
         [
@@ -386,6 +395,10 @@ static async Task TestSettingsRoundTripAsync()
     AssertEqual(settings.LastModelOverride, loaded.LastModelOverride, "last model override");
     AssertEqual(settings.LastReasoningEffortOverride, loaded.LastReasoningEffortOverride, "last reasoning override");
     AssertEqual(settings.LastServiceTierOverride, loaded.LastServiceTierOverride, "last service tier override");
+    AssertTrue(loaded.CustomDeveloperInstructionsEnabled, "developer instructions enabled");
+    AssertEqual(settings.CustomDeveloperInstructions, loaded.CustomDeveloperInstructions, "developer instructions");
+    AssertTrue(loaded.CustomBaseInstructionsEnabled, "base instructions enabled");
+    AssertEqual(settings.CustomBaseInstructions, loaded.CustomBaseInstructions, "base instructions");
     AssertEqual(settings.IsProjectRailOpen, loaded.IsProjectRailOpen, "project rail preference");
     AssertEqual(settings.IsDetailsPaneOpen, loaded.IsDetailsPaneOpen, "details pane preference");
     AssertEqual(1, loaded.RecentProjects.Count, "recent project count");
@@ -393,6 +406,8 @@ static async Task TestSettingsRoundTripAsync()
     AssertEqual("thr_saved", loaded.ProjectThreads[0].ThreadId, "project thread id");
     AssertEqual("worktree", loaded.ProjectThreads[0].Mode, "project thread mode");
     AssertEqual(settings.ProjectThreads[0].WorkspacePath, loaded.ProjectThreads[0].WorkspacePath, "project thread workspace path");
+    AssertEqual("Prefer focused tests.", loaded.ProjectThreads[0].AppliedDeveloperInstructions, "thread developer instructions");
+    AssertEqual("You are a SynthiaCode coding agent.", loaded.ProjectThreads[0].AppliedBaseInstructions, "thread base instructions");
     AssertEqual("Saved final response", loaded.ProjectThreads[0].FinalResponse, "project thread final response");
     var loadedActivity = loaded.ProjectThreads[0].ConversationTurns.Single().Activity.Single();
     AssertEqual("command_saved", loadedActivity.ItemId, "activity item identity survives JSON persistence");
@@ -402,6 +417,18 @@ static async Task TestSettingsRoundTripAsync()
     var saveMetric = logger.Entries.Single(entry => entry.EventName == "settings_saved");
     AssertTrue(long.Parse(saveMetric.Properties?["serializedBytes"] ?? "0") > 0, "settings save byte metric");
     AssertTrue(long.Parse(saveMetric.Properties?["elapsedMilliseconds"] ?? "-1") >= 0, "settings save duration metric");
+
+    var snapshot = AppSettingsSnapshot.Create(settings);
+    settings.CustomDeveloperInstructions = "Mutated after snapshot";
+    settings.ProjectThreads[0].AppliedBaseInstructions = "Mutated after snapshot";
+    AssertEqual("Prefer focused tests.", snapshot.CustomDeveloperInstructions, "settings snapshot isolates developer instructions");
+    AssertEqual("You are a SynthiaCode coding agent.", snapshot.ProjectThreads[0].AppliedBaseInstructions,
+        "settings snapshot isolates per-thread base instructions");
+
+    var legacy = System.Text.Json.JsonSerializer.Deserialize<AppSettings>("{}")
+        ?? throw new InvalidOperationException("legacy settings did not deserialize");
+    AssertTrue(!legacy.CustomDeveloperInstructionsEnabled && !legacy.CustomBaseInstructionsEnabled,
+        "legacy settings inherit Codex instruction defaults");
 }
 
 static async Task TestSettingsSavesAreSnapshottedAndCoalescedAsync()
@@ -474,6 +501,58 @@ static async Task TestViewModelAppliesAndPersistsThemeAsync()
     await WaitUntilAsync(() => settingsStore.SavedSettings.Theme == "Light", "theme setting saved");
 
     AssertEqual("Light", themeService.AppliedTheme, "changed theme applied");
+}
+
+static async Task TestViewModelPersistsCustomInstructionsAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var settingsStore = new FakeSettingsStore(new AppSettings
+    {
+        CustomDeveloperInstructionsEnabled = true,
+        CustomDeveloperInstructions = "Use tests first.",
+        CustomBaseInstructionsEnabled = false,
+        CustomBaseInstructions = "Preserved disabled base draft."
+    });
+    var viewModel = CreateMainViewModel(
+        new FakeAppServerTransport(),
+        temp.Root,
+        AuthReadiness.LikelySignedIn,
+        settingsStore);
+
+    await viewModel.InitializeAsync();
+
+    AssertTrue(viewModel.DeveloperInstructionsEnabled, "developer instruction enable state restored");
+    AssertEqual("Use tests first.", viewModel.DeveloperInstructions, "developer instruction draft restored");
+    AssertTrue(!viewModel.BaseInstructionsEnabled, "base instruction enable state restored");
+    AssertEqual("Preserved disabled base draft.", viewModel.BaseInstructions, "disabled base draft restored");
+
+    viewModel.DeveloperInstructions = " ";
+    AssertTrue(!viewModel.SaveInstructionSettingsCommand.CanExecute(null),
+        "blank enabled developer instructions cannot be saved");
+    AssertTrue(!string.IsNullOrWhiteSpace(viewModel.InstructionSettingsValidationMessage),
+        "invalid instruction settings explain the error");
+
+    viewModel.DeveloperInstructions = "Run focused tests before the full suite.";
+    viewModel.BaseInstructionsEnabled = true;
+    viewModel.BaseInstructions = "You are a careful coding agent.";
+    AssertTrue(viewModel.SaveInstructionSettingsCommand.CanExecute(null), "valid changed instructions can be saved");
+    viewModel.SaveInstructionSettingsCommand.Execute(null);
+
+    await WaitUntilAsync(
+        () => settingsStore.SavedSettings.CustomBaseInstructionsEnabled &&
+              settingsStore.SavedSettings.CustomBaseInstructions == "You are a careful coding agent.",
+        "custom instruction settings saved");
+    AssertEqual(
+        "Run focused tests before the full suite.",
+        settingsStore.SavedSettings.CustomDeveloperInstructions,
+        "developer instruction setting saved");
+
+    viewModel.ResetInstructionSettingsCommand.Execute(null);
+    AssertTrue(!viewModel.DeveloperInstructionsEnabled && !viewModel.BaseInstructionsEnabled,
+        "reset disables custom instructions");
+    AssertEqual(string.Empty, viewModel.DeveloperInstructions, "reset clears developer instructions");
+    AssertEqual(string.Empty, viewModel.BaseInstructions, "reset clears base instructions");
+    await viewModel.DisposeAsync();
 }
 
 static async Task TestViewModelPersistsResponsiveShellStateAsync()
@@ -802,6 +881,145 @@ static async Task TestViewModelManagesMultipleThreadsAsync()
     await WaitUntilAsync(() => viewModel.StatusMessage.Contains("resumed", StringComparison.OrdinalIgnoreCase), "selected thread resumed");
 
     AssertEqual(2, settingsStore.SavedSettings.ProjectThreads.Count, "multiple threads persisted");
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelCapturesInstructionsPerThreadAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var settingsStore = new FakeSettingsStore(new AppSettings
+    {
+        CustomDeveloperInstructionsEnabled = true,
+        CustomDeveloperInstructions = "Original developer instructions.",
+        CustomBaseInstructionsEnabled = true,
+        CustomBaseInstructions = "Original base instructions."
+    });
+    var viewModel = CreateMainViewModel(transport, temp.Root, AuthReadiness.LikelySignedIn, settingsStore);
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "instruction project selected");
+
+    viewModel.NewThreadCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend("""{"id":0,"result":{"userAgent":"codex-test"}}""");
+    await transport.WaitForClientMessageCountAsync(3);
+    var startRequest = ParseMessage(transport.ClientMessages[2]);
+    AssertJsonString(
+        "Original developer instructions.",
+        startRequest,
+        "params.developerInstructions",
+        "new thread developer instructions");
+    AssertJsonString(
+        "Original base instructions.",
+        startRequest,
+        "params.baseInstructions",
+        "new thread base instructions");
+    transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thr_instruction_source"}}}""");
+    await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "thr_instruction_source",
+        "instruction source thread created");
+    AssertEqual(
+        "Original developer instructions.",
+        settingsStore.SavedSettings.ProjectThreads.Single().AppliedDeveloperInstructions,
+        "thread captures developer instructions");
+    AssertEqual(
+        "Original base instructions.",
+        settingsStore.SavedSettings.ProjectThreads.Single().AppliedBaseInstructions,
+        "thread captures base instructions");
+
+    viewModel.DeveloperInstructions = "Changed global developer instructions.";
+    viewModel.BaseInstructions = "Changed global base instructions.";
+    viewModel.SaveInstructionSettingsCommand.Execute(null);
+    await WaitUntilAsync(
+        () => settingsStore.SavedSettings.CustomDeveloperInstructions == "Changed global developer instructions.",
+        "changed instruction defaults saved");
+
+    viewModel.ResumeThreadCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(4);
+    var resumeRequest = ParseMessage(transport.ClientMessages[3]);
+    AssertJsonString(
+        "Original developer instructions.",
+        resumeRequest,
+        "params.developerInstructions",
+        "resume keeps captured developer instructions");
+    AssertJsonString(
+        "Original base instructions.",
+        resumeRequest,
+        "params.baseInstructions",
+        "resume keeps captured base instructions");
+    transport.ServerSend("""{"id":2,"result":{"thread":{"id":"thr_instruction_source","turns":[]}}}""");
+    await WaitUntilAsync(
+        () => viewModel.StatusMessage.Contains("resumed", StringComparison.OrdinalIgnoreCase),
+        "instruction source resumed");
+
+    viewModel.ForkThreadCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(5);
+    var forkRequest = ParseMessage(transport.ClientMessages[4]);
+    AssertJsonString(
+        "Original developer instructions.",
+        forkRequest,
+        "params.developerInstructions",
+        "fork inherits developer instructions");
+    AssertJsonString(
+        "Original base instructions.",
+        forkRequest,
+        "params.baseInstructions",
+        "fork inherits base instructions");
+    transport.ServerSend("""{"id":3,"result":{"thread":{"id":"thr_instruction_fork"}}}""");
+    await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "thr_instruction_fork",
+        "instruction fork created");
+    AssertEqual(
+        "Original developer instructions.",
+        viewModel.SelectedThread?.AppliedDeveloperInstructions,
+        "forked state inherits developer instructions");
+    AssertEqual(
+        "Original base instructions.",
+        viewModel.SelectedThread?.AppliedBaseInstructions,
+        "forked state inherits base instructions");
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelKeepsLegacyThreadInstructionDefaultsAsync()
+{
+    using var temp = TempWorkspace.Create();
+    await using var transport = new FakeAppServerTransport();
+    var settings = new AppSettings
+    {
+        CustomDeveloperInstructionsEnabled = true,
+        CustomDeveloperInstructions = "New global developer instructions.",
+        CustomBaseInstructionsEnabled = true,
+        CustomBaseInstructions = "New global base instructions."
+    };
+    settings.ProjectThreads.Add(new PersistedProjectThread
+    {
+        ProjectPath = temp.Root,
+        ThreadId = "thr_legacy_instructions",
+        Title = "Legacy chat",
+        IsActive = true,
+        WorkspacePath = temp.Root
+    });
+    var settingsStore = new FakeSettingsStore(settings);
+    var viewModel = CreateMainViewModel(transport, temp.Root, AuthReadiness.LikelySignedIn, settingsStore);
+
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(
+        () => viewModel.SelectedThread?.ThreadId == "thr_legacy_instructions",
+        "legacy instruction thread selected");
+
+    viewModel.ResumeThreadCommand.Execute(null);
+    await transport.WaitForClientMessageCountAsync(2);
+    transport.ServerSend("""{"id":0,"result":{"userAgent":"codex-test"}}""");
+    await transport.WaitForClientMessageCountAsync(3);
+    var resumeRequest = ParseMessage(transport.ClientMessages[2]);
+    AssertTrue(ResolvePath(resumeRequest, "params.developerInstructions") is null,
+        "legacy thread does not inherit new developer instructions");
+    AssertTrue(ResolvePath(resumeRequest, "params.baseInstructions") is null,
+        "legacy thread keeps the model's default base instructions");
+    transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thr_legacy_instructions","turns":[]}}}""");
+    await WaitUntilAsync(
+        () => viewModel.StatusMessage.Contains("resumed", StringComparison.OrdinalIgnoreCase),
+        "legacy instruction thread resumed");
     await viewModel.DisposeAsync();
 }
 

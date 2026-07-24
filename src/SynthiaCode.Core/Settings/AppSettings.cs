@@ -21,6 +21,14 @@ public sealed class AppSettings
 
     public string? FollowUpBehavior { get; set; }
 
+    public bool CustomDeveloperInstructionsEnabled { get; set; }
+
+    public string CustomDeveloperInstructions { get; set; } = string.Empty;
+
+    public bool CustomBaseInstructionsEnabled { get; set; }
+
+    public string CustomBaseInstructions { get; set; } = string.Empty;
+
     public string? SandboxModeOverride { get; set; } = "workspace-write";
 
     public string? ApprovalPolicyOverride { get; set; } = "on-request";
@@ -101,6 +109,8 @@ public sealed class PersistedProjectThread
     public string Mode { get; set; } = "local";
     public string? WorkspacePath { get; set; }
     public string? WorktreeBranch { get; set; }
+    public string? AppliedDeveloperInstructions { get; set; }
+    public string? AppliedBaseInstructions { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public string FinalResponse { get; set; } = string.Empty;
     public List<CodexTimelineItem> TimelineItems { get; set; } = [];
@@ -240,6 +250,10 @@ public sealed class ProjectThreadState : INotifyPropertyChanged
     }
 
     public string? WorkspacePath { get; set; }
+
+    public string? AppliedDeveloperInstructions { get; set; }
+
+    public string? AppliedBaseInstructions { get; set; }
 
     public string? WorktreeBranch
     {

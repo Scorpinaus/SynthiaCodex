@@ -34,7 +34,34 @@ internal static class ResponsiveLayoutTests
         VerifyProjectNavigationWraps();
         VerifyTranscriptWrapsAndScrolls();
         VerifyQueuedFollowUpControls();
+        VerifyInstructionSettingsSurface();
     });
+
+    private static void VerifyInstructionSettingsSurface()
+    {
+        var view = new DetailsView
+        {
+            Width = 340,
+            Height = 760
+        };
+
+        PumpLayout(view);
+
+        var developerEditor = view.FindName("DeveloperInstructionsEditor") as TextBox;
+        var baseEditor = view.FindName("BaseInstructionsEditor") as TextBox;
+        var saveButton = view.FindName("SaveInstructionSettingsButton") as Button;
+        var resetButton = view.FindName("ResetInstructionSettingsButton") as Button;
+        Assert(developerEditor is { AcceptsReturn: true, TextWrapping: TextWrapping.Wrap },
+            "settings expose a multiline developer instructions editor");
+        Assert(baseEditor is { AcceptsReturn: true, TextWrapping: TextWrapping.Wrap },
+            "settings expose a multiline base instructions editor");
+        Assert(saveButton is not null && resetButton is not null,
+            "settings expose explicit save and reset instruction actions");
+        Assert(AutomationProperties.GetName(developerEditor) == "Developer instructions",
+            "developer instructions editor has an accessible name");
+        Assert(AutomationProperties.GetName(baseEditor) == "Base instructions override",
+            "base instructions editor has an accessible name");
+    }
 
     private static void ApplyDarkThemeForTest(ResourceDictionary resources)
     {

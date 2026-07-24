@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Threading;
 using SynthiaCode.App.Services;
@@ -24,6 +25,7 @@ internal static class ThreadRenameTests
         ("thread store renames chats and updates presentation titles", ThreadStoreRenamesChatsAsync),
         ("sidebar rename command supports general and project chats", SidebarRenameCommandSupportsBothScopesAsync),
         ("general and project chat menus expose rename", ChatMenusExposeRenameAsync),
+        ("general and project chat actions appear on hover or selection", ChatActionsAppearOnHoverOrSelectionAsync),
         ("main view model renames and persists general and project chats", MainViewModelRenamesBothScopesAsync),
         ("first message automatically renames a new chat once", FirstMessageAutomaticallyRenamesNewChatOnceAsync)
     ];
@@ -141,6 +143,69 @@ internal static class ThreadRenameTests
             chatActionMenus.All(menu => menu.Items.OfType<MenuItem>().Single(item => Equals(item.Header, "Rename")).Command == viewModel.RenameThreadCommand),
             "both Rename menu items use the shared selected-thread command");
     });
+
+    private static Task ChatActionsAppearOnHoverOrSelectionAsync() => WpfTestHost.RunAsync(() =>
+    {
+        ConfigureNavigationResources(Application.Current.Resources);
+        var viewModel = CreateNavigationViewModel();
+        var general = State("general-thread", ThreadScopeKind.General, string.Empty, "General chat");
+        var project = State("project-thread", ThreadScopeKind.Project, ProjectPath, "Project chat");
+        viewModel.RefreshProjectNavigation(
+            [new RecentProject(ProjectPath, "Alpha", DateTimeOffset.UtcNow)],
+            [general, project]);
+        viewModel.SetSelectedProjectPath(ProjectPath);
+        viewModel.SelectedThread = project;
+
+        var view = new ProjectThreadView
+        {
+            DataContext = new ProjectContext(viewModel),
+            Width = 280,
+            Height = 620
+        };
+        PumpLayout(view);
+
+        var actionButtons = FindVisualDescendants<Button>(view)
+            .Where(button => AutomationProperties.GetName(button) == "Chat actions")
+            .ToList();
+        Assert(actionButtons.Count == 2, "General and project chat action buttons are rendered");
+        Assert(
+            actionButtons.Single(button => ReferenceEquals(button.DataContext, general)).Visibility == Visibility.Collapsed,
+            "an idle unselected chat keeps its actions hidden");
+        Assert(
+            actionButtons.Single(button => ReferenceEquals(button.DataContext, project)).Visibility == Visibility.Visible,
+            "the selected chat keeps its actions visible");
+
+        foreach (var button in actionButtons)
+        {
+            Assert(
+                button.Style.Setters.OfType<Setter>().Any(setter =>
+                    setter.Property == UIElement.VisibilityProperty &&
+                    Equals(setter.Value, Visibility.Collapsed)),
+                "chat action style defaults to hidden");
+            Assert(
+                HasVisibleListItemTrigger(button.Style, nameof(ListBoxItem.IsMouseOver)),
+                "chat action style exposes the button while its row is hovered");
+            Assert(
+                HasVisibleListItemTrigger(button.Style, nameof(ListBoxItem.IsSelected)),
+                "chat action style preserves selected-row visibility");
+        }
+    });
+
+    private static bool HasVisibleListItemTrigger(Style style, string propertyName) =>
+        style.Triggers
+            .OfType<DataTrigger>()
+            .Any(trigger =>
+                string.Equals(trigger.Value?.ToString(), bool.TrueString, StringComparison.OrdinalIgnoreCase) &&
+                trigger.Binding is Binding
+                {
+                    Path.Path: var path,
+                    RelativeSource.AncestorType: var ancestorType
+                } &&
+                path == propertyName &&
+                ancestorType == typeof(ListBoxItem) &&
+                trigger.Setters.OfType<Setter>().Any(setter =>
+                    setter.Property == UIElement.VisibilityProperty &&
+                    Equals(setter.Value, Visibility.Visible)));
 
     private static async Task MainViewModelRenamesBothScopesAsync()
     {

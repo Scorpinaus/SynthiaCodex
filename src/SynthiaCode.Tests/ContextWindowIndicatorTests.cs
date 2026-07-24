@@ -19,7 +19,7 @@ internal static class ContextWindowIndicatorTests
         ("app-server compaction notifications render as transcript activity", AppServerCompactionNotificationsRenderAsTranscriptActivityAsync),
         ("token pressure does not trigger client-side summarization", TokenPressureDoesNotTriggerClientSideSummarizationAsync),
         ("context usage and compactions survive chat persistence", ContextUsageAndCompactionsSurviveChatPersistenceAsync),
-        ("composer shows context remaining beside send with usage tooltip", ComposerShowsContextRemainingBesideSendAsync)
+        ("composer shows context used beside send with usage tooltip", ComposerShowsContextUsedBesideSendAsync)
     ];
 
     private static Task ContextUsageNotificationsAreEnabledByDefaultAsync()
@@ -176,7 +176,7 @@ internal static class ContextWindowIndicatorTests
         return Task.CompletedTask;
     }
 
-    private static Task ComposerShowsContextRemainingBesideSendAsync() => WpfTestHost.RunAsync(() =>
+    private static Task ComposerShowsContextUsedBesideSendAsync() => WpfTestHost.RunAsync(() =>
     {
         ConfigureTestResources(Application.Current.Resources);
         var service = new CodexThreadService();
@@ -204,7 +204,7 @@ internal static class ContextWindowIndicatorTests
         label.GetBindingExpression(TextBlock.TextProperty)?.UpdateTarget();
         indicator.GetBindingExpression(FrameworkElement.ToolTipProperty)?.UpdateTarget();
 
-        Assert(label.Text == "83%", "indicator shows context percentage remaining");
+        Assert(label.Text == "17%", "indicator shows context percentage used");
         Assert(indicator.ToolTip?.ToString() ==
             string.Join(Environment.NewLine, "Context window", "17% used, 83% remaining", "42.5k/252k tokens used", "Compactions: 1"),
             $"tooltip includes used, remaining, token totals, and compactions; actual: {indicator.ToolTip}");

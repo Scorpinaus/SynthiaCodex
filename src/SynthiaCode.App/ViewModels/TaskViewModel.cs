@@ -581,7 +581,7 @@ public sealed class TaskViewModel : ObservableObject
             : threadService.FinalResponse;
 
     public string ContextWindowIndicator => threadService.HasContextWindowUsage
-        ? $"{threadService.ContextRemainingPercent}%"
+        ? $"{threadService.ContextUsedPercent}%"
         : "—%";
 
     public string ContextWindowToolTip => threadService.HasContextWindowUsage

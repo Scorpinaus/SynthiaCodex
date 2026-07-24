@@ -1,7 +1,7 @@
 # SynthiaCode and ChatGPT Desktop Feature Parity
 
-- **Audit date:** 23 July 2026
-- **SynthiaCode baseline:** working tree based on commit `9b5a8bc`, including automatic first-message naming, manual thread rename, sidebar chat management, cross-chat search, find-in-chat, and the completed parity work recorded below
+- **Audit date:** 24 July 2026
+- **SynthiaCode baseline:** working tree based on commit `9b5a8bc`, including automatic first-message naming, manual thread rename, hover-visible sidebar chat actions, sidebar chat management, cross-chat search, find-in-chat, and the completed parity work recorded below
 - **Comparison surface:** ChatGPT desktop app with Codex/local-project capabilities
 - **Scope:** User-visible desktop functionality, local Codex workflows, and capabilities inherited through `codex app-server`
 
@@ -39,7 +39,7 @@
 | Edit and resubmit user prompts | Completed prompts have an inline editor; resubmission uses `thread/rollback`, keeps the selected and later prompts/responses visible as Previous versions, reuses attachments, and continues the same thread from the edited prompt | **Full** | Conversation history rewinds while existing workspace file changes are intentionally kept and clearly disclosed, matching app-server rollback semantics. |
 | Resume, fork, archive, unarchive | Typed app-server lifecycle flows and UI actions | **Full** | None material. |
 | Rename chats | New General and project chats replace their placeholder title from the normalized first message after `turn/start` succeeds; manual chat menus also open a validated rename dialog. Both flows call typed `thread/name/set` and persist the acknowledged title locally | **Full** | Automatic titles are deterministic first-message names rather than a later model-generated summary. Project folder names remain filesystem-derived. |
-| Pin, delete, and search chats | Persisted sidebar pin/unpin with pinned-first ordering; confirmed delete; content search across General, project, and archived chats; current-chat occurrence search with next/previous wraparound and highlighting | **Full** | Because app-server has no permanent-delete method, delete first archives an active Codex thread and then removes SynthiaCode's local record; associated worktrees and branches are intentionally preserved. |
+| Pin, delete, and search chats | Hover- and selection-visible contextual actions; persisted sidebar pin/unpin with pinned-first ordering; confirmed delete; content search across General, project, and archived chats; current-chat occurrence search with next/previous wraparound and highlighting | **Full** | Because app-server has no permanent-delete method, delete first archives an active Codex thread and then removes SynthiaCode's local record; associated worktrees and branches are intentionally preserved. |
 | Steer an active run | Active-turn guidance uses `turn/steer` | **Full** | None for steering itself. |
 | Queue and manage follow-up messages | Per-thread persisted queues support Queue/Steer defaults, one-shot inversion, inline edit, reorder, manual send/steer, delete, and completion-driven FIFO dispatch | **Near** | Dispatch validates the captured workspace but does not yet refresh and re-resolve model-catalog and managed-permission policy immediately before a background start. |
 | Parallel top-level chats | Multiple project threads can run and route notifications independently | **Near** | No dedicated global running-task manager or completion notification center. |
@@ -84,7 +84,7 @@
 | Feature | SynthiaCode | Status | Remaining difference |
 | --- | --- | --- | --- |
 | `AGENTS.md` and shared Codex configuration | Inherited by the launched Codex runtime | **Near** | No editor, provenance view, or configuration deep links. |
-| Context-window visibility | A live percentage-remaining indicator sits beside Send; hover details show used/remaining percentages, latest-context tokens versus the model window, and cumulative compactions per persisted chat; app-server compaction lifecycle events render in the transcript | **Full** | Older settings show unavailable usage until app-server sends the first `thread/tokenUsage/updated` notification. Compaction and summarization remain owned by Codex app-server. |
+| Context-window visibility | A live percentage-used indicator sits beside Send; hover details show used/remaining percentages, latest-context tokens versus the model window, and cumulative compactions per persisted chat; app-server compaction lifecycle events render in the transcript | **Full** | Older settings show unavailable usage until app-server sends the first `thread/tokenUsage/updated` notification. Compaction and summarization remain owned by Codex app-server. |
 | Subagent execution | Collaboration notifications render as agent activity when Codex delegates | **Partial** | No Active/Done panel, agent-thread transcript, open/steer/stop controls, nicknames, or custom-agent management. |
 | MCP tool execution | Configured MCP tool activity and progress are parsed and shown | **Partial** | No MCP list/add/remove/auth/status UI or elicitation-specific presentation. |
 | Skills | Codex may load configured skills through its runtime | **Partial** | No Skills directory, enable/disable controls, install flow, `$skill` picker, or skill detail UI. |
@@ -123,17 +123,17 @@ Chat rename moved from absent to **Full** for both sidebar scopes:
 3. General chats under **Chats** and project-scoped chats under **Projects** expose the same manual Rename action in their contextual menus.
 4. Manual Rename opens a themed, keyboard-friendly dialog prefilled with the current display title; Cancel leaves the chat unchanged, whitespace is trimmed, blank names are rejected, and submitting the current explicit title avoids an unnecessary request.
 5. Successful automatic and manual changes update SynthiaCode persistence, recency, selected-title presentation, navigation, and cross-chat search results. Automatic rename failure is isolated from the already-started turn.
-6. Protocol serialization, storage normalization, shared command routing across both scopes, rendered WPF menu placement, manual rename lifecycle, first-message naming, persistence, and exactly-once follow-up behavior are protected by six focused tests in the 181-test regression suite.
+6. Protocol serialization, storage normalization, shared command routing across both scopes, rendered WPF menu placement and visibility, manual rename lifecycle, first-message naming, persistence, and exactly-once follow-up behavior are protected by seven focused tests in the 182-test regression suite.
 7. Project directory labels are intentionally unchanged because they remain derived from their filesystem folder names; “both Chats and Projects” refers to chat threads in those two navigation groups.
 
 Chat management and search moved from **Partial** to **Full** for the requested desktop outcome:
 
-1. General and project chat action menus expose Pin/Unpin and Delete. Pin state persists in existing settings data, updates the action label, and sorts pinned chats ahead of newer unpinned chats in both sidebar scopes.
+1. General and project chat action menus expose Pin/Unpin and Delete. Their `⋯` buttons appear when the chat row is hovered, remain visible for the selected row, and stay hidden on idle unselected rows. Pin state persists in existing settings data, updates the action label, and sorts pinned chats ahead of newer unpinned chats in both sidebar scopes.
 2. Delete requires explicit destructive confirmation. Unarchived Codex threads are archived through app-server before SynthiaCode removes the local chat, queue, draft, terminal, and in-memory routing state; assistant worktrees and Git branches are deliberately preserved.
 3. The sidebar search field searches titles, previews, final responses, and user/assistant transcript content across General, project, and archived chats. Results include scope and matching context, retain pinned-first ordering, and switch to the owning scope and chat when opened.
 4. Find-in-chat counts case-insensitive occurrences in both user and assistant messages, supports next/previous wraparound, scrolls to and highlights the current matching turn, and clears transient match state when closed.
 5. `Ctrl+K` opens/focuses cross-chat search and `Ctrl+F` opens/focuses find-in-chat; Enter/Shift+Enter navigate matches and Escape closes the find bar.
-6. Five focused persistence, command, main-lifecycle, cross-scope search, and occurrence-navigation tests plus rendered WPF automation/layout assertions protect the features in the current 181-test regression suite. The full suite also caught and fixed a pinned-label layout regression so long sidebar titles remain width-constrained and wrap correctly.
+6. A focused rendered-WPF hover/selection regression plus five persistence, command, main-lifecycle, cross-scope search, and occurrence-navigation tests and existing automation/layout assertions protect the features in the current 182-test regression suite. The full suite also caught and fixed a pinned-label layout regression so long sidebar titles remain width-constrained and wrap correctly.
 
 Editable user prompts moved from absent to **Full** parity for the Codex-style local-thread outcome:
 
@@ -169,7 +169,7 @@ Activity presentation now follows the combined Codex-style assistant outcome mor
 
 Context-window visibility moved from absent to **Full** parity for the live local-chat outcome:
 
-1. A compact percentage-remaining indicator now sits in the bottom composer action row immediately beside Send.
+1. A compact percentage-used indicator now sits in the bottom composer action row immediately beside Send.
 2. Its hover details show percentage used, percentage remaining, compact latest-context token usage versus the model context window, and the chat's compaction count.
 3. SynthiaCode now subscribes to `thread/tokenUsage/updated` and calculates latest-context usage as `tokenUsage.last.totalTokens - tokenUsage.last.reasoningOutputTokens`, matching Codex context-window semantics rather than cumulative session usage. Missing reasoning usage defaults to zero, and oversized values clamp the result to zero.
 4. Current `contextCompaction` item lifecycles and legacy `thread/compacted` notifications are counted without duplicate completed items, remain available in diagnostics, stay isolated by chat, and render as user-facing context activity in the owning turn.

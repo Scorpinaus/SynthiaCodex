@@ -5,6 +5,23 @@
 - **Comparison surface:** ChatGPT desktop app with Codex/local-project capabilities
 - **Scope:** User-visible desktop functionality, local Codex workflows, and capabilities inherited through `codex app-server`
 
+## Modern WPF redesign implementation parity
+
+| Phase | Implemented outcome | Status |
+| --- | --- | --- |
+| Phase 0 | Recorded the presentation contract in automated tests; baseline Debug build is warning-free and all 187 pre-redesign behavioral tests pass. | **Complete** |
+| Phase 1 | Added complete semantic light/graphite theme keys, neutral graphite palette values, compatibility aliases, and focused application resource composition. | **Complete** |
+| Phase 2 | Added reusable button, input, navigation, pane, drawer, status, focus, icon, menu, tooltip, popup, splitter, and empty-state primitives. | **Complete** |
+| Phase 3 | Replaced the workspace tabs with custom native-aware chrome, title-bar commands, persistent/drawer rail states, docked conversation and terminal regions, persistent/drawer inspector states, scrim/Esc dismissal, and top-priority approval hosting. | **Complete** |
+| Phase 4 | Migrated the project rail to accessible search, neutral navigation rows, geometry icons, recycling lists, quiet actionable status, full-name tooltips, existing lifecycle menus, search results, empty states, and a pinned account anchor. | **Complete** |
+| Phase 5 | Migrated the virtualized transcript to a quiet conversation canvas with bounded user/assistant surfaces, compact activity disclosure, modern empty state, floating jump action, existing Markdown/link security, progressive streaming, and manual-scroll preservation. | **Complete** |
+| Phase 6 | Reworked the bounded composer styling while preserving model/reasoning/permission flyouts, queues, attachments, send/queue/steer shortcuts, and added a focus-contained approval sheet with monospaced risk detail and no accidental default-Enter approval. | **Complete** |
+| Phase 7 | Added the lower dark terminal dock with start/stop/clear/close and maximize-within-workspace actions, keyboard splitter, per-thread state preservation, plus a narrow responsive changed-files/diff/commit inspector. | **Complete** |
+| Phase 8 | Migrated the pinned account flyout, settings sections, context menus, tooltips, combo popups, and transient surfaces to active semantic theme resources with predictable focus/Esc behavior. | **Complete** |
+| Phase 9 | Added a complete system-color high-contrast palette, system high-contrast selection, reduced-motion popup fallback, native-DPI vector icons, non-color state labels/structure, focus visuals, live-region metadata, focus-contained approval traversal, long-text wrapping/trimming, and keyboard-accessible drawers/splitters. | **Complete** |
+| Phase 10 | Preserved recycling virtualization, pixel transcript scrolling, 50 ms terminal presentation batching, bounded terminal/history behavior, native splitter resizing, and avoided large-surface effects/layout transforms; the warning-free build and focused performance guardrail tests pass. | **Complete** |
+| Phase 11 | Compared the implemented hierarchy and graphite palette with the approved concept, refreshed README/architecture documentation, completed rendered-WPF presentation checks, and produced warning-free Debug and Release executables after the complete regression gate. | **Complete** |
+
 ## Status legend
 
 | Status | Meaning |

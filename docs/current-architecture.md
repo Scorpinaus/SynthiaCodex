@@ -1,8 +1,8 @@
-# SynthiaCode: Current Architecture through Permission Modes
+# SynthiaCode: Current Architecture through the Modern WPF Redesign
 
-**Recorded:** 19 July 2026
-**Phase:** Server-request approvals, permission modes, and queued follow-ups after Phase 5G
-**Purpose:** Describe the current architecture while retaining the Phase 5B performance baseline.
+**Recorded:** 24 July 2026
+**Phase:** Modern WPF redesign phases 0–11
+**Purpose:** Describe the current architecture, redesigned presentation shell, and retained behavioral/performance boundaries.
 
 ## System shape
 
@@ -42,7 +42,13 @@ This ordering deliberately keeps shell visibility independent of Codex app-serve
 
 App-server lifecycle is exposed to presentation through `IAppServerSessionCoordinator`. Its implementation owns `CodexAppServerClient`, process transport startup, reconnect serialization, batched notifications, typed app-server operations, health transitions, and disposal. Protocol request/response JSON and delta-payload batching remain in the Codex Core/Infrastructure boundary rather than WPF presentation.
 
-`MainWindow.xaml` composes `ProjectThreadView`, `TaskView`, `TerminalView`, `GitView`, and the Settings view. Feature controls bind directly to their feature view models. Timeline, raw-event, thread, diagnostic, recent-project, and changed-file lists use recycling virtualization and content scrolling.
+`App.xaml` is now a resource-composition root. Theme colors live in matching light, graphite-dark, and system-color high-contrast dictionaries; foundations, typography, vector icons, buttons, inputs, navigation, and transient controls are split by concern. Feature views consume semantic dynamic resources, so changing theme dictionaries does not recreate the window or any feature view model.
+
+`MainWindow.xaml` uses `WindowChrome` and native `SystemCommands` for dragging, system-menu, minimize, maximize/restore, close, resize, and Windows 11 maximize-button hit testing. Its primary layout is no longer a workspace `TabControl`: the project rail, conversation, lower terminal dock, and changes/settings inspector are composed simultaneously. At compact widths the rail and inspector become mutually exclusive drawers behind a scrim; the approval host remains at the highest application-owned z-order. `Esc` dismisses the active side drawer but never dismisses UI behind a pending approval.
+
+`MainViewModel.UpdateViewportWidth` projects exclusive compact (800–1099 px), medium (1100–1439 px), and wide (1440 px and above) shell states. The rail is persistent in medium/wide states, the inspector is persistent only when enabled in wide state, and the terminal remains a bounded lower row unless maximized within the center workspace. Existing persisted open/closed preferences remain the source of truth.
+
+Feature controls bind directly to their existing feature view models. Timeline, raw-event, thread, diagnostic, recent-project, and changed-file lists use recycling virtualization and content scrolling. The transcript keeps pixel scrolling for variable-height turns and preserves the existing near-bottom auto-follow threshold; terminal output remains coalesced through the existing 50 ms presentation path.
 
 `ProjectThreadViewModel` also owns the unified project/thread navigation projection. `ProjectNavigationItemViewModel` groups presentation threads by normalized project path, tracks project disclosure and running summaries, and preserves the existing active-project `Threads` collection as a compatibility surface. The persisted `RecentProjects` and `ProjectThreads` collections remain unchanged.
 
@@ -50,7 +56,7 @@ App-server lifecycle is exposed to presentation through `IAppServerSessionCoordi
 
 `UserAccountView` is anchored in an `Auto` row below the independently scrolling project list. Its upward-opening flyout presents the ChatGPT email-derived identity, plan, remaining rate-limit windows, reset times, optional credits, Settings, and authentication actions. `AccountViewModel` reads typed `account/read` and `account/rateLimits/read` results, consumes account notifications before thread routing, keeps account data in memory only, and treats refresh failures as nonfatal. The app-server does not currently expose an authoritative display name or avatar, so the UI uses the email local part and generated initials.
 
-`MainViewModel.cs` is 1,589 physical lines (down 36% from 2,473) and now owns shell coordination:
+`MainViewModel.cs` remains the main shell coordinator and now owns:
 
 - project selection and recent projects;
 - thread creation, selection, resume, fork, archive, and worktree routing;
@@ -193,9 +199,9 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 
 | Measure | Final local result | Comparison |
 | --- | --- | --- |
-| `MainViewModel.cs` | 1,589 physical lines | 36% smaller |
-| `MainWindow.xaml` | 44 physical lines plus five feature controls | 95% smaller shell; feature layout independently owned |
-| Behavioral suite | 152 passing tests | 93 coordinator, lifecycle, history, persistence, multi-turn, activity-detail, presentation, attachment, permission, Markdown, projectless-thread, and navigation regressions added after the 59-test baseline |
+| `MainViewModel.cs` | 3,812 physical lines | Includes later projectless-chat, attachment, queue, rename/search, responsive-shell, and presentation coordination added after the original extraction audit. |
+| `MainWindow.xaml` | 444 physical lines | Custom chrome, adaptive three-zone shell, compact drawers, lower terminal dock, inspector, status, and approval hosting. |
+| Behavioral suite | 194 passing tests | Includes coordinator, lifecycle, history, persistence, multi-turn, activity, presentation, attachment, permission, Markdown, projectless-thread, navigation, redesign-resource, adaptive-shell, accessibility, and performance regressions. |
 | Startup shell/readiness | 541 ms / 759 ms | unchanged |
 | Codex long stream | 25,001 notifications, 2 UI batches, 20.71 MiB, 40.25 ms | same batching/allocation bound; synthetic CPU time varies locally |
 | Terminal storage/presentation | 39.06 MiB in 2.24 ms; 250,000 retained; 100 chunks to 1 UI update | faster storage run; same presentation bound |
@@ -203,7 +209,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 | Recovery | 27 ms | 5 ms slower locally, still well below interactive latency |
 | Active-resource shutdown | 2 ms | 10 ms faster locally |
 
-The Phase 5D Release solution build completed with zero warnings and errors and all 75 tests passed. The canonical self-contained `win-x64` portable folder was refreshed and launch-verified. SHA-256: executable `CA7497DDF1FAAC53C5AE968B8317974EAD5DC14109982E9CA56624DD1FB509A9`; application DLL `9111F7437E00AE840FC574977105CAF97E82115B4FC621F08A31B84BF2297F49`.
+The earlier Phase 5D release record completed with zero warnings/errors and 75 passing tests. The modern-redesign release gate supersedes that historical count with the current warning-free Debug/Release builds and 194-test suite.
 
 A no-build behavioral-runner invocation took approximately 12 seconds during the initial audit; this is a coarse runner-duration observation, not a product performance metric.
 

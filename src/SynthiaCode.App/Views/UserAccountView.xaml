@@ -27,15 +27,15 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource ButtonHoverBrush}"/>
-                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource ButtonBorderBrush}"/>
+                                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource SelectionBrush}"/>
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}"/>
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource SubtleBrush}"/>
-                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource SignalBrush}"/>
+                                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource SelectionBrush}"/>
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource FocusRingBrush}"/>
                             </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource SignalBrush}"/>
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource FocusRingBrush}"/>
                                 <Setter TargetName="Chrome" Property="BorderThickness" Value="2"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -48,15 +48,15 @@
             <Setter Property="Height" Value="6"/>
             <Setter Property="Minimum" Value="0"/>
             <Setter Property="Maximum" Value="100"/>
-            <Setter Property="Foreground" Value="{DynamicResource SignalBrush}"/>
-            <Setter Property="Background" Value="{DynamicResource SubtleBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource ActionAccentBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource SurfaceSunkenBrush}"/>
             <Setter Property="BorderThickness" Value="0"/>
         </Style>
     </UserControl.Resources>
 
     <Grid>
         <Border x:Name="AccountFooter"
-                BorderBrush="{DynamicResource LineBrush}"
+                BorderBrush="{DynamicResource DividerBrush}"
                 BorderThickness="0,1,0,0"
                 Padding="0,8,0,0">
             <ToggleButton x:Name="AccountToggle"
@@ -73,10 +73,10 @@
                     <Border Width="32"
                             Height="32"
                             CornerRadius="16"
-                            Background="{DynamicResource SignalBrush}"
+                            Background="{DynamicResource ActionAccentBrush}"
                             VerticalAlignment="Center">
                         <TextBlock Text="{Binding Initials}"
-                                   Foreground="White"
+                                   Foreground="{DynamicResource TextOnAccentBrush}"
                                    FontWeight="SemiBold"
                                    FontSize="11"
                                    HorizontalAlignment="Center"
@@ -91,10 +91,14 @@
                                    FontSize="10"
                                    TextTrimming="CharacterEllipsis"/>
                     </StackPanel>
-                    <TextBlock Grid.Column="2"
-                               Text="&#x2303;"
-                               Foreground="{DynamicResource MutedInkBrush}"
-                               VerticalAlignment="Center"/>
+                    <Path Grid.Column="2"
+                          Data="{StaticResource IconChevronUp}"
+                          Width="10"
+                          Height="6"
+                          Stroke="{DynamicResource TextSecondaryBrush}"
+                          StrokeThickness="1.5"
+                          Stretch="Uniform"
+                          VerticalAlignment="Center"/>
                 </Grid>
             </ToggleButton>
         </Border>
@@ -104,14 +108,13 @@
                Placement="Top"
                VerticalOffset="-4"
                AllowsTransparency="True"
-               PopupAnimation="Fade"
                StaysOpen="False"
                IsOpen="{Binding PlacementTarget.DataContext.IsFlyoutOpen, RelativeSource={RelativeSource Self}, Mode=TwoWay}"
                DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
             <Border Width="252"
                     MaxHeight="520"
-                    Background="{DynamicResource PanelBrush}"
-                    BorderBrush="{DynamicResource ButtonBorderBrush}"
+                    Background="{DynamicResource SurfaceRaisedBrush}"
+                    BorderBrush="{DynamicResource BorderStrongBrush}"
                     BorderThickness="1"
                     CornerRadius="8"
                     Padding="12">
@@ -131,9 +134,9 @@
                         <Border Width="34"
                                 Height="34"
                                 CornerRadius="17"
-                                Background="{DynamicResource SignalBrush}">
+                                Background="{DynamicResource ActionAccentBrush}">
                             <TextBlock Text="{Binding Initials}"
-                                       Foreground="White"
+                                       Foreground="{DynamicResource TextOnAccentBrush}"
                                        FontWeight="SemiBold"
                                        HorizontalAlignment="Center"
                                        VerticalAlignment="Center"/>

@@ -1,37 +1,74 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <SolidColorBrush x:Key="InkBrush" Color="#16201D" />
-    <SolidColorBrush x:Key="MutedInkBrush" Color="#66736D" />
-    <SolidColorBrush x:Key="CanvasBrush" Color="#F6F7F4" />
+    <!-- Intentionally derived neutral light palette, sharing the dark theme's semantic key set. -->
+    <SolidColorBrush x:Key="AppCanvasBrush" Color="#F4F5F6" />
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#FAFAFB" />
+    <SolidColorBrush x:Key="SurfaceSunkenBrush" Color="#ECEEF0" />
+    <SolidColorBrush x:Key="RailBrush" Color="#EEEFF1" />
+    <SolidColorBrush x:Key="InspectorBrush" Color="#F7F7F8" />
+
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1A1D21" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#5E6670" />
+    <SolidColorBrush x:Key="TextTertiaryBrush" Color="#7C848E" />
+    <SolidColorBrush x:Key="TextOnAccentBrush" Color="#FFFFFF" />
+
+    <SolidColorBrush x:Key="BorderSubtleBrush" Color="#D9DCE1" />
+    <SolidColorBrush x:Key="BorderStrongBrush" Color="#B8BDC5" />
+    <SolidColorBrush x:Key="FocusRingBrush" Color="#087A59" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#E1E3E7" />
+    <SolidColorBrush x:Key="SelectionBrush" Color="#E3E5E8" />
+    <SolidColorBrush x:Key="SelectionIndicatorBrush" Color="#34383E" />
+
+    <SolidColorBrush x:Key="ActionAccentBrush" Color="#087A59" />
+    <SolidColorBrush x:Key="ActionAccentHoverBrush" Color="#096B50" />
+    <SolidColorBrush x:Key="ActionAccentPressedBrush" Color="#07543F" />
+    <SolidColorBrush x:Key="ActionAccentSubtleBrush" Color="#D9EFE7" />
+
+    <SolidColorBrush x:Key="SuccessBrush" Color="#19734D" />
+    <SolidColorBrush x:Key="WarningBrush" Color="#936615" />
+    <SolidColorBrush x:Key="DangerBrush" Color="#B93F49" />
+    <SolidColorBrush x:Key="InfoBrush" Color="#356A9D" />
+    <SolidColorBrush x:Key="SuccessSubtleBrush" Color="#DCEFE6" />
+    <SolidColorBrush x:Key="WarningSubtleBrush" Color="#F5EBD6" />
+    <SolidColorBrush x:Key="DangerSubtleBrush" Color="#F7E1E3" />
+    <SolidColorBrush x:Key="InfoSubtleBrush" Color="#E0EAF4" />
+
+    <SolidColorBrush x:Key="TerminalBrush" Color="#0A0C0F" />
+    <SolidColorBrush x:Key="TerminalInkBrush" Color="#E8EAED" />
+    <SolidColorBrush x:Key="TerminalMutedBrush" Color="#8B949E" />
+    <SolidColorBrush x:Key="TerminalSelectionBrush" Color="#285F4D" />
+    <SolidColorBrush x:Key="ScrimBrush" Color="#66000000" />
+
+    <!-- Temporary compatibility aliases owned by Phase 11 cleanup. -->
+    <SolidColorBrush x:Key="InkBrush" Color="#1A1D21" />
+    <SolidColorBrush x:Key="MutedInkBrush" Color="#5E6670" />
+    <SolidColorBrush x:Key="CanvasBrush" Color="#F4F5F6" />
     <SolidColorBrush x:Key="PanelBrush" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="RailBrush" Color="#E9EFEA" />
-    <SolidColorBrush x:Key="SignalBrush" Color="#2D6CDF" />
-    <SolidColorBrush x:Key="LinkBrush" Color="#1456B8" />
-    <SolidColorBrush x:Key="LinkHoverBrush" Color="#0E4290" />
-    <SolidColorBrush x:Key="CopperBrush" Color="#B76135" />
-    <SolidColorBrush x:Key="LineBrush" Color="#D9E0DB" />
+    <SolidColorBrush x:Key="SignalBrush" Color="#087A59" />
+    <SolidColorBrush x:Key="LinkBrush" Color="#087A59" />
+    <SolidColorBrush x:Key="LinkHoverBrush" Color="#07543F" />
+    <SolidColorBrush x:Key="CopperBrush" Color="#936615" />
+    <SolidColorBrush x:Key="LineBrush" Color="#D9DCE1" />
     <SolidColorBrush x:Key="FieldBrush" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="ComboInkBrush" Color="#16201D" />
+    <SolidColorBrush x:Key="ComboInkBrush" Color="#1A1D21" />
     <SolidColorBrush x:Key="ButtonBrush" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#EDF3FF" />
-    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#DCE8FF" />
-    <SolidColorBrush x:Key="ButtonBorderBrush" Color="#C7D0CB" />
-    <SolidColorBrush x:Key="DisabledButtonBrush" Color="#EEF1EE" />
-    <SolidColorBrush x:Key="DisabledButtonBorderBrush" Color="#E0E5E1" />
-    <SolidColorBrush x:Key="DisabledInkBrush" Color="#98A39D" />
-    <SolidColorBrush x:Key="PrimaryHoverBrush" Color="#245FC8" />
-    <SolidColorBrush x:Key="PrimaryPressedBrush" Color="#1D4FA9" />
-    <SolidColorBrush x:Key="CreateActionBrush" Color="#137A66" />
+    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#E9EAED" />
+    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#DCDDE1" />
+    <SolidColorBrush x:Key="ButtonBorderBrush" Color="#B8BDC5" />
+    <SolidColorBrush x:Key="DisabledButtonBrush" Color="#ECEEF0" />
+    <SolidColorBrush x:Key="DisabledButtonBorderBrush" Color="#D9DCE1" />
+    <SolidColorBrush x:Key="DisabledInkBrush" Color="#9298A1" />
+    <SolidColorBrush x:Key="PrimaryHoverBrush" Color="#096B50" />
+    <SolidColorBrush x:Key="PrimaryPressedBrush" Color="#07543F" />
+    <SolidColorBrush x:Key="CreateActionBrush" Color="#087A59" />
     <SolidColorBrush x:Key="CreateActionInkBrush" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="RunActionBrush" Color="#2459C4" />
+    <SolidColorBrush x:Key="RunActionBrush" Color="#087A59" />
     <SolidColorBrush x:Key="RunActionInkBrush" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="SubtleBrush" Color="#E7EEF9" />
-    <SolidColorBrush x:Key="SuccessBrush" Color="#2D8A57" />
-    <SolidColorBrush x:Key="WarningBrush" Color="#B7791F" />
-    <SolidColorBrush x:Key="DangerBrush" Color="#C43D3D" />
-    <SolidColorBrush x:Key="StatusBarBrush" Color="#16201D" />
-    <SolidColorBrush x:Key="ConversationTurnBrush" Color="#F0F3F0" />
-    <SolidColorBrush x:Key="ConversationUserBrush" Color="#E7EEF9" />
+    <SolidColorBrush x:Key="SubtleBrush" Color="#E3E5E8" />
+    <SolidColorBrush x:Key="StatusBarBrush" Color="#E7E9EC" />
+    <SolidColorBrush x:Key="ConversationTurnBrush" Color="#F4F5F6" />
+    <SolidColorBrush x:Key="ConversationUserBrush" Color="#E7E9EC" />
     <SolidColorBrush x:Key="ConversationAssistantBrush" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="ConversationActivityBrush" Color="#F7F9F7" />
+    <SolidColorBrush x:Key="ConversationActivityBrush" Color="#F7F7F8" />
 </ResourceDictionary>

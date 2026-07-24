@@ -22,7 +22,7 @@
     </UserControl.Resources>
 
     <Border Background="{DynamicResource RailBrush}"
-            BorderBrush="{DynamicResource LineBrush}"
+            BorderBrush="{DynamicResource BorderSubtleBrush}"
             BorderThickness="0,0,1,0">
         <Grid Margin="14">
             <Grid.RowDefinitions>
@@ -41,9 +41,9 @@
                 </Grid.ColumnDefinitions>
                 <TextBox x:Name="ChatSearchBox"
                          Text="{Binding ProjectWorkspace.ChatSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                         Padding="8,6"
+                         Style="{StaticResource SearchBox}"
                          ToolTip="Search all chats (Ctrl+K)"
-                         AutomationProperties.Name="Search all chats"/>
+                         AutomationProperties.Name="Search chats and projects"/>
                 <Button Grid.Column="1"
                         Content="Clear"
                         Command="{Binding ProjectWorkspace.ClearChatSearchCommand}"
@@ -64,7 +64,13 @@
                         Padding="4,2"
                         AutomationProperties.Name="Toggle Chats">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="{Binding ProjectWorkspace.ChatsChevron}" Width="18" Foreground="{DynamicResource MutedInkBrush}"/>
+                        <Path Data="{StaticResource IconChevronDown}"
+                              Width="11"
+                              Height="7"
+                              Margin="2,0,7,0"
+                              Stroke="{DynamicResource TextSecondaryBrush}"
+                              StrokeThickness="1.5"
+                              Stretch="Uniform"/>
                         <TextBlock Text="Chats" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
@@ -85,10 +91,13 @@
                      BorderThickness="0"
                      Background="Transparent"
                      HorizontalContentAlignment="Stretch"
+                     VirtualizingStackPanel.IsVirtualizing="True"
+                     VirtualizingStackPanel.VirtualizationMode="Recycling"
+                     ScrollViewer.CanContentScroll="True"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      ScrollViewer.VerticalScrollBarVisibility="Auto">
                 <ListBox.ItemContainerStyle>
-                    <Style TargetType="ListBoxItem">
+                    <Style TargetType="ListBoxItem" BasedOn="{StaticResource NavigationRow}">
                         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
                         <Setter Property="Padding" Value="0"/>
                     </Style>
@@ -125,7 +134,6 @@
                                 <TextBlock Text="{Binding ActivityLabel}" FontSize="10"/>
                             </Border>
                             <Button Grid.Column="2"
-                                    Content="&#x22EF;"
                                     Style="{StaticResource ThreadActionButtonStyle}"
                                     Padding="7,2"
                                     Margin="6,0,0,0"
@@ -134,6 +142,9 @@
                                     AutomationProperties.Name="Chat actions"
                                     Tag="{Binding DataContext.ProjectWorkspace, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                     Click="OnThreadActionsClick">
+                                <Path Data="{StaticResource IconMore}"
+                                      Fill="{DynamicResource TextSecondaryBrush}"
+                                      Stretch="Uniform"/>
                                 <Button.ContextMenu>
                                     <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
                                         <MenuItem Header="Resume" Command="{Binding ResumeThreadCommand}"/>
@@ -164,7 +175,13 @@
                         Padding="4,2"
                         AutomationProperties.Name="Toggle Projects">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="{Binding ProjectWorkspace.ProjectsChevron}" Width="18" Foreground="{DynamicResource MutedInkBrush}"/>
+                        <Path Data="{StaticResource IconChevronDown}"
+                              Width="11"
+                              Height="7"
+                              Margin="2,0,7,0"
+                              Stroke="{DynamicResource TextSecondaryBrush}"
+                              StrokeThickness="1.5"
+                              Stretch="Uniform"/>
                         <TextBlock Text="Projects" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
@@ -189,7 +206,7 @@
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      ScrollViewer.VerticalScrollBarVisibility="Auto">
                 <ListBox.ItemContainerStyle>
-                    <Style TargetType="ListBoxItem">
+                    <Style TargetType="ListBoxItem" BasedOn="{StaticResource NavigationRow}">
                         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
                         <Setter Property="Padding" Value="0"/>
                         <Setter Property="Margin" Value="0,0,0,4"/>
@@ -228,7 +245,13 @@
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding Chevron}" VerticalAlignment="Center" Foreground="{DynamicResource MutedInkBrush}"/>
+                                        <Path Data="{StaticResource IconChevronDown}"
+                                              Width="10"
+                                              Height="6"
+                                              Stroke="{DynamicResource TextSecondaryBrush}"
+                                              StrokeThickness="1.4"
+                                              Stretch="Uniform"
+                                              VerticalAlignment="Center"/>
                                         <TextBlock Grid.Column="1"
                                                    Text="{Binding Name}"
                                                    FontWeight="SemiBold"
@@ -242,16 +265,19 @@
                                     </Grid>
                                 </Button>
                                 <Button Grid.Column="1"
-                                        Content="+"
                                         Command="{Binding DataContext.ProjectWorkspace.NewThreadForProjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                         CommandParameter="{Binding Path}"
                                         Style="{StaticResource CreateThreadButton}"
                                         Padding="9,5"
                                         Margin="6,0,0,0"
                                         ToolTip="New chat in current checkout"
-                                        AutomationProperties.Name="{Binding Name, StringFormat=New chat in {0}}"/>
+                                        AutomationProperties.Name="{Binding Name, StringFormat=New chat in {0}}">
+                                    <Path Data="{StaticResource IconAdd}"
+                                          Stroke="{DynamicResource TextOnAccentBrush}"
+                                          StrokeThickness="1.5"
+                                          Stretch="Uniform"/>
+                                </Button>
                                 <Button Grid.Column="2"
-                                        Content="&#x22EF;"
                                         Style="{StaticResource ProjectActionButton}"
                                         Padding="7,5"
                                         Margin="4,0,0,0"
@@ -259,6 +285,9 @@
                                         AutomationProperties.Name="{Binding Name, StringFormat=Actions for project {0}}"
                                         Tag="{Binding DataContext.ProjectWorkspace, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                         Click="OnThreadActionsClick">
+                                    <Path Data="{StaticResource IconMore}"
+                                          Fill="{DynamicResource TextSecondaryBrush}"
+                                          Stretch="Uniform"/>
                                     <Button.ContextMenu>
                                         <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
                                             <MenuItem Header="New chat in worktree"
@@ -285,7 +314,7 @@
                                          ScrollViewer.VerticalScrollBarVisibility="Disabled"
                                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                                     <ListBox.ItemContainerStyle>
-                                        <Style TargetType="ListBoxItem">
+                                        <Style TargetType="ListBoxItem" BasedOn="{StaticResource NavigationRow}">
                                             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
                                             <Setter Property="Padding" Value="0"/>
                                         </Style>
@@ -322,7 +351,6 @@
                                                     <TextBlock Text="{Binding ActivityLabel}" FontSize="10"/>
                                                 </Border>
                                                 <Button Grid.Column="2"
-                                                        Content="⋯"
                                                         Style="{StaticResource ThreadActionButtonStyle}"
                                                         Padding="7,2"
                                                         Margin="6,0,0,0"
@@ -331,6 +359,9 @@
                                                         AutomationProperties.Name="Chat actions"
                                                         Tag="{Binding DataContext.ProjectWorkspace, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                         Click="OnThreadActionsClick">
+                                                    <Path Data="{StaticResource IconMore}"
+                                                          Fill="{DynamicResource TextSecondaryBrush}"
+                                                          Stretch="Uniform"/>
                                                     <Button.ContextMenu>
                                                         <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
                                                             <MenuItem Header="Resume" Command="{Binding ResumeThreadCommand}"/>
@@ -375,11 +406,14 @@
                          BorderThickness="0"
                          Background="Transparent"
                          HorizontalContentAlignment="Stretch"
+                         VirtualizingStackPanel.IsVirtualizing="True"
+                         VirtualizingStackPanel.VirtualizationMode="Recycling"
+                         ScrollViewer.CanContentScroll="True"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                          ScrollViewer.VerticalScrollBarVisibility="Auto"
                          AutomationProperties.Name="Cross-chat search results">
                     <ListBox.ItemContainerStyle>
-                        <Style TargetType="ListBoxItem">
+                        <Style TargetType="ListBoxItem" BasedOn="{StaticResource NavigationRow}">
                             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
                             <Setter Property="Padding" Value="0"/>
                         </Style>

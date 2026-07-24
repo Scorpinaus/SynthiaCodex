@@ -23,11 +23,13 @@ public sealed class TerminalViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand killCommand;
     private readonly RelayCommand clearCommand;
     private readonly RelayCommand toggleCommand;
+    private readonly RelayCommand toggleMaximizeCommand;
     private string input = string.Empty;
     private string output = string.Empty;
     private string status = "Not started";
     private string workingDirectory = "No terminal session";
     private bool isVisible;
+    private bool isMaximized;
 
     public TerminalViewModel(
         ITerminalService terminalService,
@@ -49,6 +51,9 @@ public sealed class TerminalViewModel : ObservableObject, IAsyncDisposable
         KillCommand = killCommand = new AsyncRelayCommand(KillAsync, CanKill);
         ClearCommand = clearCommand = new RelayCommand(Clear, CanClear);
         ToggleCommand = toggleCommand = new RelayCommand(Toggle, () => !isShuttingDown());
+        ToggleMaximizeCommand = toggleMaximizeCommand = new RelayCommand(
+            ToggleMaximize,
+            () => !isShuttingDown() && IsVisible);
     }
 
     public ICommand StartCommand { get; }
@@ -60,6 +65,8 @@ public sealed class TerminalViewModel : ObservableObject, IAsyncDisposable
     public ICommand ClearCommand { get; }
 
     public ICommand ToggleCommand { get; }
+
+    public ICommand ToggleMaximizeCommand { get; }
 
     public string Input
     {
@@ -96,7 +103,24 @@ public sealed class TerminalViewModel : ObservableObject, IAsyncDisposable
     public bool IsVisible
     {
         get => isVisible;
-        set => SetProperty(ref isVisible, value);
+        set
+        {
+            if (SetProperty(ref isVisible, value))
+            {
+                if (!value)
+                {
+                    IsMaximized = false;
+                }
+
+                toggleMaximizeCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public bool IsMaximized
+    {
+        get => isMaximized;
+        set => SetProperty(ref isMaximized, value);
     }
 
     public int SessionCount => states.Count;
@@ -155,6 +179,7 @@ public sealed class TerminalViewModel : ObservableObject, IAsyncDisposable
         killCommand.RaiseCanExecuteChanged();
         clearCommand.RaiseCanExecuteChanged();
         toggleCommand.RaiseCanExecuteChanged();
+        toggleMaximizeCommand.RaiseCanExecuteChanged();
     }
 
     public async ValueTask DisposeAsync() => await ShutdownAsync().ConfigureAwait(false);
@@ -274,6 +299,17 @@ public sealed class TerminalViewModel : ObservableObject, IAsyncDisposable
         }
 
         reportStatus(IsVisible ? "Terminal panel shown" : "Terminal panel hidden");
+    }
+
+    private void ToggleMaximize()
+    {
+        if (!IsVisible)
+        {
+            return;
+        }
+
+        IsMaximized = !IsMaximized;
+        reportStatus(IsMaximized ? "Terminal maximized in workspace" : "Terminal restored in workspace");
     }
 
     private bool CanStart()

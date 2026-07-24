@@ -2,8 +2,8 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              AutomationProperties.Name="Settings">
-    <Border Background="{DynamicResource PanelBrush}"
-            BorderBrush="{DynamicResource LineBrush}"
+    <Border Background="{DynamicResource InspectorBrush}"
+            BorderBrush="{DynamicResource BorderSubtleBrush}"
             BorderThickness="1,0,0,0">
         <Grid Margin="16">
             <Grid.RowDefinitions>
@@ -196,8 +196,8 @@
                             <Border Width="48"
                                     Height="48"
                                     Padding="3"
-                                    Background="White"
-                                    BorderBrush="{DynamicResource LineBrush}"
+                                    Background="{DynamicResource SurfaceRaisedBrush}"
+                                    BorderBrush="{DynamicResource BorderSubtleBrush}"
                                     BorderThickness="1"
                                     CornerRadius="10">
                                 <Image x:Name="AboutLogoImage"

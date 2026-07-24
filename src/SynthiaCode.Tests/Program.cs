@@ -123,6 +123,7 @@ tests.AddRange(ApprovalPresentationTests.All);
 tests.AddRange(AccountFeatureTests.All);
 tests.AddRange(ContextWindowIndicatorTests.All);
 tests.AddRange(ResponsiveLayoutTests.All);
+tests.AddRange(PresentationRedesignTests.All);
 tests.AddRange(MarkdownLinkTests.All);
 tests.AddRange(ProjectlessThreadTests.All);
 tests.AddRange(PromptEditingTests.All);
@@ -575,12 +576,16 @@ static async Task TestViewModelPersistsResponsiveShellStateAsync()
 
     viewModel.UpdateViewportWidth(900);
     AssertTrue(viewModel.IsCompactLayout, "compact layout detected");
+    AssertTrue(!viewModel.IsMediumLayout && !viewModel.IsWideLayout, "compact layout is the exclusive shell state");
     AssertTrue(viewModel.IsProjectRailOpen, "project rail retained in compact conflict");
     AssertTrue(!viewModel.IsDetailsPaneOpen, "details pane closes in compact conflict");
+    AssertTrue(viewModel.IsProjectRailOverlayVisible, "compact project rail is hosted as a drawer");
+    AssertTrue(!viewModel.IsProjectRailPersistentVisible, "compact project rail does not consume center width");
 
     viewModel.ToggleDetailsPaneCommand.Execute(null);
     AssertTrue(viewModel.IsDetailsPaneOpen, "details pane opens in compact layout");
     AssertTrue(!viewModel.IsProjectRailOpen, "details pane replaces project rail in compact layout");
+    AssertTrue(viewModel.IsInspectorOverlayVisible, "compact inspector is hosted as a drawer");
     AssertTrue(settingsStore.SavedSettings.IsDetailsPaneOpen, "details pane preference saved");
     AssertTrue(!settingsStore.SavedSettings.IsProjectRailOpen, "project rail compact preference saved");
 
@@ -589,7 +594,20 @@ static async Task TestViewModelPersistsResponsiveShellStateAsync()
     AssertTrue(!viewModel.IsDetailsPaneOpen, "project rail replaces details pane in compact layout");
 
     viewModel.UpdateViewportWidth(1200);
-    AssertTrue(!viewModel.IsCompactLayout, "wide layout detected");
+    AssertTrue(viewModel.IsMediumLayout, "medium layout detected");
+    AssertTrue(!viewModel.IsCompactLayout && !viewModel.IsWideLayout, "medium layout is the exclusive shell state");
+    AssertTrue(viewModel.IsProjectRailPersistentVisible, "medium project rail remains persistent");
+
+    viewModel.ToggleDetailsPaneCommand.Execute(null);
+    AssertTrue(viewModel.IsInspectorOverlayVisible, "medium inspector opens as a drawer");
+    AssertTrue(!viewModel.IsInspectorPersistentVisible, "medium inspector does not consume center width");
+
+    viewModel.UpdateViewportWidth(1500);
+    AssertTrue(viewModel.IsWideLayout, "wide layout detected");
+    AssertTrue(!viewModel.IsCompactLayout && !viewModel.IsMediumLayout, "wide layout is the exclusive shell state");
+    AssertTrue(viewModel.IsProjectRailPersistentVisible, "wide project rail remains persistent");
+    AssertTrue(viewModel.IsInspectorPersistentVisible, "wide inspector becomes persistent");
+    AssertTrue(!viewModel.IsInspectorOverlayVisible, "wide inspector drawer closes");
 }
 
 static async Task TestViewModelTerminalToggleSelectsTerminalWorkspaceAsync()
@@ -871,6 +889,9 @@ static async Task TestViewModelManagesMultipleThreadsAsync()
     await transport.WaitForClientMessageCountAsync(4);
     transport.ServerSend("""{"id":2,"result":{"thread":{"id":"thr_two"}}}""");
     await WaitUntilAsync(() => viewModel.ProjectThreads.Count == 2, "second thread created");
+    await WaitUntilAsync(
+        () => string.Equals(viewModel.SelectedThread?.ThreadId, "thr_two", StringComparison.Ordinal),
+        "newest thread selection completed");
     AssertEqual("thr_two", viewModel.SelectedThread?.ThreadId, "newest thread selected");
 
     viewModel.SelectedThread = viewModel.ProjectThreads.Single(thread => thread.ThreadId == "thr_one");

@@ -4,9 +4,11 @@
              xmlns:controls="clr-namespace:SynthiaCode.App.Controls"
              UseLayoutRounding="True"
              SnapsToDevicePixels="True">
-    <Grid Margin="0,10,0,0">
+    <Grid>
         <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-        <Border Style="{StaticResource Card}" AutomationProperties.Name="Task transcript">
+        <Border Style="{StaticResource PaneSurface}"
+                Padding="8"
+                AutomationProperties.Name="Conversation transcript">
             <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -65,7 +67,22 @@
                     </Grid>
                 </Border>
             </Grid>
-            <TextBlock Grid.Row="1" Text="Start a conversation by describing a task below." Foreground="{DynamicResource MutedInkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding TaskWorkspace.HasConversation, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
+            <Border Grid.Row="1"
+                    Style="{StaticResource EmptyStatePresenter}"
+                    MaxWidth="520"
+                    Visibility="{Binding TaskWorkspace.HasConversation, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                <StackPanel>
+                    <TextBlock Text="What would you like to build?"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="Describe a task below. SynthiaCode will keep the conversation, activity, approvals, and workspace context together."
+                               Foreground="{DynamicResource TextSecondaryBrush}"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"
+                               Margin="0,7,0,0"/>
+                </StackPanel>
+            </Border>
             <ListBox x:Name="ConversationList"
                      Grid.Row="1"
                      ItemsSource="{Binding TaskWorkspace.ConversationTurns}"
@@ -382,11 +399,11 @@
 
         <Border x:Name="ComposerDropTarget"
                 Grid.Row="2"
-                Style="{StaticResource Card}"
+                Style="{StaticResource PaneSurface}"
                 Margin="0,12,0,0"
                 Padding="12"
                 AllowDrop="True"
-                AutomationProperties.Name="Task composer">
+                AutomationProperties.Name="Message composer">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -551,15 +568,18 @@
                             </ComboBox.ItemTemplate>
                         </ComboBox>
                         <Button x:Name="AttachButton"
-                                Content="＋"
                                 Click="OnAttachClick"
-                                Style="{StaticResource CompactButton}"
+                                Style="{StaticResource IconButton}"
                                 MinHeight="32"
                                 MinWidth="36"
                                 Margin="8,0,0,0"
                                 Padding="8,4"
                                 ToolTip="Attach images, files, or folders. Outside files and folders are saved as managed snapshots."
                                 AutomationProperties.Name="Attach">
+                            <Path Data="{StaticResource IconAttach}"
+                                  Stroke="{DynamicResource TextPrimaryBrush}"
+                                  StrokeThickness="1.4"
+                                  Stretch="Uniform"/>
                             <Button.ContextMenu>
                                 <ContextMenu Placement="Top">
                                     <MenuItem Header="Images..."
@@ -583,7 +603,6 @@
                            IsOpen="{Binding TaskWorkspace.IsOptionsFlyoutOpen, Mode=TwoWay}"
                            StaysOpen="False"
                            AllowsTransparency="True"
-                           PopupAnimation="Fade"
                            DataContext="{Binding DataContext, ElementName=ModelOptionsButton}">
                         <Border Width="380"
                                 MaxHeight="460"
@@ -614,7 +633,14 @@
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                             <TextBlock Text="Model" Foreground="{DynamicResource MutedInkBrush}"/>
                                             <TextBlock Grid.Column="1" Text="{Binding TaskWorkspace.SelectedModel.DisplayName, TargetNullValue=Load models}" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Grid.Column="2" Text="›" Margin="8,0,0,0"/>
+                                            <Path Grid.Column="2"
+                                                  Data="{StaticResource IconChevronRight}"
+                                                  Width="6"
+                                                  Height="10"
+                                                  Margin="8,0,0,0"
+                                                  Stroke="{DynamicResource TextSecondaryBrush}"
+                                                  StrokeThickness="1.5"
+                                                  Stretch="Uniform"/>
                                         </Grid>
                                     </Button>
 
@@ -627,7 +653,14 @@
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                             <TextBlock Text="Reasoning" Foreground="{DynamicResource MutedInkBrush}"/>
                                             <TextBlock Grid.Column="1" Text="{Binding TaskWorkspace.SelectedReasoning.DisplayName, TargetNullValue=Default}"/>
-                                            <TextBlock Grid.Column="2" Text="›" Margin="8,0,0,0"/>
+                                            <Path Grid.Column="2"
+                                                  Data="{StaticResource IconChevronRight}"
+                                                  Width="6"
+                                                  Height="10"
+                                                  Margin="8,0,0,0"
+                                                  Stroke="{DynamicResource TextSecondaryBrush}"
+                                                  StrokeThickness="1.5"
+                                                  Stretch="Uniform"/>
                                         </Grid>
                                     </Button>
 
@@ -663,7 +696,7 @@
                                 </StackPanel>
 
                                 <StackPanel Visibility="{Binding TaskWorkspace.IsOptionsModelPage, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                    <Button Content="‹  Model"
+                                    <Button Content="Back to model options"
                                             Command="{Binding TaskWorkspace.ShowOptionsMainCommand}"
                                             Style="{StaticResource CompactButton}"
                                             HorizontalAlignment="Left"
@@ -699,7 +732,7 @@
                                 </StackPanel>
 
                                 <StackPanel Visibility="{Binding TaskWorkspace.IsOptionsReasoningPage, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                    <Button Content="‹  Reasoning"
+                                    <Button Content="Back to model options"
                                             Command="{Binding TaskWorkspace.ShowOptionsMainCommand}"
                                             Style="{StaticResource CompactButton}"
                                             HorizontalAlignment="Left"

@@ -17,10 +17,28 @@ internal static class WpfTestHost
         var completion = new TaskCompletionSource<Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {
-            _ = new Application
+            var application = new Application
             {
                 ShutdownMode = ShutdownMode.OnExplicitShutdown
             };
+            foreach (var source in new[]
+                     {
+                         "Themes/LightTheme.xaml",
+                         "Themes/Foundations.xaml",
+                         "Themes/Typography.xaml",
+                         "Themes/Icons.xaml",
+                         "Themes/Controls.Buttons.xaml",
+                         "Themes/Controls.Inputs.xaml",
+                         "Themes/Controls.Navigation.xaml",
+                         "Themes/Controls.Transient.xaml"
+                     })
+            {
+                application.Resources.MergedDictionaries.Add(new ResourceDictionary
+                {
+                    Source = new Uri($"/SynthiaCode.App;component/{source}", UriKind.Relative)
+                });
+            }
+
             completion.SetResult(Dispatcher.CurrentDispatcher);
             Dispatcher.Run();
         })

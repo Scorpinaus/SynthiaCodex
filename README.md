@@ -10,6 +10,22 @@ The current build also includes a Git-aware Changes workspace for repository sta
 
 See the current [SynthiaCode and ChatGPT desktop feature-parity audit](feature_parity.md) for the implemented matrix and prioritized gaps.
 
+## Modern Windows workspace
+
+The frontend uses a semantic WPF design system with an approved neutral graphite dark palette, an intentionally derived light palette, and a Windows system-color high-contrast palette. The existing blue-to-teal mark remains isolated to SynthiaCode branding; interface focus, progress, and primary actions use restrained emerald.
+
+The custom native-aware shell replaces full-page workspace tabs with:
+
+- a persistent or compact-drawer project rail;
+- a virtualized conversation workspace and bounded composer;
+- a resizable dark terminal dock that can maximize within the workspace;
+- a persistent or compact-drawer changes/settings inspector;
+- a top-priority, keyboard-contained approval sheet.
+
+At 1440 px and above, the rail and enabled inspector are persistent. From 1100–1439 px the inspector becomes a drawer, and from 800–1099 px only one side drawer can be open. Existing shortcuts, app-server behavior, permission semantics, per-thread terminal ownership, Git actions, drafts, queues, attachments, and persistence remain unchanged.
+
+The directional visual reference is [`assets/design/modern-wpf-redesign-concept-graphite-v2.png`](assets/design/modern-wpf-redesign-concept-graphite-v2.png); production UI is rendered entirely with WPF controls, vector geometries, and theme resources.
+
 ## Queued follow-ups
 
 While a Codex turn is running, the composer can either **Queue follow-up** for the next turn or **Steer task** to add guidance to the current turn. Queue is the default and can be changed under Settings -> General -> Follow-up behavior.
@@ -54,6 +70,13 @@ dotnet run --project src\SynthiaCode.Tests\SynthiaCode.Tests.csproj
 ```
 
 The test project currently uses a small console-based assertion runner, so running the test project directly verifies the actual assertions.
+
+Standard solution builds produce the runnable application at:
+
+```text
+src\SynthiaCode.App\bin\Debug\net10.0-windows\SynthiaCode.App.exe
+src\SynthiaCode.App\bin\Release\net10.0-windows\SynthiaCode.App.exe
+```
 
 ## Branding
 

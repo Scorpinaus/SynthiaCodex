@@ -60,6 +60,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand saveInstructionSettingsCommand;
     private readonly RelayCommand toggleProjectRailCommand;
     private readonly RelayCommand toggleDetailsPaneCommand;
+    private readonly RelayCommand dismissShellOverlayCommand;
+    private readonly RelayCommand openChangesCommand;
     private readonly RelayCommand openSettingsCommand;
     private readonly RelayCommand resetInstructionSettingsCommand;
 
@@ -81,6 +83,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool isCompactLayout;
     private double viewportWidth = 1240;
     private int selectedWorkspaceTabIndex;
+    private int selectedInspectorTabIndex;
     private bool activeThreadLoaded;
     private bool executionPolicyLoaded;
     private string? executionPolicyCwd;
@@ -256,6 +259,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ToggleTerminalCommand = Terminal.ToggleCommand;
         ToggleProjectRailCommand = toggleProjectRailCommand = new RelayCommand(ToggleProjectRail, () => !IsShuttingDown);
         ToggleDetailsPaneCommand = toggleDetailsPaneCommand = new RelayCommand(ToggleDetailsPane, () => !IsShuttingDown);
+        DismissShellOverlayCommand = dismissShellOverlayCommand = new RelayCommand(DismissShellOverlay, () => !IsShuttingDown);
+        OpenChangesCommand = openChangesCommand = new RelayCommand(OpenChanges, () => !IsShuttingDown);
         OpenSettingsCommand = openSettingsCommand = new RelayCommand(OpenSettings, () => !IsShuttingDown);
         Account = new AccountViewModel(
             cancellationToken => appServerSessionCoordinator.ReadAccountAsync(false, cancellationToken),
@@ -621,6 +626,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public ICommand ToggleDetailsPaneCommand { get; }
 
+    public ICommand DismissShellOverlayCommand { get; }
+
+    public ICommand OpenChangesCommand { get; }
+
     public ICommand OpenSettingsCommand { get; }
 
     public ICommand SaveInstructionSettingsCommand { get; }
@@ -659,13 +668,25 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsProjectRailOpen
     {
         get => isProjectRailOpen;
-        private set => SetProperty(ref isProjectRailOpen, value);
+        private set
+        {
+            if (SetProperty(ref isProjectRailOpen, value))
+            {
+                RaiseShellVisibilityProperties();
+            }
+        }
     }
 
     public bool IsDetailsPaneOpen
     {
         get => isDetailsPaneOpen;
-        private set => SetProperty(ref isDetailsPaneOpen, value);
+        private set
+        {
+            if (SetProperty(ref isDetailsPaneOpen, value))
+            {
+                RaiseShellVisibilityProperties();
+            }
+        }
     }
 
     public bool IsCompactLayout
@@ -674,10 +695,30 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         private set => SetProperty(ref isCompactLayout, value);
     }
 
+    public bool IsMediumLayout => !IsCompactLayout && !IsWideLayout;
+
+    public bool IsWideLayout => viewportWidth >= 1440;
+
+    public bool IsProjectRailPersistentVisible => IsProjectRailOpen && !IsCompactLayout;
+
+    public bool IsProjectRailOverlayVisible => IsProjectRailOpen && IsCompactLayout;
+
+    public bool IsInspectorPersistentVisible => IsDetailsPaneOpen && IsWideLayout;
+
+    public bool IsInspectorOverlayVisible => IsDetailsPaneOpen && !IsWideLayout;
+
+    public bool IsShellOverlayVisible => IsProjectRailOverlayVisible || IsInspectorOverlayVisible;
+
     public int SelectedWorkspaceTabIndex
     {
         get => selectedWorkspaceTabIndex;
         set => SetProperty(ref selectedWorkspaceTabIndex, Math.Clamp(value, 0, 2));
+    }
+
+    public int SelectedInspectorTabIndex
+    {
+        get => selectedInspectorTabIndex;
+        set => SetProperty(ref selectedInspectorTabIndex, Math.Clamp(value, 0, 1));
     }
 
     public string TerminalInput
@@ -903,6 +944,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 Terminal.RaiseCommandStates();
                 toggleProjectRailCommand.RaiseCanExecuteChanged();
                 toggleDetailsPaneCommand.RaiseCanExecuteChanged();
+                dismissShellOverlayCommand.RaiseCanExecuteChanged();
+                openChangesCommand.RaiseCanExecuteChanged();
                 openSettingsCommand.RaiseCanExecuteChanged();
             }
         }
@@ -1689,7 +1732,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
 
         viewportWidth = width;
-        IsCompactLayout = width < 1000;
+        IsCompactLayout = width < 1100;
+        RaiseShellVisibilityProperties();
         if (IsCompactLayout && IsProjectRailOpen && IsDetailsPaneOpen)
         {
             IsDetailsPaneOpen = false;
@@ -1701,7 +1745,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void ToggleProjectRail()
     {
         IsProjectRailOpen = !IsProjectRailOpen;
-        if (IsProjectRailOpen && viewportWidth < 1000)
+        if (IsProjectRailOpen && IsCompactLayout)
         {
             IsDetailsPaneOpen = false;
         }
@@ -1714,7 +1758,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void ToggleDetailsPane()
     {
         IsDetailsPaneOpen = !IsDetailsPaneOpen;
-        if (IsDetailsPaneOpen && viewportWidth < 1000)
+        if (IsDetailsPaneOpen && IsCompactLayout)
         {
             IsProjectRailOpen = false;
         }
@@ -1726,8 +1770,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void OpenSettings()
     {
+        SelectedInspectorTabIndex = 1;
         IsDetailsPaneOpen = true;
-        if (viewportWidth < 1000)
+        if (IsCompactLayout)
         {
             IsProjectRailOpen = false;
         }
@@ -1743,6 +1788,51 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 _ = RefreshExecutionPolicyAsync(policyCwd, appServerWarmUpCancellation.Token);
             }
         }
+    }
+
+    private void OpenChanges()
+    {
+        SelectedInspectorTabIndex = 0;
+        IsDetailsPaneOpen = true;
+        if (IsCompactLayout)
+        {
+            IsProjectRailOpen = false;
+        }
+
+        settings.IsProjectRailOpen = IsProjectRailOpen;
+        settings.IsDetailsPaneOpen = true;
+        _ = SaveLayoutSelectionAsync();
+    }
+
+    private void DismissShellOverlay()
+    {
+        if (IsInspectorOverlayVisible)
+        {
+            IsDetailsPaneOpen = false;
+        }
+        else if (IsProjectRailOverlayVisible)
+        {
+            IsProjectRailOpen = false;
+        }
+        else
+        {
+            return;
+        }
+
+        settings.IsProjectRailOpen = IsProjectRailOpen;
+        settings.IsDetailsPaneOpen = IsDetailsPaneOpen;
+        _ = SaveLayoutSelectionAsync();
+    }
+
+    private void RaiseShellVisibilityProperties()
+    {
+        OnPropertyChanged(nameof(IsMediumLayout));
+        OnPropertyChanged(nameof(IsWideLayout));
+        OnPropertyChanged(nameof(IsProjectRailPersistentVisible));
+        OnPropertyChanged(nameof(IsProjectRailOverlayVisible));
+        OnPropertyChanged(nameof(IsInspectorPersistentVisible));
+        OnPropertyChanged(nameof(IsInspectorOverlayVisible));
+        OnPropertyChanged(nameof(IsShellOverlayVisible));
     }
 
     private async Task SaveLayoutSelectionAsync()

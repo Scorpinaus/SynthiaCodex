@@ -4,65 +4,441 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:views="clr-namespace:SynthiaCode.App.Views"
-        mc:Ignorable="d" Title="SynthiaCode" Closing="OnClosing" SizeChanged="OnSizeChanged" PreviewKeyDown="OnPreviewKeyDown"
+        mc:Ignorable="d"
+        Title="SynthiaCode"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        Closing="OnClosing"
+        Closed="OnClosed"
+        SourceInitialized="OnSourceInitialized"
+        SizeChanged="OnSizeChanged"
+        PreviewKeyDown="OnPreviewKeyDown"
         Icon="/SynthiaCode.App;component/Assets/Branding/SynthiaCode.ico"
-        MinHeight="640" MinWidth="800" Height="800" Width="1320">
-    <Window.InputBindings>
-        <KeyBinding Key="O" Modifiers="Control" Command="{Binding ProjectWorkspace.BrowseProjectCommand}"/>
-        <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding TaskWorkspace.ComposerSendCommand}"/>
-        <KeyBinding Key="Enter" Modifiers="Control+Shift" Command="{Binding TaskWorkspace.AlternateFollowUpCommand}"/>
-        <KeyBinding Key="B" Modifiers="Control" Command="{Binding ToggleProjectRailCommand}"/>
-        <KeyBinding Key="D" Modifiers="Control+Shift" Command="{Binding ToggleDetailsPaneCommand}"/>
-        <KeyBinding Key="T" Modifiers="Control+Shift" Command="{Binding Terminal.ToggleCommand}"/>
-        <KeyBinding Key="F5" Command="{Binding DiagnosticsViewModel.RefreshCommand}"/>
-    </Window.InputBindings>
-    <Grid Background="{DynamicResource CanvasBrush}">
-        <Grid.RowDefinitions><RowDefinition Height="Auto" MinHeight="64"/><RowDefinition Height="*"/><RowDefinition Height="Auto" MinHeight="30"/></Grid.RowDefinitions>
-        <Border Grid.Row="0" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,0,0,1"><Grid Margin="14,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Button Grid.Column="0" Command="{Binding ToggleProjectRailCommand}" Style="{StaticResource HeaderButton}" Content="☰" ToolTip="Toggle chats and projects (Ctrl+B)"/>
-            <Border Grid.Column="1"
-                    Width="38"
-                    Height="38"
-                    Margin="12,0,0,0"
-                    Padding="3"
-                    VerticalAlignment="Center"
-                    Background="White"
-                    BorderBrush="{DynamicResource LineBrush}"
-                    BorderThickness="1"
-                    CornerRadius="8">
-                <Image x:Name="AppLogoImage"
-                       Source="/SynthiaCode.App;component/Assets/Branding/SynthiaCodeLogo.png"
-                       Stretch="Uniform"
-                       IsHitTestVisible="False"
-                       AutomationProperties.Name="SynthiaCode logo"/>
-            </Border>
-            <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="10,0"><TextBlock Text="SynthiaCode" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="{Binding ProjectWorkspace.SelectedProjectPath, TargetNullValue=Choose a project to start working}" Foreground="{DynamicResource MutedInkBrush}" FontSize="11" TextTrimming="CharacterEllipsis"/></StackPanel>
-            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-                <Border Style="{StaticResource StatePill}" Margin="0,0,8,0" ToolTip="Codex app-server connection status"><StackPanel Orientation="Horizontal"><Ellipse Width="7" Height="7" Margin="0,0,6,0"><Ellipse.Style><Style TargetType="Ellipse"><Setter Property="Fill" Value="{DynamicResource MutedInkBrush}"/><Style.Triggers><DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex connected"><Setter Property="Fill" Value="{DynamicResource SuccessBrush}"/></DataTrigger><DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex connecting"><Setter Property="Fill" Value="{DynamicResource WarningBrush}"/></DataTrigger><DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex reconnecting"><Setter Property="Fill" Value="{DynamicResource WarningBrush}"/></DataTrigger><DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex unavailable"><Setter Property="Fill" Value="{DynamicResource DangerBrush}"/></DataTrigger></Style.Triggers></Style></Ellipse.Style></Ellipse><TextBlock Text="{Binding TaskWorkspace.AppServerHealth}" FontSize="11" VerticalAlignment="Center"/></StackPanel></Border>
-                <Button Content="Terminal" Command="{Binding Terminal.ToggleCommand}" Style="{StaticResource HeaderButton}" ToolTip="Open or hide Terminal (Ctrl+Shift+T)"/>
-                <Button Content="Settings" Command="{Binding OpenSettingsCommand}" Style="{StaticResource HeaderButton}" ToolTip="Open settings and diagnostics (Ctrl+Shift+D)"/>
-                <Button Content="Exit" Command="{Binding ExitApplicationCommand}" Style="{StaticResource HeaderButton}"/>
-            </StackPanel>
-        </Grid></Border>
-        <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="{Binding IsProjectRailOpen, Converter={StaticResource BooleanToGridLengthConverter}, ConverterParameter=268}"/><ColumnDefinition Width="*"/><ColumnDefinition Width="{Binding IsDetailsPaneOpen, Converter={StaticResource BooleanToGridLengthConverter}, ConverterParameter=340}"/></Grid.ColumnDefinitions>
-            <views:ProjectThreadView x:Name="NavigationFeature" Grid.Column="0" Visibility="{Binding IsProjectRailOpen, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-            <Grid Grid.Column="1" Margin="16"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                <TextBlock Margin="2,0,2,12"
-                           Text="{Binding ProjectWorkspace.SelectedThreadTitle}"
-                           FontSize="21"
-                           FontWeight="SemiBold"
-                           TextTrimming="CharacterEllipsis"/>
-                <TabControl Grid.Row="1" SelectedIndex="{Binding SelectedWorkspaceTabIndex}">
-                    <TabItem Header="Task"><views:TaskView x:Name="TaskFeature"/></TabItem>
-                    <TabItem Header="Terminal" Visibility="{Binding Terminal.IsVisible, Converter={StaticResource BooleanToVisibilityConverter}}"><views:TerminalView/></TabItem>
-                    <TabItem Header="Changes"><views:GitView/></TabItem>
+        MinHeight="640"
+        MinWidth="800"
+        Height="800"
+        Width="1320">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="40"
+                      ResizeBorderThickness="6"
+                      GlassFrameThickness="0"
+                      CornerRadius="0"
+                      UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <DataTemplate x:Key="ProjectRailContent">
+            <views:ProjectThreadView />
+        </DataTemplate>
+        <DataTemplate x:Key="InspectorContent">
+            <Border Background="{DynamicResource InspectorBrush}"
+                    BorderBrush="{DynamicResource BorderSubtleBrush}"
+                    BorderThickness="1,0,0,0">
+                <TabControl SelectedIndex="{Binding SelectedInspectorTabIndex}"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            AutomationProperties.Name="Workspace inspector">
+                    <TabItem Header="Changes">
+                        <views:GitView />
+                    </TabItem>
+                    <TabItem Header="Settings">
+                        <views:DetailsView />
+                    </TabItem>
                 </TabControl>
+            </Border>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Window.InputBindings>
+        <KeyBinding Key="O" Modifiers="Control" Command="{Binding ProjectWorkspace.BrowseProjectCommand}" />
+        <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding TaskWorkspace.ComposerSendCommand}" />
+        <KeyBinding Key="Enter" Modifiers="Control+Shift" Command="{Binding TaskWorkspace.AlternateFollowUpCommand}" />
+        <KeyBinding Key="B" Modifiers="Control" Command="{Binding ToggleProjectRailCommand}" />
+        <KeyBinding Key="D" Modifiers="Control+Shift" Command="{Binding ToggleDetailsPaneCommand}" />
+        <KeyBinding Key="T" Modifiers="Control+Shift" Command="{Binding Terminal.ToggleCommand}" />
+        <KeyBinding Key="F5" Command="{Binding DiagnosticsViewModel.RefreshCommand}" />
+    </Window.InputBindings>
+
+    <Grid Background="{DynamicResource AppCanvasBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="40" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="24" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                Background="{DynamicResource RailBrush}"
+                BorderBrush="{DynamicResource DividerBrush}"
+                BorderThickness="0,0,0,1"
+                MouseLeftButtonDown="OnTitleBarMouseLeftButtonDown"
+                MouseRightButtonUp="OnTitleBarMouseRightButtonUp">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Button Grid.Column="0"
+                        Command="{Binding ToggleProjectRailCommand}"
+                        Style="{StaticResource IconButton}"
+                        Margin="4"
+                        WindowChrome.IsHitTestVisibleInChrome="True"
+                        AutomationProperties.Name="Toggle chats and projects"
+                        ToolTip="Toggle chats and projects (Ctrl+B)">
+                    <Path Data="{StaticResource IconMenu}"
+                          Stroke="{DynamicResource TextPrimaryBrush}"
+                          StrokeThickness="1.5"
+                          StrokeStartLineCap="Round"
+                          StrokeEndLineCap="Round"
+                          Stretch="Uniform" />
+                </Button>
+
+                <Border Grid.Column="1"
+                        Width="28"
+                        Height="28"
+                        Margin="4,0,8,0"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource SurfaceRaisedBrush}"
+                        BorderBrush="{DynamicResource BorderSubtleBrush}"
+                        BorderThickness="1"
+                        CornerRadius="6">
+                    <Image Source="/SynthiaCode.App;component/Assets/Branding/SynthiaCodeLogo.png"
+                           Margin="2"
+                           Stretch="Uniform"
+                           IsHitTestVisible="False"
+                           AutomationProperties.Name="SynthiaCode logo" />
+                </Border>
+
+                <StackPanel Grid.Column="2"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="SynthiaCode"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                    <Border Width="1"
+                            Height="16"
+                            Margin="10,0"
+                            Background="{DynamicResource DividerBrush}" />
+                    <TextBlock Text="{Binding ProjectWorkspace.SelectedThreadTitle, TargetNullValue=New task}"
+                               Foreground="{DynamicResource TextSecondaryBrush}"
+                               FontSize="12"
+                               MaxWidth="520"
+                               TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="3"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            WindowChrome.IsHitTestVisibleInChrome="True">
+                    <Border Style="{StaticResource StatusPill}"
+                            Margin="0,0,4,0"
+                            ToolTip="Codex app-server connection status">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="7" Height="7" Margin="0,0,6,0">
+                                <Ellipse.Style>
+                                    <Style TargetType="{x:Type Ellipse}" BasedOn="{StaticResource StatusDot}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex connected">
+                                                <Setter Property="Fill" Value="{DynamicResource SuccessBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex connecting">
+                                                <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex reconnecting">
+                                                <Setter Property="Fill" Value="{DynamicResource WarningBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding TaskWorkspace.AppServerHealth}" Value="Codex unavailable">
+                                                <Setter Property="Fill" Value="{DynamicResource DangerBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding TaskWorkspace.AppServerHealth}"
+                                       FontSize="11"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+
+                    <Button Command="{Binding Terminal.ToggleCommand}"
+                            Style="{StaticResource IconButton}"
+                            AutomationProperties.Name="Toggle terminal"
+                            ToolTip="Open or hide Terminal (Ctrl+Shift+T)">
+                        <Path Data="{StaticResource IconTerminal}"
+                              Stroke="{DynamicResource TextPrimaryBrush}"
+                              StrokeThickness="1.4"
+                              Stretch="Uniform" />
+                    </Button>
+                    <Button Command="{Binding OpenChangesCommand}"
+                            Style="{StaticResource IconButton}"
+                            AutomationProperties.Name="Open changes inspector"
+                            ToolTip="Open changed files">
+                        <Path Data="{StaticResource IconChanges}"
+                              Stroke="{DynamicResource TextPrimaryBrush}"
+                              StrokeThickness="1.4"
+                              Stretch="Uniform" />
+                    </Button>
+                    <Button Command="{Binding OpenSettingsCommand}"
+                            Style="{StaticResource IconButton}"
+                            AutomationProperties.Name="Open settings"
+                            ToolTip="Open settings and diagnostics">
+                        <Path Data="{StaticResource IconSettings}"
+                              Stroke="{DynamicResource TextPrimaryBrush}"
+                              StrokeThickness="1.35"
+                              Stretch="Uniform" />
+                    </Button>
+                </StackPanel>
+
+                <StackPanel Grid.Column="4"
+                            Orientation="Horizontal"
+                            WindowChrome.IsHitTestVisibleInChrome="True">
+                    <Button Style="{StaticResource CaptionButton}"
+                            Click="OnMinimizeClick"
+                            AutomationProperties.Name="Minimize">
+                        <Path Data="{StaticResource IconMinimize}"
+                              Stroke="{DynamicResource TextPrimaryBrush}"
+                              StrokeThickness="1.2"
+                              Stretch="Uniform" />
+                    </Button>
+                    <Button x:Name="MaximizeButton"
+                            Style="{StaticResource CaptionButton}"
+                            Click="OnMaximizeRestoreClick"
+                            AutomationProperties.Name="Maximize or restore">
+                        <Grid>
+                            <Path Data="{StaticResource IconMaximize}"
+                                  Stroke="{DynamicResource TextPrimaryBrush}"
+                                  StrokeThickness="1.15"
+                                  Stretch="Uniform">
+                                <Path.Style>
+                                    <Style TargetType="{x:Type Path}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Path.Style>
+                            </Path>
+                            <Path Data="{StaticResource IconRestore}"
+                                  Stroke="{DynamicResource TextPrimaryBrush}"
+                                  StrokeThickness="1.15"
+                                  Stretch="Uniform">
+                                <Path.Style>
+                                    <Style TargetType="{x:Type Path}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding WindowState, RelativeSource={RelativeSource AncestorType=Window}}" Value="Maximized">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Path.Style>
+                            </Path>
+                        </Grid>
+                    </Button>
+                    <Button Style="{StaticResource CaptionButton}"
+                            Click="OnCloseClick"
+                            AutomationProperties.Name="Close">
+                        <Path Data="{StaticResource IconClose}"
+                              Stroke="{DynamicResource TextPrimaryBrush}"
+                              StrokeThickness="1.2"
+                              Stretch="Uniform" />
+                    </Button>
+                </StackPanel>
             </Grid>
-            <views:DetailsView Grid.Column="2" Visibility="{Binding IsDetailsPaneOpen, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+        </Border>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="{Binding IsProjectRailPersistentVisible, Converter={StaticResource BooleanToGridLengthConverter}, ConverterParameter=276}" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="{Binding IsInspectorPersistentVisible, Converter={StaticResource BooleanToGridLengthConverter}, ConverterParameter=340}" />
+            </Grid.ColumnDefinitions>
+
+            <ContentControl x:Name="ProjectRailRegion"
+                            Grid.Column="0"
+                            Content="{Binding}"
+                            ContentTemplate="{StaticResource ProjectRailContent}"
+                            Visibility="{Binding IsProjectRailPersistentVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+            <Grid x:Name="ConversationWorkspaceRegion"
+                  Grid.Column="1"
+                  Background="{DynamicResource AppCanvasBrush}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="50" />
+                    <RowDefinition>
+                        <RowDefinition.Style>
+                            <Style TargetType="{x:Type RowDefinition}">
+                                <Setter Property="Height" Value="*" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Terminal.IsMaximized}" Value="True">
+                                        <Setter Property="Height" Value="0" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </RowDefinition.Style>
+                    </RowDefinition>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition>
+                        <RowDefinition.Style>
+                            <Style TargetType="{x:Type RowDefinition}">
+                                <Setter Property="Height"
+                                        Value="{Binding IsTerminalVisible, Converter={StaticResource BooleanToGridLengthConverter}, ConverterParameter=260}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Terminal.IsMaximized}" Value="True">
+                                        <Setter Property="Height" Value="*" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </RowDefinition.Style>
+                    </RowDefinition>
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0"
+                        Background="{DynamicResource SurfaceBrush}"
+                        BorderBrush="{DynamicResource DividerBrush}"
+                        BorderThickness="0,0,0,1"
+                        Padding="16,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="{Binding ProjectWorkspace.SelectedThreadTitle}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding ActiveWorkspaceLabel}"
+                                       Foreground="{DynamicResource TextTertiaryBrush}"
+                                       FontSize="10"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <Border Grid.Column="1"
+                                Style="{StaticResource StatusPill}"
+                                VerticalAlignment="Center">
+                            <TextBlock Text="{Binding TaskWorkspace.ComposerActionLabel}"
+                                       FontSize="10"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" />
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <views:TaskView x:Name="TaskFeature"
+                                Grid.Row="1"
+                                Margin="12,8,12,10"
+                                Visibility="{Binding Terminal.IsMaximized, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+
+                <GridSplitter Grid.Row="2"
+                              Height="5"
+                              HorizontalAlignment="Stretch"
+                              ResizeDirection="Rows"
+                              ResizeBehavior="PreviousAndNext"
+                              AutomationProperties.Name="Resize terminal dock">
+                    <GridSplitter.Style>
+                        <Style TargetType="{x:Type GridSplitter}"
+                               BasedOn="{StaticResource {x:Type GridSplitter}}">
+                            <Setter Property="Visibility"
+                                    Value="{Binding IsTerminalVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Terminal.IsMaximized}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </GridSplitter.Style>
+                </GridSplitter>
+
+                <Border x:Name="TerminalDockRegion"
+                        Grid.Row="3"
+                        Background="{DynamicResource TerminalBrush}"
+                        BorderBrush="{DynamicResource BorderStrongBrush}"
+                        BorderThickness="0,1,0,0"
+                        Visibility="{Binding IsTerminalVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <views:TerminalView MinHeight="160" />
+                </Border>
+            </Grid>
+
+            <ContentControl x:Name="InspectorRegion"
+                            Grid.Column="2"
+                            Content="{Binding}"
+                            ContentTemplate="{StaticResource InspectorContent}"
+                            Visibility="{Binding IsInspectorPersistentVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+            <Button Grid.ColumnSpan="3"
+                    Panel.ZIndex="40"
+                    Command="{Binding DismissShellOverlayCommand}"
+                    Background="{DynamicResource ScrimBrush}"
+                    BorderThickness="0"
+                    Visibility="{Binding IsShellOverlayVisible, Converter={StaticResource BooleanToVisibilityConverter}}"
+                    AutomationProperties.Name="Close side panel">
+                <Button.Template>
+                    <ControlTemplate TargetType="{x:Type Button}">
+                        <Border Background="{TemplateBinding Background}" />
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+
+            <Border x:Name="CompactProjectRailDrawer"
+                    Grid.ColumnSpan="3"
+                    Panel.ZIndex="50"
+                    Width="300"
+                    MaxWidth="360"
+                    Margin="8"
+                    HorizontalAlignment="Left"
+                    Style="{StaticResource DrawerSurface}"
+                    Visibility="{Binding IsProjectRailOverlayVisible, Converter={StaticResource BooleanToVisibilityConverter}}"
+                    AutomationProperties.Name="Chats and projects drawer">
+                <ContentControl Content="{Binding}"
+                                ContentTemplate="{StaticResource ProjectRailContent}" />
+            </Border>
+
+            <Border x:Name="CompactInspectorDrawer"
+                    Grid.ColumnSpan="3"
+                    Panel.ZIndex="50"
+                    Width="360"
+                    MaxWidth="420"
+                    Margin="8"
+                    HorizontalAlignment="Right"
+                    Style="{StaticResource DrawerSurface}"
+                    Visibility="{Binding IsInspectorOverlayVisible, Converter={StaticResource BooleanToVisibilityConverter}}"
+                    AutomationProperties.Name="Workspace inspector drawer">
+                <ContentControl Content="{Binding}"
+                                ContentTemplate="{StaticResource InspectorContent}" />
+            </Border>
         </Grid>
-        <Border Grid.Row="2" Background="{DynamicResource StatusBarBrush}"><Grid Margin="12,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center" FontSize="11"/><TextBlock Grid.Column="1" Text="Ctrl+O project  ·  Ctrl+Enter run  ·  Ctrl+B navigation  ·  Ctrl+Shift+D settings" VerticalAlignment="Center" Foreground="{DynamicResource MutedInkBrush}" FontSize="10"/></Grid></Border>
+
+        <Border Grid.Row="2"
+                Background="{DynamicResource StatusBarBrush}"
+                BorderBrush="{DynamicResource DividerBrush}"
+                BorderThickness="0,1,0,0">
+            <Grid Margin="10,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding StatusMessage}"
+                           VerticalAlignment="Center"
+                           FontSize="10"
+                           TextTrimming="CharacterEllipsis"
+                           AutomationProperties.LiveSetting="Polite" />
+                <TextBlock Grid.Column="1"
+                           Text="{Binding ActiveWorkspaceLabel}"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource TextTertiaryBrush}"
+                           FontSize="10"
+                           MaxWidth="420"
+                           TextTrimming="CharacterEllipsis" />
+            </Grid>
+        </Border>
+
         <views:ApprovalPromptView Grid.RowSpan="3"
-                                  Panel.ZIndex="100"
-                                  Visibility="{Binding ApprovalQueue.HasPendingApproval, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                  Panel.ZIndex="1000"
+                                  Visibility="{Binding ApprovalQueue.HasPendingApproval, Converter={StaticResource BooleanToVisibilityConverter}}" />
     </Grid>
 </Window>

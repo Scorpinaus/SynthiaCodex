@@ -3,92 +3,142 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Loaded="OnLoaded"
              PreviewKeyDown="OnPreviewKeyDown"
-             AutomationProperties.Name="Codex approval request">
-    <Grid Background="#99000000">
-        <Border Width="640"
+             AutomationProperties.Name="Codex approval request"
+             AutomationProperties.LiveSetting="Assertive">
+    <Grid Background="{DynamicResource ScrimBrush}">
+        <Border x:Name="ApprovalSheet"
+                Width="640"
                 MaxWidth="760"
                 MaxHeight="620"
                 Margin="24"
-                Padding="22"
+                Padding="24"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
-                Background="{DynamicResource PanelBrush}"
-                BorderBrush="{DynamicResource LineBrush}"
+                Background="{DynamicResource SurfaceRaisedBrush}"
+                BorderBrush="{DynamicResource BorderStrongBrush}"
                 BorderThickness="1"
-                CornerRadius="10">
+                CornerRadius="12"
+                KeyboardNavigation.TabNavigation="Cycle"
+                KeyboardNavigation.ControlTabNavigation="Cycle"
+                KeyboardNavigation.DirectionalNavigation="Contained">
             <Grid>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <StackPanel>
-                    <TextBlock Text="Approval required" FontSize="20" FontWeight="SemiBold"/>
-                    <TextBlock Text="{Binding ApprovalQueue.ActivePrompt.Kind}"
-                               Margin="0,4,0,0"
-                               Foreground="{DynamicResource MutedInkBrush}"/>
-                </StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Approval required"
+                                   Style="{StaticResource TitleText}" />
+                        <TextBlock Text="{Binding ApprovalQueue.ActivePrompt.Kind}"
+                                   Margin="0,4,0,0"
+                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                    </StackPanel>
+                    <Border Grid.Column="1"
+                            Background="{DynamicResource WarningSubtleBrush}"
+                            BorderBrush="{DynamicResource WarningBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10"
+                            Padding="9,4"
+                            VerticalAlignment="Top">
+                        <TextBlock Text="Review carefully"
+                                   Foreground="{DynamicResource WarningBrush}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold" />
+                    </Border>
+                </Grid>
 
-                <ScrollViewer Grid.Row="1" Margin="0,18,0,18" VerticalScrollBarVisibility="Auto">
+                <ScrollViewer Grid.Row="1"
+                              Margin="0,20,0,20"
+                              VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <TextBlock Text="{Binding ApprovalQueue.ActivePrompt.Reason}"
                                    TextWrapping="Wrap"
                                    FontSize="14"
-                                   Margin="0,0,0,12"/>
-                        <TextBlock Text="Requested action" FontWeight="SemiBold" Margin="0,0,0,5"/>
-                        <Border Padding="12"
-                                Background="{DynamicResource CanvasBrush}"
-                                BorderBrush="{DynamicResource LineBrush}"
+                                   LineHeight="21"
+                                   Margin="0,0,0,14" />
+                        <TextBlock Text="Requested action"
+                                   Style="{StaticResource SectionLabel}" />
+                        <Border Padding="14"
+                                Background="{DynamicResource SurfaceSunkenBrush}"
+                                BorderBrush="{DynamicResource BorderSubtleBrush}"
                                 BorderThickness="1"
-                                CornerRadius="5">
+                                CornerRadius="8">
                             <TextBlock Text="{Binding ApprovalQueue.ActivePrompt.Detail}"
-                                       FontFamily="Consolas"
-                                       TextWrapping="Wrap"/>
+                                       FontFamily="{StaticResource MonoFont}"
+                                       FontSize="12"
+                                       LineHeight="18"
+                                       TextWrapping="Wrap"
+                                       AutomationProperties.Name="Approval command or path detail" />
                         </Border>
                         <ItemsControl ItemsSource="{Binding ApprovalQueue.ActivePrompt.PermissionOptions}"
-                                      Margin="0,10,0,0">
+                                      Margin="0,12,0,0">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <CheckBox Content="{Binding Name}"
                                               IsChecked="{Binding IsGranted, Mode=TwoWay}"
-                                              Margin="0,3"/>
+                                              Margin="0,4"
+                                              AutomationProperties.Name="{Binding Name}" />
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                         <TextBlock Text="{Binding ApprovalQueue.ActivePrompt.Context}"
-                                   Margin="0,10,0,0"
-                                   Foreground="{DynamicResource MutedInkBrush}"
-                                   TextWrapping="Wrap"/>
-                        <TextBlock Text="{Binding ApprovalQueue.ErrorMessage}"
-                                   Margin="0,10,0,0"
-                                   Foreground="{DynamicResource DangerBrush}"
-                                   TextWrapping="Wrap"/>
+                                   Margin="0,12,0,0"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   TextWrapping="Wrap" />
+                        <Border Margin="0,12,0,0"
+                                Padding="10"
+                                Background="{DynamicResource DangerSubtleBrush}"
+                                BorderBrush="{DynamicResource DangerBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Visibility="{Binding ApprovalQueue.HasError, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="{Binding ApprovalQueue.ErrorMessage}"
+                                       Foreground="{DynamicResource DangerBrush}"
+                                       TextWrapping="Wrap" />
+                        </Border>
                         <TextBlock Text="{Binding ApprovalQueue.PendingCount, StringFormat={}{0} pending approval request(s)}"
-                                   Margin="0,8,0,0"
-                                   Foreground="{DynamicResource MutedInkBrush}"
-                                   FontSize="11"/>
+                                   Margin="0,10,0,0"
+                                   Foreground="{DynamicResource TextTertiaryBrush}"
+                                   FontSize="11" />
                     </StackPanel>
                 </ScrollViewer>
 
-                <WrapPanel Grid.Row="2" HorizontalAlignment="Right">
+                <Grid Grid.Row="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
                     <Button x:Name="CancelButton"
-                            Content="Cancel"
+                            Content="Cancel request"
                             Command="{Binding ApprovalQueue.CancelCommand}"
-                            Style="{StaticResource CompactButton}"
-                            Margin="0,0,8,0"/>
-                    <Button Content="Decline"
-                            Command="{Binding ApprovalQueue.DeclineCommand}"
-                            Style="{StaticResource CompactButton}"
-                            Margin="0,0,8,0"/>
-                    <Button Content="Allow for session"
-                            Command="{Binding ApprovalQueue.AllowSessionCommand}"
-                            Style="{StaticResource CompactButton}"
-                            Margin="0,0,8,0"/>
-                    <Button Content="Allow once"
-                            Command="{Binding ApprovalQueue.AllowOnceCommand}"
-                            Style="{StaticResource CompactButton}"/>
-                </WrapPanel>
+                            Style="{StaticResource SubtleButton}"
+                            HorizontalAlignment="Left"
+                            IsDefault="False"
+                            AutomationProperties.Name="Cancel approval request" />
+                    <WrapPanel Grid.Column="1" HorizontalAlignment="Right">
+                        <Button Content="Decline"
+                                Command="{Binding ApprovalQueue.DeclineCommand}"
+                                Style="{StaticResource DangerButton}"
+                                Margin="0,0,8,0"
+                                IsDefault="False" />
+                        <Button Content="Allow for session"
+                                Command="{Binding ApprovalQueue.AllowSessionCommand}"
+                                Style="{StaticResource SecondaryButton}"
+                                Margin="0,0,8,0"
+                                IsDefault="False" />
+                        <Button Content="Allow once"
+                                Command="{Binding ApprovalQueue.AllowOnceCommand}"
+                                Style="{StaticResource PrimaryButton}"
+                                IsDefault="False" />
+                    </WrapPanel>
+                </Grid>
             </Grid>
         </Border>
     </Grid>

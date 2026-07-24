@@ -145,8 +145,16 @@ public sealed class ApprovalQueueViewModel : ObservableObject
     public string? ErrorMessage
     {
         get => errorMessage;
-        private set => SetProperty(ref errorMessage, value);
+        private set
+        {
+            if (SetProperty(ref errorMessage, value))
+            {
+                OnPropertyChanged(nameof(HasError));
+            }
+        }
     }
+
+    public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
 
     public ICommand AllowOnceCommand => allowOnceCommand;
 

@@ -236,8 +236,8 @@ internal static class ResponsiveLayoutTests
         var searchBox = view.FindName("ChatSearchBox") as TextBox
             ?? throw new InvalidOperationException("cross-chat search box was not created");
         Assert(
-            AutomationProperties.GetName(searchBox) == "Search all chats",
-            "cross-chat search is exposed to automation");
+            AutomationProperties.GetName(searchBox) == "Search chats and projects",
+            "navigation search is exposed to automation");
         var text = FindVisualDescendants<TextBlock>(view).Select(block => block.Text).ToList();
         Assert(text.Contains("Chats"), "General navigation is labelled Chats");
         Assert(!text.Contains("General"), "the legacy General section label is absent");

@@ -57,6 +57,8 @@ The same section shows the active source chain for the current workspace in root
 
 Settings discovers Codex skills for the active General, project, or worktree workspace through the existing app-server session. The virtualized list supports search and scope filters, shows metadata, dependencies, paths, enabled state, and partial discovery errors, and provides Editor and Explorer actions. Enable/disable writes use the absolute `SKILL.md` path and refresh from Codex's authoritative effective state.
 
+The task composer has a native enabled-skill picker and `$` completion. Selecting a skill inserts its visible `$name` marker, shows a removable invocation chip, and binds submission to the exact absolute `SKILL.md` path through the app-server's structured `skill` input. Duplicate names remain path- and scope-distinct, while queued follow-ups retain the selected binding through persistence and later dispatch.
+
 External `skills/changed` notifications invalidate the active view without scanning hidden Settings surfaces. The adjacent effective-settings summary is read-only and retains only a small safe allowlist plus origin labels; raw or sensitive Codex configuration never enters presentation state. The existing shared `AGENTS.md` and `config.toml` editors remain available for explicit advanced edits.
 
 ## Solution

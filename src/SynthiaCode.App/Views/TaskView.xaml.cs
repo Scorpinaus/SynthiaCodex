@@ -386,6 +386,78 @@ public partial class TaskView : UserControl
         }
     }
 
+    private async void OnComposerKeyUp(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox composer ||
+            taskViewModel is null ||
+            taskViewModel.SkillSelector.IsOpen)
+        {
+            return;
+        }
+
+        var token = ComposerSkillToken.Find(composer.Text, composer.CaretIndex);
+        if (token is null)
+        {
+            return;
+        }
+
+        await taskViewModel.SkillSelector.OpenAsync(token).ConfigureAwait(true);
+    }
+
+    private void OnSkillsPopupOpened(object? sender, EventArgs e)
+    {
+        Dispatcher.BeginInvoke(
+            () =>
+            {
+                SkillsSearchBox.Focus();
+                SkillsSearchBox.SelectAll();
+            },
+            DispatcherPriority.Input);
+    }
+
+    private void OnSkillsPopupPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (taskViewModel is null)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            taskViewModel.SkillSelector.IsOpen = false;
+            FocusComposer(taskViewModel.IsTurnRunning);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Enter)
+        {
+            var item = ComposerSkillsList.SelectedItem
+                ?? taskViewModel.SkillSelector.FilteredSkills.FirstOrDefault();
+            if (item is not null &&
+                taskViewModel.SkillSelector.SelectCommand.CanExecute(item))
+            {
+                taskViewModel.SkillSelector.SelectCommand.Execute(item);
+                FocusComposer(taskViewModel.IsTurnRunning);
+                e.Handled = true;
+            }
+            return;
+        }
+
+        if (e.Key is not (Key.Down or Key.Up) ||
+            taskViewModel.SkillSelector.FilteredSkills.Count == 0)
+        {
+            return;
+        }
+
+        var current = ComposerSkillsList.SelectedIndex;
+        ComposerSkillsList.SelectedIndex = e.Key == Key.Down
+            ? Math.Min(current + 1, taskViewModel.SkillSelector.FilteredSkills.Count - 1)
+            : Math.Max(current <= 0 ? 0 : current - 1, 0);
+        ComposerSkillsList.ScrollIntoView(ComposerSkillsList.SelectedItem);
+        e.Handled = true;
+    }
+
     private async Task ImportAttachmentPathsAsync(IEnumerable<string> paths)
     {
         if (DataContext is not MainViewModel main)

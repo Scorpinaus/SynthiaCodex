@@ -75,8 +75,23 @@ public sealed class TaskViewModel : ObservableObject
         Func<QueuedFollowUp, Task>? sendQueuedFollowUp = null,
         Func<CodexConversationTurn, string, Task<bool>>? editPrompt = null,
         Action<string>? showLocalImage = null,
-        Func<CodexConversationTurn, Task>? forkConversation = null)
+        Func<CodexConversationTurn, Task>? forkConversation = null,
+        Func<CancellationToken, Task<ComposerSkillLoadResult>>? loadComposerSkills = null)
     {
+        SkillSelector = new ComposerSkillSelectorViewModel(
+            loadComposerSkills,
+            () => IsTurnRunning ? SteeringText : Prompt,
+            value =>
+            {
+                if (IsTurnRunning)
+                {
+                    SteeringText = value;
+                }
+                else
+                {
+                    Prompt = value;
+                }
+            });
         SubmitCommand = submitCommand = new AsyncRelayCommand(submit);
         ComposerSendCommand = composerSendCommand = new AsyncRelayCommand(
             () => IsTurnRunning ? steer() : submit());
@@ -263,6 +278,8 @@ public sealed class TaskViewModel : ObservableObject
 
     public ObservableCollection<string> ReasoningEffortOptions { get; } = [];
 
+    public ComposerSkillSelectorViewModel SkillSelector { get; }
+
     public IReadOnlyList<FollowUpBehavior> FollowUpBehaviorOptions { get; } =
         [FollowUpBehavior.Queue, FollowUpBehavior.Steer];
 
@@ -374,7 +391,13 @@ public sealed class TaskViewModel : ObservableObject
     public string Prompt
     {
         get => prompt;
-        set => SetProperty(ref prompt, value);
+        set
+        {
+            if (SetProperty(ref prompt, value ?? string.Empty))
+            {
+                SkillSelector.ReconcileText(prompt);
+            }
+        }
     }
 
     public string SubmittedPrompt
@@ -585,6 +608,7 @@ public sealed class TaskViewModel : ObservableObject
         {
             if (SetProperty(ref steeringText, value))
             {
+                SkillSelector.ReconcileText(steeringText);
                 steerCommand.RaiseCanExecuteChanged();
             }
         }

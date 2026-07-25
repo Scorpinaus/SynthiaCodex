@@ -1735,6 +1735,17 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                     Path.IsPathRooted(mention.Path):
                     hasContent = true;
                     break;
+                case CodexSkillInput skill when
+                    !string.IsNullOrWhiteSpace(skill.Name) &&
+                    !string.IsNullOrWhiteSpace(skill.Path) &&
+                    Path.IsPathRooted(skill.Path) &&
+                    Path.GetFileName(skill.Path).Equals("SKILL.md", StringComparison.OrdinalIgnoreCase):
+                    hasContent = true;
+                    break;
+                case CodexSkillInput:
+                    throw new ArgumentException(
+                        "Skill inputs require a name and an absolute SKILL.md path.",
+                        parameterName);
                 case CodexTextInput or CodexLocalImageInput or CodexImageInput or CodexMentionInput:
                     break;
                 default:
@@ -1777,6 +1788,16 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                     ["type"] = "mention",
                     ["name"] = mention.Name,
                     ["path"] = mention.Path
+                },
+                CodexSkillInput skill when
+                    !string.IsNullOrWhiteSpace(skill.Name) &&
+                    !string.IsNullOrWhiteSpace(skill.Path) &&
+                    Path.IsPathRooted(skill.Path) &&
+                    Path.GetFileName(skill.Path).Equals("SKILL.md", StringComparison.OrdinalIgnoreCase) => new JsonObject
+                {
+                    ["type"] = "skill",
+                    ["name"] = skill.Name,
+                    ["path"] = skill.Path
                 },
                 _ => null
             };

@@ -55,6 +55,14 @@
 | Phase 6A.4 - Effective settings | Added a read-only, origin-aware Settings summary for model, provider, reasoning, service tier, profile, sandbox, approvals, web search, and workspace network access. Unallowlisted configuration is discarded before presentation. Existing shared-file editors and permission/model controls remain unchanged. | **Complete** |
 | Phase 6A.5 - Verification | All 209 behavioral tests pass in Debug and Release, including the new protocol, view-model, redaction, and rendered-WPF coverage. Non-incremental Debug and Release rebuilds complete with zero warnings and errors, and the self-contained portable publish gate succeeds. | **Complete** |
 
+## Phase 6B native skill invocation implementation parity
+
+| Phase | Implemented outcome | Status |
+| --- | --- | --- |
+| Phase 6B.1 - Native selector | Added a composer Skills button and `$` entry point backed by active-workspace `skills/list` discovery. The searchable, keyboard-operable, recycling-virtualized popup shows only enabled skills, preserves duplicate-name rows by absolute path and scope, inserts or replaces visible `$name` markers, and exposes removable selected-skill chips. Three focused selector, token, and rendered-WPF tests pass as part of the 212-test suite. | **Complete** |
+| Phase 6B.2 - Explicit app-server input | Added typed `CodexSkillInput` validation and `{ type: "skill", name, path }` serialization while retaining the visible `$name` marker. Unique manual markers resolve from enabled metadata, duplicate names require path-aware picker selection, removed markers discard stale bindings, and start, steer, queued snapshots, restore, manual queued steer, and later queued dispatch preserve the exact absolute path. Three additional focused tests pass as part of the 215-test suite. | **Complete** |
+| Phase 6B.3 - Verification | All 215 behavioral tests pass in Debug and Release. The complete solution test command succeeds, `git diff --check` is clean, and non-incremental Debug and Release rebuilds complete with zero warnings and errors. Both `SynthiaCode.App.exe` artifacts were verified after the rebuild. The final review also added coverage and fixes for full-token replacement when the caret is inside `$name`, and fail-closed composer discovery after a stale workspace refresh. | **Complete** |
+
 ## Status legend
 
 | Status | Meaning |
@@ -138,7 +146,7 @@
 | Context-window visibility | A live percentage-used indicator sits beside Send; hover details show used/remaining percentages, latest-context tokens versus the model window, and cumulative compactions per persisted chat; app-server compaction lifecycle events render in the transcript | **Full** | Older settings show unavailable usage until app-server sends the first `thread/tokenUsage/updated` notification. Compaction and summarization remain owned by Codex app-server. |
 | Subagent execution | Collaboration notifications render as agent activity when Codex delegates | **Partial** | No Active/Done panel, agent-thread transcript, open/steer/stop controls, nicknames, or custom-agent management. |
 | MCP tool execution | Configured MCP tool activity and progress are parsed and shown | **Partial** | No MCP list/add/remove/auth/status UI or elicitation-specific presentation. |
-| Skills | Settings lists active-workspace skills with scope, description, dependencies, path, discovery errors, search/filtering, forced refresh, Editor/Explorer actions, and path-based enable/disable; external changes invalidate and refresh the visible list | **Near** | No skill creation/install flow, arbitrary extra-root management, full `SKILL.md` body editor, or composer `$skill` picker. |
+| Skills | Settings manages active-workspace discovery and enablement; the composer provides an enabled-skill selector, `$` completion, duplicate-path disambiguation, removable invocation chips, and exact structured skill inputs across turns and queued follow-ups | **Near** | Skill creation/install, arbitrary extra roots, and a full `SKILL.md` body editor remain absent. |
 | Plugins and app connectors | No SynthiaCode plugin/connector directory or authorization flow | **Missing** | ChatGPT supports plugins and connected services such as GitHub, Slack, Google Drive, Gmail, and calendars. |
 | Web search | App-server web-search activity is rendered when the runtime uses it | **Partial** | No cached/live search control, source-focused result UI, or product-level availability setting. |
 | Built-in Browser | No shared in-app browser, website permissions, comments, downloads, or browser developer mode | **Missing** | Requires a browser surface plus Browser tool/plugin integration. |

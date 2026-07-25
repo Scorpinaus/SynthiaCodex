@@ -207,7 +207,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             SendQueuedFollowUpNowAsync,
             EditPromptAsync,
             userInteractionService.ShowImagePreview,
-            ForkConversationFromTurnAsync);
+            ForkConversationFromTurnAsync,
+            LoadComposerSkillsAsync);
         TaskWorkspace.PropertyChanged += (_, args) => RelayTaskPropertyChanged(args.PropertyName);
 
         ApprovalQueue = new ApprovalQueueViewModel(appServerSessionCoordinator.RespondToServerRequestAsync);
@@ -1613,10 +1614,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             var guidance = SteeringText.Trim();
             var attachments = TaskWorkspace.Attachments.Select(attachment => attachment.Clone()).ToList();
+            var skillInputs = TaskWorkspace.SkillSelector.ResolveSkillInputs(guidance);
             var queue = followUpQueueWorkspace.GetOrCreate(threadId);
-            queue.Enqueue(guidance, CaptureQueuedTurnOptions(GetWorkspacePathForThread(threadId)), attachments);
+            queue.Enqueue(
+                guidance,
+                CaptureQueuedTurnOptions(GetWorkspacePathForThread(threadId)),
+                attachments,
+                skillInputs);
             TaskWorkspace.NotifyQueuedFollowUpsChanged();
             await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
+            TaskWorkspace.SkillSelector.ClearSelectedSkills();
             SteeringText = string.Empty;
             TaskWorkspace.ClearAttachments();
             StatusMessage = "Follow-up queued for the next turn";
@@ -1668,7 +1675,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 await appServerSessionCoordinator.SteerTurnAsync(new CodexTurnSteerRequest(
                     threadId,
                     turnId,
-                    BuildUserInputs(item.Text, item.Attachments, item.Options.WorkspacePath, item.Options.Model))).ConfigureAwait(true);
+                    BuildUserInputs(
+                        item.Text,
+                        item.Attachments,
+                        item.Options.WorkspacePath,
+                        item.Options.Model,
+                        item.SkillInputs))).ConfigureAwait(true);
                 if (!string.IsNullOrWhiteSpace(item.Text))
                 {
                     threadWorkspace.GetRequired(threadId).AddGuidance(item.Text);
@@ -1726,6 +1738,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 service.AddGuidance(guidance);
             }
             TaskWorkspace.NotifyResponseChanged();
+            TaskWorkspace.SkillSelector.ClearSelectedSkills();
             SteeringText = string.Empty;
             TaskWorkspace.ClearAttachments();
             StatusMessage = "Steering sent to active turn";
@@ -2169,6 +2182,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var turn = await appServerSessionCoordinator
                 .StartTurnAsync(CreateTurnStartRequest(activeThreadId, submittedPrompt, submittedImages, workspacePath))
                 .ConfigureAwait(true);
+            TaskWorkspace.SkillSelector.ClearSelectedSkills();
 
             var boundTurn = threadService.BindPendingTurn(turn.TurnId);
             threadWorkspace.RegisterTurn(activeThreadId, turn.TurnId);
@@ -2901,7 +2915,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         string text,
         IReadOnlyList<AttachmentReference> attachments,
         string workspacePath,
-        string? model = null)
+        string? model = null,
+        IReadOnlyList<CodexSkillInput>? preservedSkillInputs = null)
     {
         var selectedModel = string.IsNullOrWhiteSpace(model)
             ? TaskWorkspace.SelectedModel
@@ -2913,8 +2928,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 $"{selectedModel.DisplayName} does not accept image input. Remove the images or choose an image-capable model.");
         }
 
-        return new AttachmentPromptInputBuilder(attachmentStore, workspaceAttachmentResolver)
-            .Build(text, attachments, workspacePath);
+        var result = new AttachmentPromptInputBuilder(attachmentStore, workspaceAttachmentResolver)
+            .Build(text, attachments, workspacePath)
+            .ToList();
+        result.AddRange(TaskWorkspace.SkillSelector.ResolveSkillInputs(text, preservedSkillInputs));
+        return result;
     }
 
     private CodexTurnStartRequest CreateTurnStartRequest(
@@ -3043,7 +3061,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             persisted.Preview = item.Text;
             var turn = await appServerSessionCoordinator.StartTurnAsync(new CodexTurnStartRequest(
                 threadId,
-                BuildUserInputs(item.Text, item.Attachments, workspacePath, options.Model),
+                BuildUserInputs(
+                    item.Text,
+                    item.Attachments,
+                    workspacePath,
+                    options.Model,
+                    item.SkillInputs),
                 workspacePath,
                 options.Sandbox,
                 options.Model,
@@ -3790,11 +3813,29 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void NotifyCodexContextChanged()
     {
         Skills.NotifyContextChanged();
+        TaskWorkspace.SkillSelector.NotifyContextChanged();
         EffectiveCodexSettings.NotifyContextChanged();
         if (Skills.IsActive)
         {
             _ = EffectiveCodexSettings.RefreshIfStaleAsync(appServerWarmUpCancellation.Token);
         }
+    }
+
+    private async Task<ComposerSkillLoadResult> LoadComposerSkillsAsync(
+        CancellationToken cancellationToken)
+    {
+        if (Skills.IsStale)
+        {
+            await Skills.RefreshAsync(forceReload: false, cancellationToken).ConfigureAwait(true);
+        }
+
+        IReadOnlyList<CodexSkillMetadata> enabledSkills = Skills.IsStale
+            ? []
+            : Skills.GetEnabledSkillSnapshot();
+        return new ComposerSkillLoadResult(
+            enabledSkills,
+            Skills.IsSupported,
+            Skills.Message);
     }
 
     private void RelayGitPropertyChanged(string? propertyName)

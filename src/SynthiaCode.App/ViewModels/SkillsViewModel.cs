@@ -72,6 +72,8 @@ public sealed class SkillItemViewModel : ObservableObject
 
     public string ToggleAutomationName => $"{ToggleActionLabel} {DisplayName}";
 
+    internal CodexSkillMetadata Metadata => metadata;
+
     internal bool Matches(string searchText)
     {
         if (string.IsNullOrWhiteSpace(searchText))
@@ -449,6 +451,12 @@ public sealed class SkillsViewModel : ObservableObject, IAsyncDisposable
             _ = RefreshAsync(forceReload: false);
         }
     }
+
+    public IReadOnlyList<CodexSkillMetadata> GetEnabledSkillSnapshot() =>
+        allSkills
+            .Where(item => item.IsEnabled)
+            .Select(item => item.Metadata)
+            .ToList();
 
     public void RaiseCommandStates() =>
         RaiseCommandStatesCore();

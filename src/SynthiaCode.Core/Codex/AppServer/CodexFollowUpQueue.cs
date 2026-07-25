@@ -70,6 +70,7 @@ public sealed class QueuedFollowUpSnapshot
     public string? LastError { get; set; }
     public QueuedTurnOptionsSnapshot Options { get; set; } = new();
     public List<AttachmentReference> Attachments { get; set; } = [];
+    public List<CodexSkillInput> SkillInputs { get; set; } = [];
 
     [JsonIgnore]
     public List<AttachmentReference> Images
@@ -101,7 +102,8 @@ public sealed class QueuedFollowUpSnapshot
         State = State,
         LastError = LastError,
         Options = Options.Clone(),
-        Attachments = [.. Attachments.Select(attachment => attachment.Clone())]
+        Attachments = [.. Attachments.Select(attachment => attachment.Clone())],
+        SkillInputs = [.. SkillInputs]
     };
 }
 
@@ -175,6 +177,8 @@ public sealed class QueuedFollowUp : INotifyPropertyChanged
 
     public IReadOnlyList<AttachmentReference> Attachments { get; init; } = [];
 
+    public IReadOnlyList<CodexSkillInput> SkillInputs { get; init; } = [];
+
     public IReadOnlyList<AttachmentReference> Images => Attachments;
 
     public bool HasAttachments => Attachments.Count > 0;
@@ -202,7 +206,8 @@ public sealed class QueuedFollowUp : INotifyPropertyChanged
         State = State,
         LastError = LastError,
         Options = Options.Clone(),
-        Attachments = [.. Attachments.Select(attachment => attachment.Clone())]
+        Attachments = [.. Attachments.Select(attachment => attachment.Clone())],
+        SkillInputs = [.. SkillInputs]
     };
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
@@ -226,6 +231,7 @@ public sealed class CodexFollowUpQueue
     public const int MaximumItems = 50;
     public const int MaximumItemBytes = 64 * 1024;
     public const int MaximumAggregateBytes = 256 * 1024;
+    public const int MaximumSkillInputs = 16;
     private const string InterruptedDeliveryMessage =
         "SynthiaCode closed or disconnected while this follow-up was starting. Review it before retrying.";
 
@@ -234,10 +240,12 @@ public sealed class CodexFollowUpQueue
     public QueuedFollowUp Enqueue(
         string text,
         QueuedTurnOptionsSnapshot options,
-        IEnumerable<AttachmentReference>? attachments = null)
+        IEnumerable<AttachmentReference>? attachments = null,
+        IEnumerable<CodexSkillInput>? skillInputs = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         var attachmentList = (attachments ?? []).Select(attachment => attachment.Clone()).ToList();
+        var skillInputList = NormalizeSkillInputs(skillInputs, throwOnInvalid: true);
         var normalized = ValidateContent(text, attachmentList, replacingItemId: null);
         if (Items.Count >= MaximumItems)
         {
@@ -254,7 +262,8 @@ public sealed class CodexFollowUpQueue
             UpdatedAt = now,
             State = QueuedFollowUpState.Pending,
             Options = options.Clone(),
-            Attachments = attachmentList
+            Attachments = attachmentList,
+            SkillInputs = skillInputList
         };
         Items.Add(item);
         return item;
@@ -285,7 +294,8 @@ public sealed class CodexFollowUpQueue
                     ? InterruptedDeliveryMessage
                     : snapshot.LastError,
                 Options = (snapshot.Options ?? new QueuedTurnOptionsSnapshot()).Clone(),
-                Attachments = [.. snapshot.Attachments.Select(attachment => attachment.Clone())]
+                Attachments = [.. snapshot.Attachments.Select(attachment => attachment.Clone())],
+                SkillInputs = NormalizeSkillInputs(snapshot.SkillInputs, throwOnInvalid: false)
             });
         }
     }
@@ -472,6 +482,47 @@ public sealed class CodexFollowUpQueue
         return segments.Length > 0
             && segments.All(segment => segment is not "." and not "..")
             && string.IsNullOrWhiteSpace(attachment.StorageKey);
+    }
+
+    private static IReadOnlyList<CodexSkillInput> NormalizeSkillInputs(
+        IEnumerable<CodexSkillInput>? values,
+        bool throwOnInvalid)
+    {
+        var result = new List<CodexSkillInput>();
+        foreach (var input in values ?? [])
+        {
+            var isValid = !string.IsNullOrWhiteSpace(input.Name) &&
+                !string.IsNullOrWhiteSpace(input.Path) &&
+                Path.IsPathRooted(input.Path) &&
+                Path.GetFileName(input.Path).Equals("SKILL.md", StringComparison.OrdinalIgnoreCase);
+            if (!isValid)
+            {
+                if (throwOnInvalid)
+                {
+                    throw new InvalidOperationException(
+                        "Queued skill inputs require a name and an absolute SKILL.md path.");
+                }
+                continue;
+            }
+
+            if (result.Any(existing =>
+                    existing.Path.Equals(input.Path, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+            if (result.Count >= MaximumSkillInputs)
+            {
+                if (throwOnInvalid)
+                {
+                    throw new InvalidOperationException(
+                        $"A queued follow-up can invoke at most {MaximumSkillInputs} skills.");
+                }
+                break;
+            }
+
+            result.Add(new CodexSkillInput(input.Name.Trim(), Path.GetFullPath(input.Path)));
+        }
+        return result;
     }
 
     private void SetState(string id, QueuedFollowUpState state, string? error)

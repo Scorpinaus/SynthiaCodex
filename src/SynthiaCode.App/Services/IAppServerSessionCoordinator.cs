@@ -1,5 +1,6 @@
 using SynthiaCode.Core.Codex;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Codex.Configuration;
 using SynthiaCode.Infrastructure.Codex;
 
 namespace SynthiaCode.App.Services;
@@ -76,6 +77,18 @@ public interface IAppServerSessionCoordinator : IAsyncDisposable
 
     Task<CodexPermissionProfileListResult> ListPermissionProfilesAsync(
         string cwd,
+        CancellationToken cancellationToken = default);
+
+    Task<CodexSkillListResult> ListSkillsAsync(
+        CodexSkillListRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<CodexSkillConfigWriteResult> WriteSkillConfigAsync(
+        CodexSkillConfigWriteRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<CodexEffectiveConfiguration> ReadEffectiveConfigurationAsync(
+        string? cwd = null,
         CancellationToken cancellationToken = default);
 
     Task RespondToServerRequestAsync(

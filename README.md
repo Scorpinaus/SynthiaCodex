@@ -53,6 +53,12 @@ Settings can edit the `AGENTS.md` and `config.toml` files in SynthiaCode's isola
 
 The same section shows the active source chain for the current workspace in root-to-leaf precedence order. Shared files can be edited in the built-in multiline editors or opened externally; workspace `AGENTS.md` and `.codex/config.toml` sources remain project-owned and use Editor/Explorer deep links.
 
+## Skills and effective settings
+
+Settings discovers Codex skills for the active General, project, or worktree workspace through the existing app-server session. The virtualized list supports search and scope filters, shows metadata, dependencies, paths, enabled state, and partial discovery errors, and provides Editor and Explorer actions. Enable/disable writes use the absolute `SKILL.md` path and refresh from Codex's authoritative effective state.
+
+External `skills/changed` notifications invalidate the active view without scanning hidden Settings surfaces. The adjacent effective-settings summary is read-only and retains only a small safe allowlist plus origin labels; raw or sensitive Codex configuration never enters presentation state. The existing shared `AGENTS.md` and `config.toml` editors remain available for explicit advanced edits.
+
 ## Solution
 
 ```text

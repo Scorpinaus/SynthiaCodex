@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using SynthiaCode.Core.Codex;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Codex.Configuration;
 using SynthiaCode.Core.Logging;
 using SynthiaCode.Infrastructure.Codex;
 
@@ -181,6 +182,38 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
         return result;
     }
 
+    public async Task<CodexSkillListResult> ListSkillsAsync(
+        CodexSkillListRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var discoveryClient = GetConnectedClient();
+        var result = await discoveryClient.ListSkillsAsync(request, cancellationToken).ConfigureAwait(false);
+        EnsureCurrentClient(discoveryClient, "Skills were returned by a stale app-server connection.");
+        return result;
+    }
+
+    public async Task<CodexSkillConfigWriteResult> WriteSkillConfigAsync(
+        CodexSkillConfigWriteRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var writeClient = GetConnectedClient();
+        var result = await writeClient.WriteSkillConfigAsync(request, cancellationToken).ConfigureAwait(false);
+        EnsureCurrentClient(writeClient, "Skill configuration was written by a stale app-server connection.");
+        return result;
+    }
+
+    public async Task<CodexEffectiveConfiguration> ReadEffectiveConfigurationAsync(
+        string? cwd = null,
+        CancellationToken cancellationToken = default)
+    {
+        var configurationClient = GetConnectedClient();
+        var result = await configurationClient
+            .ReadEffectiveConfigurationAsync(cwd, cancellationToken)
+            .ConfigureAwait(false);
+        EnsureCurrentClient(configurationClient, "Configuration was returned by a stale app-server connection.");
+        return result;
+    }
+
     public async Task RespondToServerRequestAsync(
         CodexServerRequest request,
         CodexServerRequestResponse response,
@@ -232,6 +265,14 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
         client?.IsHealthy == true
             ? client
             : throw new InvalidOperationException("The Codex app-server session is not connected.");
+
+    private void EnsureCurrentClient(CodexAppServerClient requestClient, string message)
+    {
+        if (!ReferenceEquals(requestClient, client))
+        {
+            throw new InvalidOperationException(message);
+        }
+    }
 
     private void OnNotificationReceived(object? sender, AppServerNotification notification) =>
         notificationBatcher.Enqueue(notification);

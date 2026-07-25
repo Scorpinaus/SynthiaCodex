@@ -1,8 +1,8 @@
 # SynthiaCode: Current Architecture through the Modern WPF Redesign
 
-**Recorded:** 24 July 2026
-**Phase:** Modern WPF redesign phases 0–11
-**Purpose:** Describe the current architecture, redesigned presentation shell, and retained behavioral/performance boundaries.
+**Recorded:** 25 July 2026
+**Phase:** Modern WPF redesign through Phase 17 and product Phase 6A
+**Purpose:** Describe the current architecture, redesigned presentation shell, retained behavioral/performance boundaries, and the Phase 6A Skills/Settings extension.
 
 ## System shape
 
@@ -38,7 +38,7 @@ This ordering deliberately keeps shell visibility independent of Codex app-serve
 
 ## Presentation ownership
 
-`MainViewModel` is the shell coordinator. `ProjectThreadViewModel`, `TaskViewModel`, `TerminalViewModel`, `DiagnosticsViewModel`, `AccountViewModel`, and `GitViewModel` own feature presentation state and commands. The shell supplies explicit operation delegates or immutable-on-read context callbacks and receives status/selection callbacks; feature view models do not reference or control one another.
+`MainViewModel` is the shell coordinator. `ProjectThreadViewModel`, `TaskViewModel`, `TerminalViewModel`, `DiagnosticsViewModel`, `AccountViewModel`, `GitViewModel`, `SkillsViewModel`, and `EffectiveCodexSettingsViewModel` own feature presentation state and commands. The shell supplies explicit operation delegates or immutable-on-read context callbacks and receives status/selection callbacks; feature view models do not reference or control one another.
 
 App-server lifecycle is exposed to presentation through `IAppServerSessionCoordinator`. Its implementation owns `CodexAppServerClient`, process transport startup, reconnect serialization, batched notifications, typed app-server operations, health transitions, and disposal. Protocol request/response JSON and delta-payload batching remain in the Codex Core/Infrastructure boundary rather than WPF presentation.
 
@@ -105,6 +105,16 @@ Settings persist the mode and optional profile ID through `AppSettingsPermission
 `SharedCodexConfigurationService` owns the two editable files in the isolated runtime home: `AGENTS.md` and `config.toml`. It reads strict UTF-8 up to 512 KiB, fingerprints loaded bytes with SHA-256, rejects stale revisions, writes a same-directory temporary file through to disk, and atomically replaces the destination. Missing shared files are materialized only for an explicit save or external-editor action. File contents never enter structured logs.
 
 For the active workspace, the service locates the nearest Git root and enumerates existing `AGENTS.md` and `.codex/config.toml` files from root to leaf after the two shared sources. `CodexConfigurationViewModel` keeps dirty editor text during automatic Settings refresh, exposes explicit refresh/save conflict recovery, and supplies Editor/Explorer commands for every provenance record. Project-owned sources are provenance-only in the built-in editor and deep-link to the user's external tools.
+
+### Skills and effective Codex settings
+
+Phase 6A reuses the initialized `AppServerSessionCoordinator`; it does not create another process, transport, client, or settings store. Infrastructure owns typed serialization and tolerant parsing for `skills/list`, `skills/config/write`, and a separate allowlisted `config/read` projection. A `-32601` response becomes an unsupported-capability result and leaves the shared app-server connection healthy.
+
+`SkillsViewModel` resolves the same active General, project, or worktree CWD used for task execution. Absolute normalized `SKILL.md` paths are row identity, so duplicate names remain distinct. The source collection retains valid rows when the same CWD reports load errors; search and scope filtering project that source into a recycling-virtualized list. Enable/disable sends only path and desired state, applies the returned `effectiveEnabled`, then forces discovery to reconcile the complete row.
+
+`skills/changed` is an invalidation signal rather than row data. The view model debounces it, refreshes only while Settings is active, and otherwise marks the cache stale. Refresh generations and cancellation prevent an older CWD from replacing a newer context. The shell marks both Skills and effective settings stale when the active context changes and disposes the Skills notification subscription before the shared coordinator shuts down.
+
+`EffectiveCodexSettingsViewModel` presents model, provider, reasoning effort, service tier, profile, sandbox mode, approval policy/reviewer, web search, and workspace network access with available origin labels. Infrastructure discards every other configuration field before constructing the Core result, so raw JSON, MCP headers, environment values, and secrets never enter presentation state or application logs. This read-only overview coexists with the existing explicit shared-file editor, model selectors, and permission resolver.
 
 ```text
 app-server request (method + id)
@@ -207,7 +217,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 | --- | --- | --- |
 | `MainViewModel.cs` | 3,813 physical lines | Includes later projectless-chat, attachment, queue, rename/search, responsive-shell, generated-image expansion, and presentation coordination added after the original extraction audit. |
 | `MainWindow.xaml` | 444 physical lines | Custom chrome, adaptive three-zone shell, compact drawers, lower terminal dock, inspector, status, and approval hosting. |
-| Behavioral suite | 197 passing tests | Includes coordinator, lifecycle, history, persistence, multi-turn, activity, presentation, attachment, permission, Markdown, generated-image preview/expansion, projectless-thread, navigation, redesign-resource, adaptive-shell, accessibility, and performance regressions. |
+| Behavioral suite | 209 passing tests | Includes coordinator, lifecycle, history, persistence, multi-turn, activity, presentation, attachment, permission, Markdown, generated-image preview/expansion, projectless-thread, navigation, redesign-resource, adaptive-shell, accessibility, performance, shared-configuration, and Phase 6A Skills/Settings regressions. |
 | Startup shell/readiness | 541 ms / 759 ms | unchanged |
 | Codex long stream | 25,001 notifications, 2 UI batches, 20.71 MiB, 40.25 ms | same batching/allocation bound; synthetic CPU time varies locally |
 | Terminal storage/presentation | 39.06 MiB in 2.24 ms; 250,000 retained; 100 chunks to 1 UI update | faster storage run; same presentation bound |
@@ -215,7 +225,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 | Recovery | 27 ms | 5 ms slower locally, still well below interactive latency |
 | Active-resource shutdown | 2 ms | 10 ms faster locally |
 
-The earlier Phase 5D release record completed with zero warnings/errors and 75 passing tests. The modern-redesign release gate supersedes that historical count with the current warning-free Debug/Release builds and 197-test suite.
+The earlier Phase 5D release record completed with zero warnings/errors and 75 passing tests. The Phase 6A release gate supersedes that historical count with the current warning-free Debug/Release builds and 209-test suite.
 
 A no-build behavioral-runner invocation took approximately 12 seconds during the initial audit; this is a coarse runner-duration observation, not a product performance metric.
 
@@ -230,4 +240,4 @@ A no-build behavioral-runner invocation took approximately 12 seconds during the
 
 ## Phase boundary
 
-Phase 5D consolidates project/thread navigation over the completed Phase 5A-5C experience. Skills, plugins, MCP, automations, and other Phase 6 work remain out of scope.
+Phase 6A completes active-context skill discovery/enablement and the redacted effective-settings overview. Skill creation/install, composer `$skill` invocation, arbitrary skill roots, MCP management, plugins/connectors, and automations remain later bounded phases.

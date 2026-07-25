@@ -774,36 +774,58 @@ This slice does not make SynthiaCode an editor for `config.toml` and does not ex
 
 ## 13. Phase 6: Skills, Plugins, MCP, and Settings
 
+**Status:** Phase 6A complete — 25 July 2026. The implemented Skills and effective-Settings boundary, test-first slices, compatibility behavior, and verification record are maintained in `phase_6_skills_settings_implementation_plan.md`.
+
 ### Goals
 
 Expose Codex configuration in a friendly native surface without taking ownership of all Codex internals.
 
 ### Approach
 
-Read and respect the user's Codex configuration rather than inventing a parallel config system.
+Read and respect Codex-owned configuration rather than inventing a parallel config system. Reuse the existing SynthiaCode settings store, isolated `CODEX_HOME`, shared `AGENTS.md`/`config.toml` editors, model controls, permission resolver, diagnostics, and app-server session.
 
-Possible settings UI:
+Implement Phase 6 in bounded capability slices:
 
-- Codex executable path
-- default model/profile
-- sandbox default
-- approval default
-- web search default
-- MCP server list
-- plugin list
-- skill discovery links
-- `CODEX_HOME` display
+1. Skills discovery and enablement plus a typed effective-settings overview.
+2. MCP status and authentication management.
+3. Plugins only after the production app-server surface is documented as stable.
+
+Existing settings capabilities that must not be rebuilt:
+
+- Codex executable path, version, `CODEX_HOME`, authentication, and doctor diagnostics.
+- Model, reasoning, service-tier, permission-mode, sandbox, approval, and profile controls.
+- Custom developer and base instructions.
+- Atomic shared `AGENTS.md` and `config.toml` editing with workspace provenance.
+
+Phase 6A adds:
+
+- active-workspace skill discovery through `skills/list`;
+- user, repository, system, and admin scope presentation;
+- search, filters, dependencies, errors, and local path actions;
+- path-based enable/disable through `skills/config/write`;
+- `skills/changed` invalidation and bounded refresh;
+- an allowlisted read-only effective-configuration summary with origins.
+
+### Phase 6A completion record
+
+- Typed Core and Infrastructure contracts now cover `skills/list`, `skills/config/write`, `skills/changed`, and a redacted `config/read` projection through the existing app-server session.
+- Settings discovers skills for the active General, project, or worktree context; supports search, scope filtering, dependency/error presentation, Editor/Explorer actions, and path-identified enable/disable.
+- Visible invalidations are debounced and refreshed; hidden or context-switched results remain stale until relevant, and unsupported runtime methods degrade without disconnecting Codex.
+- The effective-settings card is read-only and retains only the documented allowlist and origin labels. Existing model, permission, shared-file, diagnostic, and SynthiaCode settings ownership remains unchanged.
+- Five focused Phase 6A tests bring the behavioral suite to 209 passing tests in Debug and Release. Non-incremental Debug and Release rebuilds complete with zero warnings and errors, and the self-contained portable publish gate succeeds.
 
 ### Important boundary
 
-The app should not directly edit complex Codex config until the file format and user expectations are fully understood. Start with read-only visibility and safe shortcuts to documented CLI commands.
+Do not add a second Codex configuration store or parse and rewrite arbitrary TOML. Dedicated typed app-server writes such as `skills/config/write` are allowed; complex configuration remains visible through typed read-only projections or the existing explicit raw-file editor.
 
 ### Acceptance criteria
 
-- App shows relevant Codex environment/config state.
-- User can open config files or docs.
-- App can run diagnostic commands.
-- App does not silently overwrite existing Codex configuration.
+- App shows skills and relevant effective configuration for the active project, worktree, or General workspace.
+- User can search, filter, refresh, open, reveal, enable, and disable supported skills.
+- External skill changes refresh without restarting SynthiaCode.
+- Unsupported app-server methods degrade to clear, nonfatal states.
+- Existing settings, configuration, permissions, diagnostics, and app-server behavior remain regression-tested.
+- App does not silently overwrite or duplicate Codex-owned configuration.
 
 ## 14. Phase 7: Automations
 

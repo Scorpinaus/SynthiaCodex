@@ -45,6 +45,16 @@
 | Phase 3 - Desktop surface | Added multiline shared `AGENTS.md` and `config.toml` editors, explicit refresh/save state, raw-TOML safety guidance, actionable conflict messages, ordered source cards for shared/workspace provenance, and Editor/Explorer deep links. Automatic refresh retains unsaved edits, configuration contents are excluded from logs, and all four focused tests pass. | **Complete** |
 | Phase 4 - Verification | All 203 tests pass in both Debug and Release. A pre-existing console-test polling race found by the final gate now retries only the transient concurrent-enumeration condition. Clean solution rebuilds produced verified Debug and Release executables with zero warnings and errors. | **Complete** |
 
+## Phase 6A skills and settings implementation parity
+
+| Phase | Implemented outcome | Status |
+| --- | --- | --- |
+| Phase 6A.1 - Test contract | Added red-test coverage for skill request/response shapes, duplicate-name path identity, load errors, path-based enablement, unsupported-method fallback, effective-setting redaction, invalidation refresh, filtering, accessibility, and list virtualization. | **Complete** |
+| Phase 6A.2 - Typed protocol | Added Core skill/effective-configuration records and typed `skills/list`, `skills/config/write`, and allowlisted `config/read` operations through the existing app-server client and session coordinator. Unsupported methods remain nonfatal. | **Complete** |
+| Phase 6A.3 - Desktop lifecycle | Added active-workspace skill discovery, search and scope filtering, metadata/dependency/error presentation, Editor/Explorer actions, authoritative enable/disable refresh, debounced `skills/changed` invalidation, and hidden-surface stale caching. | **Complete** |
+| Phase 6A.4 - Effective settings | Added a read-only, origin-aware Settings summary for model, provider, reasoning, service tier, profile, sandbox, approvals, web search, and workspace network access. Unallowlisted configuration is discarded before presentation. Existing shared-file editors and permission/model controls remain unchanged. | **Complete** |
+| Phase 6A.5 - Verification | All 209 behavioral tests pass in Debug and Release, including the new protocol, view-model, redaction, and rendered-WPF coverage. Non-incremental Debug and Release rebuilds complete with zero warnings and errors, and the self-contained portable publish gate succeeds. | **Complete** |
+
 ## Status legend
 
 | Status | Meaning |
@@ -63,7 +73,7 @@
 | Git and worktree lifecycle | **Moderate** | Core isolation and file-level Git operations exist; chunk review, handoff, push, PR, snapshots, and setup actions do not. |
 | Agent orchestration | **Partial** | Parallel top-level chats and collaboration activity exist, but subagent thread inspection and management are absent. |
 | Context and multimodal input | **Near** | Per-chat context-window visibility plus image/file/folder picker, paste/drop, previews, queued lifecycle persistence, workspace mentions, and managed external snapshots are implemented; rich artifact viewing and remaining hardening are out of scope. |
-| Tools and integrations | **Low** | Configured MCP/web activity can flow through app-server, but Browser, Chrome, plugins, connectors, skills management, and Scheduled are not product surfaces. |
+| Tools and integrations | **Moderate** | Skills discovery and enablement are now native Settings surfaces, and configured MCP/web activity can flow through app-server. Browser, Chrome, plugin/connector management, MCP administration, and Scheduled remain absent. |
 | Desktop convenience | **Moderate** | Native Windows shell, themes, diagnostics, custom Codex instruction defaults, shared-configuration source links, cross-chat search, find-in-chat, and core shortcuts exist; notifications, dictation, quick chat, general task deep links, and broader personalization do not. |
 
 ## Detailed parity matrix
@@ -128,7 +138,7 @@
 | Context-window visibility | A live percentage-used indicator sits beside Send; hover details show used/remaining percentages, latest-context tokens versus the model window, and cumulative compactions per persisted chat; app-server compaction lifecycle events render in the transcript | **Full** | Older settings show unavailable usage until app-server sends the first `thread/tokenUsage/updated` notification. Compaction and summarization remain owned by Codex app-server. |
 | Subagent execution | Collaboration notifications render as agent activity when Codex delegates | **Partial** | No Active/Done panel, agent-thread transcript, open/steer/stop controls, nicknames, or custom-agent management. |
 | MCP tool execution | Configured MCP tool activity and progress are parsed and shown | **Partial** | No MCP list/add/remove/auth/status UI or elicitation-specific presentation. |
-| Skills | Codex may load configured skills through its runtime | **Partial** | No Skills directory, enable/disable controls, install flow, `$skill` picker, or skill detail UI. |
+| Skills | Settings lists active-workspace skills with scope, description, dependencies, path, discovery errors, search/filtering, forced refresh, Editor/Explorer actions, and path-based enable/disable; external changes invalidate and refresh the visible list | **Near** | No skill creation/install flow, arbitrary extra-root management, full `SKILL.md` body editor, or composer `$skill` picker. |
 | Plugins and app connectors | No SynthiaCode plugin/connector directory or authorization flow | **Missing** | ChatGPT supports plugins and connected services such as GitHub, Slack, Google Drive, Gmail, and calendars. |
 | Web search | App-server web-search activity is rendered when the runtime uses it | **Partial** | No cached/live search control, source-focused result UI, or product-level availability setting. |
 | Built-in Browser | No shared in-app browser, website permissions, comments, downloads, or browser developer mode | **Missing** | Requires a browser surface plus Browser tool/plugin integration. |
@@ -147,7 +157,7 @@
 | Native Windows application | WPF, single-process guard, responsive three-pane shell, and native file dialogs | **Full** | SynthiaCode is intentionally Windows-only. |
 | Appearance | System, light, and dark themes | **Partial** | No accent/background/foreground editor, font selection, or theme sharing. |
 | Keyboard shortcuts | Core project, submit, navigation, terminal, settings, refresh, cross-chat search (`Ctrl+K`), and find-in-chat (`Ctrl+F`) shortcuts | **Partial** | No command palette, searchable/customizable shortcut editor, or next/previous chat navigation. |
-| Account and settings pane | Custom Codex instructions, account, appearance, Codex runtime, doctor, diagnostics, and about information | **Near** | ChatGPT has substantially broader settings. |
+| Account and settings pane | Custom Codex instructions, shared configuration editors/provenance, active-workspace skills, a redacted origin-aware effective Codex settings summary, account, appearance, runtime, doctor, diagnostics, and about information | **Near** | ChatGPT still has substantially broader plugin, connector, automation, personalization, and application settings. |
 | Notifications | Status bar and in-app state only | **Missing** | No OS completion notifications or notification preferences. |
 | Dictation/voice input | No speech input | **Missing** | ChatGPT desktop supports dictation. |
 | Quick chat, pop-out, always-on-top | No compact or detached chat window | **Missing** | ChatGPT can keep a chat beside another app. |
@@ -156,6 +166,15 @@
 | Chat profile, usage insights, and pets | Basic account/rate-limit view only | **Partial** | Profile analytics/cards and pets are non-core gaps. |
 
 ## What changed in this recheck
+
+Phase 6A skills and effective settings moved from backend-only behavior to **Near** desktop parity:
+
+1. Settings now discovers skills for the same active General, project, or worktree path used by task execution, preserves duplicate names by absolute `SKILL.md` path, and shows scope, description, dependencies, path, enabled state, and partial discovery errors.
+2. Search and scope filtering compose over a recycling-virtualized list. Rows expose accessible enable/disable, Editor, and Explorer actions; enablement uses typed `skills/config/write`, treats `effectiveEnabled` as authoritative, and performs a forced rescan.
+3. `skills/changed` is treated as debounced invalidation. Visible Settings refreshes through the existing app-server session, while hidden Settings only marks its cached result stale. Context changes and reconnects cannot apply results for an older workspace.
+4. A separate read-only effective-settings view shows only an explicit safe allowlist and available origins. MCP headers, environment values, raw JSON, and all other configuration are discarded before reaching presentation or logs.
+5. Existing SynthiaCode settings persistence, isolated `CODEX_HOME`, model/reasoning/service-tier controls, permission resolver, and atomic shared `AGENTS.md`/`config.toml` editors remain the owners of their previous behavior.
+6. Five focused tests cover the typed protocol, nonfatal compatibility fallback, redaction, view-model lifecycle, and rendered WPF surface as part of the 209-test regression suite.
 
 Custom Codex instructions moved from absent to **Full** for the local app-server outcome:
 
@@ -286,7 +305,7 @@ P0 attachments and image input moved from **Missing** to **Near**:
 2. **Chat management (core implemented):** add running-task filtering and optional bulk chat-management actions.
 3. **Notifications/background reliability:** completion notifications, prevent-sleep, and a task inbox.
 4. **Terminal integration:** expose current terminal output to Codex and add reusable project actions.
-5. **MCP and skills visibility:** show configured servers/skills, health, provenance, and enablement without owning their configuration semantics unnecessarily.
+5. **MCP visibility:** show configured servers, health, authentication state, and provenance without owning their configuration semantics unnecessarily; add optional skill invocation UX only after the composer contract is defined.
 
 ### P2 — Expand into the ChatGPT ecosystem
 

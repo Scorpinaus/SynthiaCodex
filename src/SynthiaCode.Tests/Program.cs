@@ -130,6 +130,7 @@ tests.AddRange(PromptEditingTests.All);
 tests.AddRange(ChatManagementSearchTests.All);
 tests.AddRange(ThreadRenameTests.All);
 tests.AddRange(CodexConfigurationTests.All);
+tests.AddRange(SkillsSettingsTests.All);
 
 var failures = 0;
 var testFilter = Environment.GetEnvironmentVariable("SYNTHIACODE_TEST_FILTER");

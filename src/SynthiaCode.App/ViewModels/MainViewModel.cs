@@ -148,6 +148,20 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             message => StatusMessage = message,
             logger);
         synchronizationContext = SynchronizationContext.Current;
+        Skills = new SkillsViewModel(
+            appServerSessionCoordinator,
+            GetActiveWorkspacePathIfAvailable,
+            () => ActiveWorkspaceLabel,
+            userInteractionService.OpenInEditor,
+            userInteractionService.RevealInExplorer,
+            () => IsShuttingDown,
+            message => StatusMessage = message,
+            logger);
+        EffectiveCodexSettings = new EffectiveCodexSettingsViewModel(
+            appServerSessionCoordinator,
+            GetActiveWorkspacePathIfAvailable,
+            () => IsShuttingDown,
+            logger);
         appServerSessionCoordinator.NotificationReceived += OnAppServerNotificationReceived;
         appServerSessionCoordinator.ServerRequestReceived += OnServerRequestReceived;
         appServerSessionCoordinator.ConnectionFailed += OnAppServerConnectionFailed;
@@ -553,6 +567,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public CodexConfigurationViewModel CodexConfiguration { get; }
 
+    public SkillsViewModel Skills { get; }
+
+    public EffectiveCodexSettingsViewModel EffectiveCodexSettings { get; }
+
     public AccountViewModel Account { get; }
 
     public ApprovalQueueViewModel ApprovalQueue { get; }
@@ -704,6 +722,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             if (SetProperty(ref isDetailsPaneOpen, value))
             {
                 RaiseShellVisibilityProperties();
+                UpdateSettingsSurfaceActivity();
             }
         }
     }
@@ -737,7 +756,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public int SelectedInspectorTabIndex
     {
         get => selectedInspectorTabIndex;
-        set => SetProperty(ref selectedInspectorTabIndex, Math.Clamp(value, 0, 1));
+        set
+        {
+            if (SetProperty(ref selectedInspectorTabIndex, Math.Clamp(value, 0, 1)))
+            {
+                UpdateSettingsSurfaceActivity();
+            }
+        }
     }
 
     public string TerminalInput
@@ -967,6 +992,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 openChangesCommand.RaiseCanExecuteChanged();
                 openSettingsCommand.RaiseCanExecuteChanged();
                 CodexConfiguration.RaiseCommandStates();
+                Skills.RaiseCommandStates();
+                EffectiveCodexSettings.RaiseCommandStates();
             }
         }
     }
@@ -2533,6 +2560,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ApprovalQueue.Clear();
         appServerSessionCoordinator.ServerRequestReceived -= OnServerRequestReceived;
         appServerSessionCoordinator.FlushNotifications();
+        await Skills.DisposeAsync().ConfigureAwait(true);
         await appServerSessionCoordinator.DisposeAsync().ConfigureAwait(true);
         await SaveActiveThreadStateAsync().ConfigureAwait(true);
 
@@ -3260,6 +3288,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 args.PreviousState is AppServerSessionState.Reconnecting or AppServerSessionState.Unavailable)
             {
                 TaskWorkspace.InvalidateModelCatalog();
+                EffectiveCodexSettings.NotifyContextChanged();
+                if (Skills.IsActive)
+                {
+                    _ = EffectiveCodexSettings.RefreshIfStaleAsync(appServerWarmUpCancellation.Token);
+                }
             }
         }
 
@@ -3286,6 +3319,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void ApplyNotification(AppServerNotification notification)
     {
+        if (notification.Method == "skills/changed")
+        {
+            return;
+        }
+
         if (notification.Method == "serverRequest/resolved" && TryReadRequestId(notification.Params, out var requestId))
         {
             if (ApprovalQueue.Resolve(requestId))
@@ -3541,6 +3579,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(SelectedThread));
         OnPropertyChanged(nameof(ActiveWorkspacePath));
         OnPropertyChanged(nameof(ActiveWorkspaceLabel));
+        NotifyCodexContextChanged();
         Terminal.RefreshContext();
         _ = Git.RefreshAsync();
     }
@@ -3739,6 +3778,25 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    private void UpdateSettingsSurfaceActivity()
+    {
+        Skills.IsActive = IsDetailsPaneOpen && SelectedInspectorTabIndex == 1;
+        if (Skills.IsActive)
+        {
+            _ = EffectiveCodexSettings.RefreshIfStaleAsync(appServerWarmUpCancellation.Token);
+        }
+    }
+
+    private void NotifyCodexContextChanged()
+    {
+        Skills.NotifyContextChanged();
+        EffectiveCodexSettings.NotifyContextChanged();
+        if (Skills.IsActive)
+        {
+            _ = EffectiveCodexSettings.RefreshIfStaleAsync(appServerWarmUpCancellation.Token);
+        }
+    }
+
     private void RelayGitPropertyChanged(string? propertyName)
     {
         var mainProperty = propertyName switch
@@ -3774,6 +3832,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (mainProperty is not null)
         {
             OnPropertyChanged(mainProperty);
+            if (propertyName is nameof(ProjectThreadViewModel.SelectedProjectPath) or
+                nameof(ProjectThreadViewModel.ActiveWorkspacePath) or
+                nameof(ProjectThreadViewModel.ActiveWorkspaceLabel))
+            {
+                NotifyCodexContextChanged();
+            }
         }
     }
 

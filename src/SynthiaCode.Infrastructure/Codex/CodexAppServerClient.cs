@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Codex.Configuration;
 
 namespace SynthiaCode.Infrastructure.Codex;
 
@@ -340,6 +341,114 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         return new CodexPermissionProfileListResult(profiles, null);
     }
 
+    public async Task<CodexSkillListResult> ListSkillsAsync(
+        CodexSkillListRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Cwds.Count == 0)
+        {
+            throw new ArgumentException("At least one working directory is required.", nameof(request));
+        }
+
+        var cwds = request.Cwds
+            .Select(path =>
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    throw new ArgumentException("Skill working directories cannot be empty.", nameof(request));
+                }
+
+                return Path.GetFullPath(path);
+            })
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .ToList();
+
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        JsonObject? result;
+        try
+        {
+            result = await SendRequestAsync(
+                "skills/list",
+                new JsonObject
+                {
+                    ["cwds"] = new JsonArray(cwds.Select(path => JsonValue.Create(path)).ToArray()),
+                    ["forceReload"] = request.ForceReload
+                },
+                cancellationToken).ConfigureAwait(false) as JsonObject;
+        }
+        catch (CodexAppServerProtocolException ex) when (ex.Code == -32601)
+        {
+            return new CodexSkillListResult([], IsSupported: false);
+        }
+
+        var contexts = new List<CodexSkillContextResult>();
+        if (result?["data"] is not JsonArray data)
+        {
+            return new CodexSkillListResult(contexts);
+        }
+
+        foreach (var entry in data.OfType<JsonObject>())
+        {
+            var cwd = ReadString(entry, "cwd") ?? string.Empty;
+            var errors = ParseSkillErrors(entry["errors"] as JsonArray);
+            var skills = new List<CodexSkillMetadata>();
+            if (entry["skills"] is JsonArray skillValues)
+            {
+                foreach (var skillValue in skillValues.OfType<JsonObject>())
+                {
+                    var parsed = ParseSkill(skillValue);
+                    if (parsed is not null)
+                    {
+                        skills.Add(parsed);
+                        continue;
+                    }
+
+                    errors.Add(new CodexSkillLoadError(
+                        ReadString(skillValue, "path") ?? cwd,
+                        "Codex returned incomplete skill metadata."));
+                }
+            }
+
+            contexts.Add(new CodexSkillContextResult(cwd, skills, errors));
+        }
+
+        return new CodexSkillListResult(contexts);
+    }
+
+    public async Task<CodexSkillConfigWriteResult> WriteSkillConfigAsync(
+        CodexSkillConfigWriteRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.Path) || !Path.IsPathRooted(request.Path))
+        {
+            throw new ArgumentException("An absolute SKILL.md path is required.", nameof(request));
+        }
+
+        var path = Path.GetFullPath(request.Path);
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var result = await SendRequestAsync(
+                "skills/config/write",
+                new JsonObject
+                {
+                    ["path"] = path,
+                    ["enabled"] = request.Enabled
+                },
+                cancellationToken).ConfigureAwait(false) as JsonObject;
+            var effectiveEnabled = ReadBool(result, "effectiveEnabled")
+                ?? throw new CodexAppServerProtocolException(
+                    "skills/config/write response did not include result.effectiveEnabled.");
+            return new CodexSkillConfigWriteResult(effectiveEnabled);
+        }
+        catch (CodexAppServerProtocolException ex) when (ex.Code == -32601)
+        {
+            return new CodexSkillConfigWriteResult(request.Enabled, IsSupported: false);
+        }
+    }
+
     public async Task<CodexAccountReadResult> ReadAccountAsync(
         bool refreshToken = false,
         CancellationToken cancellationToken = default)
@@ -394,6 +503,69 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             ParseSandbox(ReadString(config, "sandbox_mode")),
             ParseApprovalPolicy(config?["approval_policy"]),
             ParseApprovalsReviewer(ReadString(config, "approvals_reviewer")),
+            ReadBool(config, "sandbox_workspace_write.network_access"),
+            origins);
+    }
+
+    public async Task<CodexEffectiveConfiguration> ReadEffectiveConfigurationAsync(
+        string? cwd,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        JsonObject? result;
+        try
+        {
+            result = await SendRequestAsync(
+                "config/read",
+                new JsonObject
+                {
+                    ["cwd"] = string.IsNullOrWhiteSpace(cwd) ? null : Path.GetFullPath(cwd),
+                    ["includeLayers"] = true
+                },
+                cancellationToken).ConfigureAwait(false) as JsonObject;
+        }
+        catch (CodexAppServerProtocolException ex) when (ex.Code == -32601)
+        {
+            return CodexEffectiveConfiguration.Unsupported;
+        }
+
+        var config = result?["config"] as JsonObject;
+        var allowedOriginKeys = new HashSet<string>(
+            [
+                "model",
+                "model_provider",
+                "model_reasoning_effort",
+                "service_tier",
+                "profile",
+                "sandbox_mode",
+                "approval_policy",
+                "approvals_reviewer",
+                "web_search",
+                "sandbox_workspace_write.network_access"
+            ],
+            StringComparer.Ordinal);
+        var origins = new Dictionary<string, string?>(StringComparer.Ordinal);
+        if (result?["origins"] is JsonObject originValues)
+        {
+            foreach (var (key, value) in originValues)
+            {
+                if (allowedOriginKeys.Contains(key))
+                {
+                    origins[key] = FormatConfigOrigin(value as JsonObject);
+                }
+            }
+        }
+
+        return new CodexEffectiveConfiguration(
+            ReadString(config, "model"),
+            ReadString(config, "model_provider"),
+            ReadString(config, "model_reasoning_effort"),
+            ReadString(config, "service_tier"),
+            ReadString(config, "profile"),
+            ReadString(config, "sandbox_mode"),
+            FormatApprovalPolicy(config?["approval_policy"]),
+            ReadString(config, "approvals_reviewer"),
+            ReadString(config, "web_search"),
             ReadBool(config, "sandbox_workspace_write.network_access"),
             origins);
     }
@@ -1301,6 +1473,131 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
         return current is JsonValue value && value.TryGetValue<bool>(out var boolValue)
             ? boolValue
+            : null;
+    }
+
+    private static List<CodexSkillLoadError> ParseSkillErrors(JsonArray? values)
+    {
+        var errors = new List<CodexSkillLoadError>();
+        if (values is null)
+        {
+            return errors;
+        }
+
+        foreach (var value in values.OfType<JsonObject>())
+        {
+            var message = ReadString(value, "message");
+            if (!string.IsNullOrWhiteSpace(message))
+            {
+                errors.Add(new CodexSkillLoadError(
+                    ReadString(value, "path") ?? string.Empty,
+                    message));
+            }
+        }
+
+        return errors;
+    }
+
+    private static CodexSkillMetadata? ParseSkill(JsonObject value)
+    {
+        var name = ReadString(value, "name");
+        var description = ReadString(value, "description");
+        var path = ReadString(value, "path");
+        if (string.IsNullOrWhiteSpace(name) ||
+            string.IsNullOrWhiteSpace(description) ||
+            string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        CodexSkillInterface? skillInterface = null;
+        if (value["interface"] is JsonObject interfaceValue)
+        {
+            skillInterface = new CodexSkillInterface(
+                ReadString(interfaceValue, "displayName"),
+                ReadString(interfaceValue, "shortDescription"),
+                ReadString(interfaceValue, "brandColor"),
+                ReadString(interfaceValue, "defaultPrompt"),
+                ReadString(interfaceValue, "iconSmall"),
+                ReadString(interfaceValue, "iconLarge"));
+        }
+
+        CodexSkillDependencies? dependencies = null;
+        if (value["dependencies"] is JsonObject dependencyValue &&
+            dependencyValue["tools"] is JsonArray toolValues)
+        {
+            var tools = new List<CodexSkillToolDependency>();
+            foreach (var toolValue in toolValues.OfType<JsonObject>())
+            {
+                var type = ReadString(toolValue, "type");
+                var dependencyValueText = ReadString(toolValue, "value");
+                if (!string.IsNullOrWhiteSpace(type) && !string.IsNullOrWhiteSpace(dependencyValueText))
+                {
+                    tools.Add(new CodexSkillToolDependency(
+                        type,
+                        dependencyValueText,
+                        ReadString(toolValue, "description"),
+                        ReadString(toolValue, "command"),
+                        ReadString(toolValue, "transport"),
+                        ReadString(toolValue, "url")));
+                }
+            }
+
+            dependencies = new CodexSkillDependencies(tools);
+        }
+
+        return new CodexSkillMetadata(
+            name,
+            description,
+            Path.GetFullPath(path),
+            ParseSkillScope(ReadString(value, "scope")),
+            ReadBool(value, "enabled") ?? true,
+            ReadString(value, "shortDescription"),
+            skillInterface,
+            dependencies);
+    }
+
+    private static CodexSkillScope ParseSkillScope(string? value) => value?.ToLowerInvariant() switch
+    {
+        "user" => CodexSkillScope.User,
+        "repo" => CodexSkillScope.Repository,
+        "system" => CodexSkillScope.System,
+        "admin" => CodexSkillScope.Admin,
+        _ => CodexSkillScope.Unknown
+    };
+
+    private static string? FormatConfigOrigin(JsonObject? origin)
+    {
+        if (origin is null)
+        {
+            return null;
+        }
+
+        if (origin["name"] is JsonValue nameValue &&
+            nameValue.TryGetValue<string>(out var nameText))
+        {
+            return nameText;
+        }
+
+        if (origin["name"] is JsonObject source)
+        {
+            return ReadString(source, "file") ??
+                   ReadString(source, "path") ??
+                   ReadString(source, "type");
+        }
+
+        return ReadString(origin, "path") ?? ReadString(origin, "type");
+    }
+
+    private static string? FormatApprovalPolicy(JsonNode? value)
+    {
+        if (value is JsonObject)
+        {
+            return "granular";
+        }
+
+        return value is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var text)
+            ? text
             : null;
     }
 

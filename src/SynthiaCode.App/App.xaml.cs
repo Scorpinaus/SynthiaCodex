@@ -49,7 +49,8 @@ public partial class App : Application
             services.Logger,
             services.GeneralWorkspaceService,
             services.AttachmentStore,
-            services.WorkspaceAttachmentResolver);
+            services.WorkspaceAttachmentResolver,
+            services.SharedCodexConfigurationService);
 
         MainWindow = new MainWindow(mainViewModel);
         MainWindow.Show();

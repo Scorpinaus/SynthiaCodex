@@ -100,6 +100,12 @@ Protocol request construction, response correlation, parsing, and transport fail
 
 Settings persist the mode and optional profile ID through `AppSettingsPermissionMigration`. Existing workspace-write/on-request settings migrate to Ask, explicit inheritance migrates to Custom, and nonstandard legacy combinations remain a distinct compatibility state without broadening access. `config/read` and `configRequirements/read` supply effective and managed context; reviewer and profile restrictions are enforced alongside legacy sandbox/policy restrictions. Unknown modes, stale profiles, and disallowed selections fail closed. The single resolved result is passed consistently to thread start, resume, fork, replacement-thread, and every turn-start request, and the client rejects any request that combines a permission profile with a legacy sandbox before writing to transport.
 
+### Shared Codex configuration and provenance
+
+`SharedCodexConfigurationService` owns the two editable files in the isolated runtime home: `AGENTS.md` and `config.toml`. It reads strict UTF-8 up to 512 KiB, fingerprints loaded bytes with SHA-256, rejects stale revisions, writes a same-directory temporary file through to disk, and atomically replaces the destination. Missing shared files are materialized only for an explicit save or external-editor action. File contents never enter structured logs.
+
+For the active workspace, the service locates the nearest Git root and enumerates existing `AGENTS.md` and `.codex/config.toml` files from root to leaf after the two shared sources. `CodexConfigurationViewModel` keeps dirty editor text during automatic Settings refresh, exposes explicit refresh/save conflict recovery, and supplies Editor/Explorer commands for every provenance record. Project-owned sources are provenance-only in the built-in editor and deep-link to the user's external tools.
+
 ```text
 app-server request (method + id)
   -> CodexAppServerClient typed parser and incoming registry

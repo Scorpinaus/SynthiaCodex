@@ -30,6 +30,15 @@
 | Phase 15.2 | Implemented retained, expandable work details above the final answer. Assistant updates render as full Markdown message text, commands/searches/tools retain structured rows, live work stays expanded, completed work collapses without losing detail, and the disclosure reports total turn duration from persisted timestamps. Responsive coverage verifies long content, links, collapse, and re-expansion. | **Complete** |
 | Phase 15.3 | Completed the full 199-test regression gate. Rebuilt and verified `src/SynthiaCode.App/bin/Debug/net10.0-windows/SynthiaCode.App.exe` and `src/SynthiaCode.App/bin/Release/net10.0-windows/SynthiaCode.App.exe`; both configurations completed with zero warnings and zero errors. | **Complete** |
 
+## Shared Codex configuration implementation parity
+
+| Phase | Implemented outcome | Status |
+| --- | --- | --- |
+| Phase 1 - Test contract | Added red-test coverage for atomic shared-file editing with stale-write protection, ordered shared/workspace provenance, editor and Explorer deep links, and accessible Settings controls. The expected compile failure confirms the production contract is not yet present. | **Complete** |
+| Phase 2 - Configuration core | Added size-bounded UTF-8 storage for shared `AGENTS.md` and `config.toml`, atomic replace, revision-based stale-write rejection, missing-file creation, and root-to-leaf discovery of active workspace `AGENTS.md` and `.codex/config.toml` sources. The focused Core/Infrastructure build passes with zero warnings and errors. | **Complete** |
+| Phase 3 - Desktop surface | Added multiline shared `AGENTS.md` and `config.toml` editors, explicit refresh/save state, raw-TOML safety guidance, actionable conflict messages, ordered source cards for shared/workspace provenance, and Editor/Explorer deep links. Automatic refresh retains unsaved edits, configuration contents are excluded from logs, and all four focused tests pass. | **Complete** |
+| Phase 4 - Verification | All 203 tests pass in both Debug and Release. A pre-existing console-test polling race found by the final gate now retries only the transient concurrent-enumeration condition. Clean solution rebuilds produced verified Debug and Release executables with zero warnings and errors. | **Complete** |
+
 ## Status legend
 
 | Status | Meaning |
@@ -49,7 +58,7 @@
 | Agent orchestration | **Partial** | Parallel top-level chats and collaboration activity exist, but subagent thread inspection and management are absent. |
 | Context and multimodal input | **Near** | Per-chat context-window visibility plus image/file/folder picker, paste/drop, previews, queued lifecycle persistence, workspace mentions, and managed external snapshots are implemented; rich artifact viewing and remaining hardening are out of scope. |
 | Tools and integrations | **Low** | Configured MCP/web activity can flow through app-server, but Browser, Chrome, plugins, connectors, skills management, and Scheduled are not product surfaces. |
-| Desktop convenience | **Moderate** | Native Windows shell, themes, diagnostics, custom Codex instruction defaults, cross-chat search, find-in-chat, and core shortcuts exist; notifications, dictation, quick chat, deep links, and broader personalization do not. |
+| Desktop convenience | **Moderate** | Native Windows shell, themes, diagnostics, custom Codex instruction defaults, shared-configuration source links, cross-chat search, find-in-chat, and core shortcuts exist; notifications, dictation, quick chat, general task deep links, and broader personalization do not. |
 
 ## Detailed parity matrix
 
@@ -109,7 +118,7 @@
 
 | Feature | SynthiaCode | Status | Remaining difference |
 | --- | --- | --- | --- |
-| `AGENTS.md` and shared Codex configuration | Inherited by the launched Codex runtime | **Near** | No editor, provenance view, or configuration deep links. |
+| `AGENTS.md` and shared Codex configuration | Settings edits the isolated shared `CODEX_HOME` `AGENTS.md` and `config.toml` with atomic stale-write protection, shows the active shared/workspace source chain in precedence order, and opens or reveals every source | **Full** | Workspace `AGENTS.md` and `.codex/config.toml` sources deliberately deep-link to the external editor rather than being rewritten through the shared-file editor. |
 | Context-window visibility | A live percentage-used indicator sits beside Send; hover details show used/remaining percentages, latest-context tokens versus the model window, and cumulative compactions per persisted chat; app-server compaction lifecycle events render in the transcript | **Full** | Older settings show unavailable usage until app-server sends the first `thread/tokenUsage/updated` notification. Compaction and summarization remain owned by Codex app-server. |
 | Subagent execution | Collaboration notifications render as agent activity when Codex delegates | **Partial** | No Active/Done panel, agent-thread transcript, open/steer/stop controls, nicknames, or custom-agent management. |
 | MCP tool execution | Configured MCP tool activity and progress are parsed and shown | **Partial** | No MCP list/add/remove/auth/status UI or elicitation-specific presentation. |

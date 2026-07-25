@@ -129,6 +129,7 @@ tests.AddRange(ProjectlessThreadTests.All);
 tests.AddRange(PromptEditingTests.All);
 tests.AddRange(ChatManagementSearchTests.All);
 tests.AddRange(ThreadRenameTests.All);
+tests.AddRange(CodexConfigurationTests.All);
 
 var failures = 0;
 var testFilter = Environment.GetEnvironmentVariable("SYNTHIACODE_TEST_FILTER");
@@ -2986,8 +2987,22 @@ static MainViewModel CreateMainViewModel(
 static async Task WaitUntilAsync(Func<bool> condition, string label)
 {
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-    while (!condition())
+    while (true)
     {
+        try
+        {
+            if (condition())
+            {
+                return;
+            }
+        }
+        catch (InvalidOperationException ex) when (
+            ex.Message.Contains("Collection was modified", StringComparison.Ordinal))
+        {
+            // Observable collections are UI-thread-owned in production. The console test host
+            // has no synchronization context, so retry a transient concurrent enumeration.
+        }
+
         await Task.Delay(20, timeout.Token);
     }
 }

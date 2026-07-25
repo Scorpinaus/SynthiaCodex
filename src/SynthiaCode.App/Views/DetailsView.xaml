@@ -125,6 +125,163 @@
 
                     <Border Style="{StaticResource Card}" Margin="0,0,0,10">
                         <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Shared Codex configuration" FontWeight="SemiBold"/>
+                                    <TextBlock Text="Edit the files inherited by every SynthiaCode task and inspect the active workspace source order."
+                                               Foreground="{DynamicResource MutedInkBrush}"
+                                               FontSize="11"
+                                               TextWrapping="Wrap"
+                                               Margin="0,5,8,0"/>
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Content="Refresh"
+                                        Command="{Binding CodexConfiguration.RefreshCommand}"
+                                        Style="{StaticResource CompactButton}"
+                                        VerticalAlignment="Top"
+                                        AutomationProperties.Name="Refresh shared Codex configuration"/>
+                            </Grid>
+
+                            <Expander Header="Shared AGENTS.md"
+                                      IsExpanded="False"
+                                      Margin="0,10,0,0">
+                                <StackPanel Margin="0,8,0,0">
+                                    <TextBlock Text="{Binding CodexConfiguration.SharedInstructionsPath}"
+                                               Style="{StaticResource ValueText}"
+                                               TextWrapping="Wrap"/>
+                                    <TextBox x:Name="SharedAgentsEditor"
+                                             Text="{Binding CodexConfiguration.SharedInstructionsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             AcceptsReturn="True"
+                                             AcceptsTab="True"
+                                             TextWrapping="NoWrap"
+                                             HorizontalScrollBarVisibility="Auto"
+                                             VerticalScrollBarVisibility="Auto"
+                                             FontFamily="Consolas"
+                                             MinHeight="140"
+                                             MaxHeight="300"
+                                             Padding="8"
+                                             Margin="0,7,0,0"
+                                             AutomationProperties.Name="Shared AGENTS.md"/>
+                                    <WrapPanel Margin="0,8,0,0">
+                                        <Button x:Name="SaveSharedAgentsButton"
+                                                Content="Save AGENTS.md"
+                                                Command="{Binding CodexConfiguration.SaveSharedInstructionsCommand}"
+                                                Style="{StaticResource CompactButton}"
+                                                Margin="0,0,6,6"/>
+                                        <Button Content="Editor"
+                                                Command="{Binding CodexConfiguration.OpenSharedInstructionsCommand}"
+                                                Style="{StaticResource CompactButton}"
+                                                Margin="0,0,0,6"
+                                                AutomationProperties.Name="Open shared AGENTS.md in editor"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Expander>
+
+                            <Expander Header="Shared config.toml"
+                                      IsExpanded="False"
+                                      Margin="0,6,0,0">
+                                <StackPanel Margin="0,8,0,0">
+                                    <TextBlock Text="{Binding CodexConfiguration.SharedConfigurationPath}"
+                                               Style="{StaticResource ValueText}"
+                                               TextWrapping="Wrap"/>
+                                    <TextBlock Text="Advanced: invalid TOML can prevent Codex from starting. SynthiaCode preserves the text exactly; Codex validates it when configuration is loaded."
+                                               Foreground="{DynamicResource WarningBrush}"
+                                               FontSize="11"
+                                               TextWrapping="Wrap"
+                                               Margin="0,6,0,0"/>
+                                    <TextBox x:Name="SharedConfigEditor"
+                                             Text="{Binding CodexConfiguration.SharedConfigurationText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             AcceptsReturn="True"
+                                             AcceptsTab="True"
+                                             TextWrapping="NoWrap"
+                                             HorizontalScrollBarVisibility="Auto"
+                                             VerticalScrollBarVisibility="Auto"
+                                             FontFamily="Consolas"
+                                             MinHeight="140"
+                                             MaxHeight="300"
+                                             Padding="8"
+                                             Margin="0,7,0,0"
+                                             AutomationProperties.Name="Shared Codex config.toml"/>
+                                    <WrapPanel Margin="0,8,0,0">
+                                        <Button x:Name="SaveSharedConfigButton"
+                                                Content="Save config.toml"
+                                                Command="{Binding CodexConfiguration.SaveSharedConfigurationCommand}"
+                                                Style="{StaticResource CompactButton}"
+                                                Margin="0,0,6,6"/>
+                                        <Button Content="Editor"
+                                                Command="{Binding CodexConfiguration.OpenSharedConfigurationCommand}"
+                                                Style="{StaticResource CompactButton}"
+                                                Margin="0,0,0,6"
+                                                AutomationProperties.Name="Open shared config.toml in editor"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Expander>
+
+                            <TextBlock Text="{Binding CodexConfiguration.ConfigurationMessage}"
+                                       Foreground="{DynamicResource MutedInkBrush}"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       Margin="0,8,0,0"
+                                       AutomationProperties.LiveSetting="Polite"/>
+
+                            <TextBlock Text="Configuration provenance"
+                                       FontWeight="SemiBold"
+                                       Margin="0,12,0,6"/>
+                            <ItemsControl x:Name="CodexConfigurationProvenance"
+                                          ItemsSource="{Binding CodexConfiguration.Provenance}"
+                                          AutomationProperties.Name="Codex configuration provenance">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="6"
+                                                Padding="8"
+                                                Margin="0,0,0,6">
+                                            <StackPanel>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding Scope}"
+                                                               FontWeight="SemiBold"
+                                                               FontSize="11"
+                                                               TextWrapping="Wrap"/>
+                                                    <TextBlock Grid.Column="1"
+                                                               Text="{Binding Availability}"
+                                                               Foreground="{DynamicResource MutedInkBrush}"
+                                                               FontSize="10"
+                                                               Margin="8,0,0,0"/>
+                                                </Grid>
+                                                <TextBlock Text="{Binding Path}"
+                                                           Style="{StaticResource ValueText}"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,4,0,0"/>
+                                                <WrapPanel Margin="0,7,0,0">
+                                                    <Button Content="Editor"
+                                                            Command="{Binding DataContext.CodexConfiguration.OpenSourceCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                            CommandParameter="{Binding}"
+                                                            Style="{StaticResource CompactButton}"
+                                                            Margin="0,0,6,0"/>
+                                                    <Button Content="Explorer"
+                                                            Command="{Binding DataContext.CodexConfiguration.RevealSourceCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                            CommandParameter="{Binding}"
+                                                            Style="{StaticResource CompactButton}"/>
+                                                </WrapPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,10">
+                        <StackPanel>
                             <TextBlock Text="Appearance" FontWeight="SemiBold"/>
                             <TextBlock Text="Theme"
                                        Foreground="{DynamicResource MutedInkBrush}"

@@ -2,6 +2,7 @@ using SynthiaCode.App.Services;
 using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Auth;
 using SynthiaCode.Core.Codex;
+using SynthiaCode.Core.Codex.Configuration;
 using SynthiaCode.Core.Logging;
 using SynthiaCode.Core.Git;
 using SynthiaCode.Core.Projects;
@@ -11,6 +12,7 @@ using SynthiaCode.Infrastructure;
 using SynthiaCode.Infrastructure.Auth;
 using SynthiaCode.Infrastructure.Attachments;
 using SynthiaCode.Infrastructure.Codex;
+using SynthiaCode.Infrastructure.Codex.Configuration;
 using SynthiaCode.Infrastructure.Logging;
 using SynthiaCode.Infrastructure.Git;
 using SynthiaCode.Infrastructure.Projects;
@@ -46,7 +48,8 @@ public sealed class AppServices
         IAppLogger logger,
         IGeneralWorkspaceService generalWorkspaceService,
         IAttachmentStore attachmentStore,
-        WorkspaceAttachmentResolver workspaceAttachmentResolver)
+        WorkspaceAttachmentResolver workspaceAttachmentResolver,
+        ISharedCodexConfigurationService sharedCodexConfigurationService)
     {
         SettingsStore = settingsStore;
         CodexDiscoveryService = codexDiscoveryService;
@@ -66,6 +69,7 @@ public sealed class AppServices
         GeneralWorkspaceService = generalWorkspaceService;
         AttachmentStore = attachmentStore;
         WorkspaceAttachmentResolver = workspaceAttachmentResolver;
+        SharedCodexConfigurationService = sharedCodexConfigurationService;
     }
 
     public ISettingsStore SettingsStore { get; }
@@ -104,6 +108,8 @@ public sealed class AppServices
 
     public WorkspaceAttachmentResolver WorkspaceAttachmentResolver { get; }
 
+    public ISharedCodexConfigurationService SharedCodexConfigurationService { get; }
+
     public static AppServices Create()
     {
         var appDataDirectory = SystemPaths.AppDataDirectory;
@@ -136,6 +142,8 @@ public sealed class AppServices
         var generalWorkspaceService = new GeneralWorkspaceService(appDataDirectory);
         var attachmentStore = new LocalAttachmentStore(Path.Combine(appDataDirectory, "attachments"), logger);
         var workspaceAttachmentResolver = new WorkspaceAttachmentResolver();
+        var sharedCodexConfigurationService =
+            new SharedCodexConfigurationService(codexRuntimeEnvironment.HomePath);
 
         logger.Log(AppLogLevel.Information, "app_services_created", "Application services were created.");
 
@@ -157,6 +165,7 @@ public sealed class AppServices
             logger,
             generalWorkspaceService,
             attachmentStore,
-            workspaceAttachmentResolver);
+            workspaceAttachmentResolver,
+            sharedCodexConfigurationService);
     }
 }

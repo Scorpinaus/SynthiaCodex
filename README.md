@@ -47,6 +47,12 @@ Use the permission selector beneath the task composer to choose one of three mod
 
 Named profiles and their rules remain owned by `config.toml`; SynthiaCode does not rewrite them. Managed Codex requirements disable unavailable reviewers or profiles, stale selections fail closed, and older Codex app-server versions fall back to the equivalent `workspace-write` behavior for Ask for approval.
 
+## Shared Codex configuration
+
+Settings can edit the `AGENTS.md` and `config.toml` files in SynthiaCode's isolated shared `CODEX_HOME`. Saves are UTF-8, size-bounded, atomic, and rejected if the file changed externally after it was loaded. Configuration text is never written to application logs.
+
+The same section shows the active source chain for the current workspace in root-to-leaf precedence order. Shared files can be edited in the built-in multiline editors or opened externally; workspace `AGENTS.md` and `.codex/config.toml` sources remain project-owned and use Editor/Explorer deep links.
+
 ## Solution
 
 ```text

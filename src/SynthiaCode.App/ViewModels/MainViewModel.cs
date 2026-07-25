@@ -7,6 +7,7 @@ using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Auth;
 using SynthiaCode.Core.Codex;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Codex.Configuration;
 using SynthiaCode.Core.Git;
 using SynthiaCode.Core.Logging;
 using SynthiaCode.Core.Projects;
@@ -15,6 +16,7 @@ using SynthiaCode.Core.Terminal;
 using SynthiaCode.Core.Worktrees;
 using SynthiaCode.Core.Workspaces;
 using SynthiaCode.Infrastructure.Attachments;
+using SynthiaCode.Infrastructure.Codex.Configuration;
 
 namespace SynthiaCode.App.ViewModels;
 
@@ -116,7 +118,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         IAppLogger logger,
         IGeneralWorkspaceService generalWorkspaceService,
         IAttachmentStore? attachmentStore = null,
-        WorkspaceAttachmentResolver? workspaceAttachmentResolver = null)
+        WorkspaceAttachmentResolver? workspaceAttachmentResolver = null,
+        ISharedCodexConfigurationService? sharedCodexConfigurationService = null)
     {
         this.settingsStore = settingsStore;
         this.appServerSessionCoordinator = appServerSessionCoordinator;
@@ -132,6 +135,18 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         this.generalWorkspaceService = generalWorkspaceService;
         this.attachmentStore = attachmentStore;
         this.workspaceAttachmentResolver = workspaceAttachmentResolver ?? new WorkspaceAttachmentResolver();
+        sharedCodexConfigurationService ??= new SharedCodexConfigurationService(
+            Path.Combine(
+                Path.GetDirectoryName(settingsStore.SettingsPath) ?? AppContext.BaseDirectory,
+                "codex-home"));
+        CodexConfiguration = new CodexConfigurationViewModel(
+            sharedCodexConfigurationService,
+            GetActiveWorkspacePathIfAvailable,
+            userInteractionService.OpenInEditor,
+            userInteractionService.RevealInExplorer,
+            () => IsShuttingDown,
+            message => StatusMessage = message,
+            logger);
         synchronizationContext = SynchronizationContext.Current;
         appServerSessionCoordinator.NotificationReceived += OnAppServerNotificationReceived;
         appServerSessionCoordinator.ServerRequestReceived += OnServerRequestReceived;
@@ -534,6 +549,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public TerminalViewModel Terminal { get; }
 
     public DiagnosticsViewModel DiagnosticsViewModel { get; }
+
+    public CodexConfigurationViewModel CodexConfiguration { get; }
 
     public AccountViewModel Account { get; }
 
@@ -948,6 +965,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 dismissShellOverlayCommand.RaiseCanExecuteChanged();
                 openChangesCommand.RaiseCanExecuteChanged();
                 openSettingsCommand.RaiseCanExecuteChanged();
+                CodexConfiguration.RaiseCommandStates();
             }
         }
     }
@@ -1781,6 +1799,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         settings.IsProjectRailOpen = IsProjectRailOpen;
         settings.IsDetailsPaneOpen = true;
         _ = SaveLayoutSelectionAsync();
+        _ = CodexConfiguration.RefreshIfCleanAsync(appServerWarmUpCancellation.Token);
         if (appServerSessionCoordinator.State == AppServerSessionState.Connected)
         {
             var policyCwd = GetActiveWorkspacePathIfAvailable();

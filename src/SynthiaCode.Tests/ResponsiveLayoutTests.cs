@@ -426,6 +426,18 @@ internal static class ResponsiveLayoutTests
             AutomationProperties.GetName(block) == "Assistant message date and time");
         Assert(!string.IsNullOrWhiteSpace(userTimestamp.Text), "user message has its own timestamp footer");
         Assert(!string.IsNullOrWhiteSpace(assistantTimestamp.Text), "assistant message has its own timestamp footer");
+        var userSurface = FindVisualDescendants<Border>(conversationList)
+            .Single(border => AutomationProperties.GetName(border) == "User message");
+        var userFooter = FindVisualDescendants<Grid>(conversationList)
+            .Single(grid => AutomationProperties.GetName(grid) == "User message footer");
+        var assistantFooter = FindVisualDescendants<Grid>(conversationList)
+            .Single(grid => AutomationProperties.GetName(grid) == "Assistant message footer");
+        Assert(!IsVisualDescendantOf(userFooter, userSurface), "user date and actions sit below and outside the user message surface");
+        Assert(!IsVisualDescendantOf(assistantFooter, assistantSurface), "assistant date, copy, and fork actions sit below and outside the assistant message surface");
+        Assert(IsVisualDescendantOf(userTimestamp, userFooter), "user timestamp belongs to the external user footer");
+        Assert(IsVisualDescendantOf(assistantTimestamp, assistantFooter), "assistant timestamp belongs to the external assistant footer");
+        Assert(!transcriptText.Any(block => block.Text == "You"), "user message omits the You role label");
+        Assert(!transcriptText.Any(block => block.Text == "Assistant"), "assistant message omits the Assistant role label");
         Assert(!transcriptText.Any(block => block.Text is "Turn" or "Completed"), "turn-level metadata is removed");
 
         var copyButtons = FindVisualDescendants<Button>(conversationList)
@@ -434,6 +446,14 @@ internal static class ResponsiveLayoutTests
         Assert(copyButtons.Count == 2, "each message has a copy action");
         Assert(Equals(copyButtons["Copy user message"].CommandParameter, longLine), "user copy action targets the user message");
         Assert(Equals(copyButtons["Copy assistant message"].CommandParameter, tallResponse), "assistant copy action targets the assistant message");
+        var assistantCopyButton = copyButtons["Copy assistant message"];
+        var forkButton = FindVisualDescendants<Button>(assistantFooter)
+            .Single(button => AutomationProperties.GetName(button) == "Fork conversation from assistant message");
+        Assert(Grid.GetColumn(assistantTimestamp) == 0, "assistant date starts at the left edge of its footer");
+        Assert(Grid.GetColumn(assistantCopyButton) == 1, "assistant copy follows the date on the left");
+        Assert(Grid.GetColumn(forkButton) == 2, "assistant fork follows copy on the left");
+        Assert(Equals(forkButton.Content, "Fork"), "assistant footer labels the fork action");
+        Assert(ReferenceEquals(forkButton.CommandParameter, turn), "assistant fork targets its conversation turn");
         Assert(
             VirtualizingPanel.GetScrollUnit(conversationList) == ScrollUnit.Pixel,
             "transcript uses pixel scrolling for variable-height turns");

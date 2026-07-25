@@ -192,7 +192,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             PersistSelectedFollowUpQueueAsync,
             SendQueuedFollowUpNowAsync,
             EditPromptAsync,
-            userInteractionService.ShowImagePreview);
+            userInteractionService.ShowImagePreview,
+            ForkConversationFromTurnAsync);
         TaskWorkspace.PropertyChanged += (_, args) => RelayTaskPropertyChanged(args.PropertyName);
 
         ApprovalQueue = new ApprovalQueueViewModel(appServerSessionCoordinator.RespondToServerRequestAsync);
@@ -1275,9 +1276,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private async Task ForkSelectedThreadAsync()
+    private Task ForkSelectedThreadAsync() => ForkThreadAsync(null);
+
+    private Task ForkConversationFromTurnAsync(CodexConversationTurn turn) => ForkThreadAsync(turn);
+
+    private async Task ForkThreadAsync(CodexConversationTurn? forkPoint)
     {
-        if (!CanUseSelectedThread() || SelectedThread is null)
+        if (!CanUseSelectedThread() ||
+            SelectedThread is null ||
+            (forkPoint is not null &&
+             (IsTurnRunning || forkPoint.IsSuperseded || !forkPoint.HasAssistantResponse)))
         {
             return;
         }
@@ -1287,10 +1295,42 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
             var sourceThread = SelectedThread;
             var sourceWorkspace = GetActiveWorkspacePath();
+            var sourceService = threadWorkspace.GetRequired(sourceThread.ThreadId);
+            var sourceConversation = sourceService.SnapshotConversation();
+            var forkPointIndex = forkPoint is null
+                ? sourceConversation.Count - 1
+                : sourceService.ConversationTurns.IndexOf(forkPoint);
+            if (forkPoint is not null && forkPointIndex < 0)
+            {
+                throw new InvalidOperationException("The selected assistant response is no longer part of this chat.");
+            }
+
+            var rollbackCount = 0;
+            if (forkPoint is not null)
+            {
+                var activeTurnsFromForkPoint = sourceService.GetActiveRollbackTurnCount(forkPoint);
+                if (activeTurnsFromForkPoint == 0)
+                {
+                    throw new InvalidOperationException("Only an active completed response can be forked.");
+                }
+                rollbackCount = activeTurnsFromForkPoint - 1;
+            }
+
             var instructionSnapshot = ResolveInstructionSnapshot(sourceThread.ThreadId);
             var result = await appServerSessionCoordinator
                 .ForkThreadAsync(CreateThreadForkRequest(sourceThread.ThreadId, sourceWorkspace, instructionSnapshot))
                 .ConfigureAwait(true);
+            if (rollbackCount > 0)
+            {
+                var rollback = await appServerSessionCoordinator
+                    .RollbackThreadAsync(new CodexThreadRollbackRequest(result.ThreadId, rollbackCount))
+                    .ConfigureAwait(true);
+                if (!string.Equals(rollback.ThreadId, result.ThreadId, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Codex returned a different thread while creating the conversation fork.");
+                }
+            }
+
             AssistantWorktree? worktree = null;
             if (sourceThread.ScopeKind == ThreadScopeKind.Project &&
                 string.Equals(sourceThread.Mode, "worktree", StringComparison.OrdinalIgnoreCase))
@@ -1315,17 +1355,22 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 worktree?.Path ?? sourceWorkspace,
                 worktree?.Branch,
                 instructionSnapshot: instructionSnapshot);
-            state.Preview = sourceThread.Preview;
-            var sourceService = threadWorkspace.GetRequired(sourceThread.ThreadId);
-            state.FinalResponse = sourceService.FinalResponse;
-            state.ConversationTurns = sourceService.SnapshotConversation().Select(CloneConversationTurn).ToList();
-            state.ContextTokensUsed = sourceService.ContextTokensUsed;
+            state.Preview = forkPoint?.UserPrompt ?? sourceThread.Preview;
+            state.FinalResponse = forkPoint?.AssistantResponse ?? sourceService.FinalResponse;
+            state.ConversationTurns = sourceConversation
+                .Take(forkPoint is null ? sourceConversation.Count : forkPointIndex + 1)
+                .Select(CloneConversationTurn)
+                .ToList();
+            state.ContextTokensUsed = rollbackCount == 0 ? sourceService.ContextTokensUsed : 0;
             state.ContextWindowTokens = sourceService.ContextWindowTokens;
-            state.ContextCompactionCount = sourceService.ContextCompactionCount;
+            state.ContextCompactionCount = rollbackCount == 0 ? sourceService.ContextCompactionCount : 0;
             threadStore.Upsert(settings, state);
+            threadWorkspace.Restore(state);
             loadedThreadIds.Add(result.ThreadId);
             RefreshProjectThreads(result.ThreadId);
-            StatusMessage = "Codex thread forked";
+            StatusMessage = forkPoint is null
+                ? "Codex thread forked"
+                : "Conversation forked from the selected response";
             await settingsStore.SaveAsync(settings).ConfigureAwait(true);
         }
         catch (Exception ex)

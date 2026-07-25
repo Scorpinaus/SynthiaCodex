@@ -19,6 +19,7 @@ internal static class PromptEditingTests
         ("thread service retains previous prompt versions", ThreadServiceRetainsPreviousPromptVersionsAsync),
         ("task view model edits and resubmits a prompt", TaskViewModelEditsAndResubmitsPromptAsync),
         ("prompt edit rolls back and continues the selected thread", PromptEditRollsBackAndContinuesSelectedThreadAsync),
+        ("assistant response forks a new chat at that turn", AssistantResponseForksNewChatAtTurnAsync),
         ("task transcript exposes prompt edit controls", TaskTranscriptExposesPromptEditControlsAsync)
     ];
 
@@ -181,6 +182,78 @@ internal static class PromptEditingTests
         transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-edit","turn":{"id":"turn-edited","status":"completed","items":[]}}}""");
         await WaitUntilAsync(() => !viewModel.IsTurnRunning, "edited prompt completed");
         Assert(viewModel.TaskWorkspace.ConversationTurns[2].AssistantResponse == "Edited answer", "edited response is visible beside previous responses");
+        await viewModel.DisposeAsync();
+    }
+
+    private static async Task AssistantResponseForksNewChatAtTurnAsync()
+    {
+        using var temp = TempWorkspace.Create();
+        await using var transport = new FakeAppServerTransport();
+        var projectPath = temp.CreateDirectory("ResponseForkRepo");
+        var viewModel = CreateViewModel(transport, projectPath);
+        await viewModel.InitializeAsync();
+        viewModel.BrowseProjectCommand.Execute(null);
+        await WaitUntilAsync(
+            () => string.Equals(viewModel.SelectedProjectPath, projectPath, StringComparison.OrdinalIgnoreCase),
+            "response fork project selection");
+
+        viewModel.PromptText = "Original prompt";
+        viewModel.SubmitPromptCommand.Execute(null);
+        await transport.WaitForClientMessageCountAsync(2);
+        transport.ServerSend("""{"id":0,"result":{"userAgent":"codex-test"}}""");
+        await transport.WaitForClientMessageCountAsync(3);
+        transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thread-fork-source"}}}""");
+        await transport.WaitForClientMessageCountAsync(4);
+        transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-original"}}}""");
+        await WaitUntilAsync(() => viewModel.IsTurnRunning, "fork source first turn running");
+        await CompleteAutomaticThreadRenameAsync(transport, "thread-fork-source");
+        transport.ServerSend("""{"method":"item/agentMessage/delta","params":{"threadId":"thread-fork-source","turnId":"turn-original","itemId":"answer-original","delta":"Original answer"}}""");
+        transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-fork-source","turn":{"id":"turn-original","status":"completed","items":[]}}}""");
+        await WaitUntilAsync(() => !viewModel.IsTurnRunning, "fork source first turn completed");
+
+        viewModel.PromptText = "Later prompt";
+        viewModel.SubmitPromptCommand.Execute(null);
+        await transport.WaitForClientMessageCountAsync(6);
+        transport.ServerSend("""{"id":4,"result":{"turn":{"id":"turn-later"}}}""");
+        await WaitUntilAsync(() => viewModel.IsTurnRunning, "fork source later turn running");
+        transport.ServerSend("""{"method":"item/agentMessage/delta","params":{"threadId":"thread-fork-source","turnId":"turn-later","itemId":"answer-later","delta":"Later answer"}}""");
+        transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-fork-source","turn":{"id":"turn-later","status":"completed","items":[]}}}""");
+        await WaitUntilAsync(() => !viewModel.IsTurnRunning, "fork source later turn completed");
+
+        var forkPoint = viewModel.TaskWorkspace.ConversationTurns[0];
+        Assert(viewModel.TaskWorkspace.ForkConversationCommand.CanExecute(forkPoint), "completed assistant response can be forked");
+        viewModel.TaskWorkspace.ForkConversationCommand.Execute(forkPoint);
+
+        await transport.WaitForClientMessageCountAsync(7);
+        var forkRequest = ParseMessage(transport.ClientMessages[6]);
+        Assert(ReadString(forkRequest, "method") == "thread/fork", "assistant response uses thread fork");
+        Assert(ReadString(forkRequest, "params.threadId") == "thread-fork-source", "assistant response forks the selected source chat");
+        var forkRequestId = ReadInt(forkRequest, "id") ?? throw new InvalidOperationException("Fork request id was missing.");
+        transport.ServerSend(
+            """{"id":REQUEST_ID,"result":{"thread":{"id":"thread-fork-result"}}}"""
+                .Replace("REQUEST_ID", forkRequestId.ToString(), StringComparison.Ordinal));
+
+        await transport.WaitForClientMessageCountAsync(8);
+        var rollbackRequest = ParseMessage(transport.ClientMessages[7]);
+        Assert(ReadString(rollbackRequest, "method") == "thread/rollback", "fork rolls back later turns only in the new chat");
+        Assert(ReadString(rollbackRequest, "params.threadId") == "thread-fork-result", "rollback targets the new chat");
+        Assert(ReadInt(rollbackRequest, "params.numTurns") == 1, "fork keeps the selected assistant response");
+        var rollbackRequestId = ReadInt(rollbackRequest, "id") ?? throw new InvalidOperationException("Rollback request id was missing.");
+        transport.ServerSend(
+            """
+            {"id":REQUEST_ID,"result":{"thread":{"id":"thread-fork-result","turns":[{"id":"turn-original","status":"completed","items":[{"type":"userMessage","content":[{"type":"text","text":"Original prompt"}]},{"type":"agentMessage","text":"Original answer"}]}]}}}
+            """
+                .Replace("REQUEST_ID", rollbackRequestId.ToString(), StringComparison.Ordinal));
+
+        await WaitUntilAsync(
+            () => viewModel.StatusMessage == "Conversation forked from the selected response",
+            "response fork completion");
+        Assert(viewModel.SelectedThread?.ThreadId == "thread-fork-result", "forked response chat is selected");
+        Assert(
+            viewModel.TaskWorkspace.ConversationTurns.Count == 1,
+            $"new chat ends at the selected assistant response (actual count: {viewModel.TaskWorkspace.ConversationTurns.Count})");
+        Assert(viewModel.TaskWorkspace.ConversationTurns[0].TurnId == "turn-original", "new chat retains the selected turn");
+        Assert(viewModel.TaskWorkspace.ConversationTurns[0].AssistantResponse == "Original answer", "new chat retains the selected assistant response");
         await viewModel.DisposeAsync();
     }
 

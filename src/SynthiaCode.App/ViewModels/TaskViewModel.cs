@@ -18,6 +18,7 @@ public sealed class TaskViewModel : ObservableObject
     private readonly RelayCommand beginPromptEditCommand;
     private readonly RelayCommand cancelPromptEditCommand;
     private readonly AsyncRelayCommand submitPromptEditCommand;
+    private readonly AsyncRelayCommand forkConversationCommand;
     private readonly RelayCommand beginQueuedFollowUpEditCommand;
     private readonly RelayCommand cancelQueuedFollowUpEditCommand;
     private readonly AsyncRelayCommand saveQueuedFollowUpEditCommand;
@@ -73,7 +74,8 @@ public sealed class TaskViewModel : ObservableObject
         Func<Task>? persistFollowUpQueue = null,
         Func<QueuedFollowUp, Task>? sendQueuedFollowUp = null,
         Func<CodexConversationTurn, string, Task<bool>>? editPrompt = null,
-        Action<string>? showLocalImage = null)
+        Action<string>? showLocalImage = null,
+        Func<CodexConversationTurn, Task>? forkConversation = null)
     {
         SubmitCommand = submitCommand = new AsyncRelayCommand(submit);
         ComposerSendCommand = composerSendCommand = new AsyncRelayCommand(
@@ -132,6 +134,15 @@ public sealed class TaskViewModel : ObservableObject
                 editPrompt is not null &&
                 !IsTurnRunning &&
                 turn.IsPromptEditing);
+        ForkConversationCommand = forkConversationCommand = new AsyncRelayCommand(
+            parameter => parameter is CodexConversationTurn turn && forkConversation is not null
+                ? forkConversation(turn)
+                : Task.CompletedTask,
+            parameter => parameter is CodexConversationTurn turn &&
+                forkConversation is not null &&
+                !IsTurnRunning &&
+                turn.HasAssistantResponse &&
+                turn.CanEditPrompt);
         RemoveAttachmentCommand = removeAttachmentCommand = new RelayCommand(
             parameter =>
             {
@@ -264,6 +275,7 @@ public sealed class TaskViewModel : ObservableObject
     public ICommand BeginPromptEditCommand => beginPromptEditCommand;
     public ICommand CancelPromptEditCommand => cancelPromptEditCommand;
     public ICommand SubmitPromptEditCommand => submitPromptEditCommand;
+    public ICommand ForkConversationCommand { get; }
     public ICommand BeginQueuedFollowUpEditCommand => beginQueuedFollowUpEditCommand;
     public ICommand CancelQueuedFollowUpEditCommand => cancelQueuedFollowUpEditCommand;
     public ICommand SaveQueuedFollowUpEditCommand => saveQueuedFollowUpEditCommand;
@@ -979,6 +991,7 @@ public sealed class TaskViewModel : ObservableObject
         loadModelsCommand.RaiseCanExecuteChanged();
         steerCommand.RaiseCanExecuteChanged();
         alternateFollowUpCommand.RaiseCanExecuteChanged();
+        forkConversationCommand.RaiseCanExecuteChanged();
         removeAttachmentCommand.RaiseCanExecuteChanged();
         moveAttachmentLeftCommand.RaiseCanExecuteChanged();
         moveAttachmentRightCommand.RaiseCanExecuteChanged();

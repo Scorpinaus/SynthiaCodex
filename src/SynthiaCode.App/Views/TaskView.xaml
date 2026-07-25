@@ -132,165 +132,177 @@
                                 </Style>
                             </Border.Style>
                             <StackPanel>
-                                <Border Style="{StaticResource ConversationUserSurface}" Margin="48,0,0,12" AutomationProperties.Name="User message">
-                                    <StackPanel>
-                                        <Grid Margin="0,0,0,6">
-                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                            <TextBlock Text="You" Style="{StaticResource ConversationRoleText}" Foreground="{DynamicResource SignalBrush}"/>
-                                            <Border Grid.Column="1"
-                                                    Style="{StaticResource StatePill}"
+                                <StackPanel Margin="48,0,0,12">
+                                    <Border Style="{StaticResource ConversationUserSurface}" AutomationProperties.Name="User message">
+                                        <StackPanel>
+                                            <Border Style="{StaticResource StatePill}"
+                                                    HorizontalAlignment="Right"
+                                                    Margin="0,0,0,6"
                                                     Visibility="{Binding IsSuperseded, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                 <TextBlock Text="Previous version" FontSize="10"/>
                                             </Border>
-                                        </Grid>
-                                        <TextBlock Text="{Binding UserPrompt}"
-                                                   Style="{StaticResource ConversationBodyText}"
-                                                   Visibility="{Binding IsPromptEditing, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
-                                        <Border BorderBrush="{DynamicResource LineBrush}"
-                                                BorderThickness="1"
-                                                CornerRadius="6"
-                                                Padding="8"
-                                                Visibility="{Binding IsPromptEditing, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <StackPanel>
-                                                <TextBox Text="{Binding EditedPrompt, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                         AcceptsReturn="True"
-                                                         TextWrapping="Wrap"
-                                                         MinHeight="72"
-                                                         VerticalScrollBarVisibility="Auto"
-                                                         AutomationProperties.Name="Edit user prompt"/>
-                                                <TextBlock Text="Resubmitting rewinds conversation context; workspace file changes are kept."
-                                                           Style="{StaticResource ConversationMetadataText}"
-                                                           TextWrapping="Wrap"
-                                                           Margin="0,6,0,0"/>
-                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
-                                                    <Button Content="Cancel"
-                                                            Command="{Binding DataContext.TaskWorkspace.CancelPromptEditCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                            CommandParameter="{Binding}"
-                                                            Style="{StaticResource CompactButton}"
-                                                            Margin="0,0,6,0"
-                                                            AutomationProperties.Name="Cancel prompt edit"/>
-                                                    <Button Content="Resubmit"
-                                                            Command="{Binding DataContext.TaskWorkspace.SubmitPromptEditCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                            CommandParameter="{Binding}"
-                                                            IsEnabled="{Binding CanSubmitPromptEdit}"
-                                                            Style="{StaticResource CompactButton}"
-                                                            AutomationProperties.Name="Resubmit edited prompt"/>
+                                            <TextBlock Text="{Binding UserPrompt}"
+                                                       Style="{StaticResource ConversationBodyText}"
+                                                       Visibility="{Binding IsPromptEditing, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
+                                            <Border BorderBrush="{DynamicResource LineBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Padding="8"
+                                                    Visibility="{Binding IsPromptEditing, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <StackPanel>
+                                                    <TextBox Text="{Binding EditedPrompt, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                             AcceptsReturn="True"
+                                                             TextWrapping="Wrap"
+                                                             MinHeight="72"
+                                                             VerticalScrollBarVisibility="Auto"
+                                                             AutomationProperties.Name="Edit user prompt"/>
+                                                    <TextBlock Text="Resubmitting rewinds conversation context; workspace file changes are kept."
+                                                               Style="{StaticResource ConversationMetadataText}"
+                                                               TextWrapping="Wrap"
+                                                               Margin="0,6,0,0"/>
+                                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                                                        <Button Content="Cancel"
+                                                                Command="{Binding DataContext.TaskWorkspace.CancelPromptEditCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                CommandParameter="{Binding}"
+                                                                Style="{StaticResource CompactButton}"
+                                                                Margin="0,0,6,0"
+                                                                AutomationProperties.Name="Cancel prompt edit"/>
+                                                        <Button Content="Resubmit"
+                                                                Command="{Binding DataContext.TaskWorkspace.SubmitPromptEditCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                CommandParameter="{Binding}"
+                                                                IsEnabled="{Binding CanSubmitPromptEdit}"
+                                                                Style="{StaticResource CompactButton}"
+                                                                AutomationProperties.Name="Resubmit edited prompt"/>
+                                                    </StackPanel>
                                                 </StackPanel>
-                                            </StackPanel>
-                                        </Border>
-                                        <ItemsControl ItemsSource="{Binding UserAttachments}"
-                                                      Margin="0,8,0,0"
-                                                      Visibility="{Binding HasUserAttachments, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <ItemsControl.ItemsPanel>
-                                                <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
-                                            </ItemsControl.ItemsPanel>
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="5" Margin="0,0,8,8" Padding="6">
-                                                        <StackPanel Orientation="Horizontal">
-                                                            <Image Source="{Binding ManagedPath}" Width="108" Height="80" Stretch="Uniform" ToolTip="{Binding DisplayName}" Visibility="{Binding IsImage, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                                            <TextBlock Text="{Binding KindLabel}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,6,0" Visibility="{Binding IsImage, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
-                                                            <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="200"/>
-                                                        </StackPanel>
-                                                    </Border>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                        <Grid Margin="0,10,0,0">
-                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="1"
-                                                       Text="{Binding StartedAtLocalTime, StringFormat={}{0:g}}"
-                                                       Style="{StaticResource ConversationMetadataText}"
-                                                       VerticalAlignment="Center"
-                                                       Margin="0,0,8,0"
-                                                       AutomationProperties.Name="User message date and time"/>
-                                            <Button Grid.Column="2"
-                                                    Content="Edit"
-                                                    Command="{Binding DataContext.TaskWorkspace.BeginPromptEditCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                    CommandParameter="{Binding}"
-                                                    Visibility="{Binding CanEditPrompt, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                    Style="{StaticResource CompactButton}"
-                                                    MinHeight="24"
-                                                    Padding="7,2"
-                                                    Margin="0,0,6,0"
-                                                    ToolTip="Edit and resubmit this prompt"
-                                                    AutomationProperties.Name="Edit user prompt"/>
-                                            <Button Grid.Column="3"
-                                                    Content="Copy"
-                                                    CommandParameter="{Binding UserPrompt}"
-                                                    Style="{StaticResource CompactButton}"
-                                                    MinHeight="24"
-                                                    Padding="7,2"
-                                                    Click="OnCopyMessageClick"
-                                                    ToolTip="Copy user message"
-                                                    AutomationProperties.Name="Copy user message"/>
-                                        </Grid>
-                                    </StackPanel>
-                                </Border>
+                                            </Border>
+                                            <ItemsControl ItemsSource="{Binding UserAttachments}"
+                                                          Margin="0,8,0,0"
+                                                          Visibility="{Binding HasUserAttachments, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="5" Margin="0,0,8,8" Padding="6">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <Image Source="{Binding ManagedPath}" Width="108" Height="80" Stretch="Uniform" ToolTip="{Binding DisplayName}" Visibility="{Binding IsImage, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                                                <TextBlock Text="{Binding KindLabel}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,6,0" Visibility="{Binding IsImage, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
+                                                                <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="200"/>
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                    <Grid Margin="0,6,0,0" AutomationProperties.Name="User message footer">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding StartedAtLocalTime, StringFormat={}{0:g}}"
+                                                   Style="{StaticResource ConversationMetadataText}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,8,0"
+                                                   AutomationProperties.Name="User message date and time"/>
+                                        <Button Grid.Column="2"
+                                                Content="Edit"
+                                                Command="{Binding DataContext.TaskWorkspace.BeginPromptEditCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}"
+                                                Visibility="{Binding CanEditPrompt, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                Style="{StaticResource CompactButton}"
+                                                MinHeight="24"
+                                                Padding="7,2"
+                                                Margin="0,0,6,0"
+                                                ToolTip="Edit and resubmit this prompt"
+                                                AutomationProperties.Name="Edit user prompt"/>
+                                        <Button Grid.Column="3"
+                                                Content="Copy"
+                                                CommandParameter="{Binding UserPrompt}"
+                                                Style="{StaticResource CompactButton}"
+                                                MinHeight="24"
+                                                Padding="7,2"
+                                                Click="OnCopyMessageClick"
+                                                ToolTip="Copy user message"
+                                                AutomationProperties.Name="Copy user message"/>
+                                    </Grid>
+                                </StackPanel>
 
-                                <Border Style="{StaticResource ConversationAssistantSurface}" Margin="0,0,48,0" AutomationProperties.Name="Assistant turn">
-                                    <StackPanel>
-                                        <StackPanel Visibility="{Binding ShowsCommentaryChannel, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                    AutomationProperties.Name="Assistant commentary">
-                                            <Expander Header="{Binding WorkSummary}"
-                                                      IsExpanded="{Binding IsActivityExpanded, Mode=TwoWay}"
-                                                      AutomationProperties.Name="Work details">
-                                                <ItemsControl ItemsSource="{Binding Activity}" Margin="0,6,0,0">
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <Grid>
-                                                                <controls:MarkdownTextBlock Markdown="{Binding Detail}"
-                                                                                            LinkCommand="{Binding DataContext.TaskWorkspace.OpenExternalUriCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                                                            Style="{StaticResource ConversationBodyText}"
-                                                                                            Margin="0,5,0,8"
-                                                                                            Visibility="{Binding IsAssistantCommentary, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                                                            AutomationProperties.LiveSetting="Polite"/>
-                                                                <Border BorderBrush="{DynamicResource LineBrush}"
-                                                                        BorderThickness="0,0,0,1"
-                                                                        Padding="0,7"
-                                                                        Visibility="{Binding IsSupportingActivity, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                                    <Grid>
-                                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="8"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                                        <Ellipse Width="7" Height="7" Fill="{DynamicResource SignalBrush}" VerticalAlignment="Top" Margin="0,5,0,0"/>
-                                                                        <StackPanel Grid.Column="2"><TextBlock Text="{Binding Title}" Style="{StaticResource ConversationActivityTitleText}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource ConversationActivityDetailText}" Margin="0,2,0,0"/></StackPanel>
-                                                                        <TextBlock Grid.Column="3" Text="{Binding CategoryLabel}" Style="{StaticResource ConversationMetadataText}" Margin="8,2,0,0"/>
-                                                                    </Grid>
-                                                                </Border>
-                                                            </Grid>
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
-                                            </Expander>
+                                <StackPanel Margin="0,0,48,0">
+                                    <Border Style="{StaticResource ConversationAssistantSurface}" AutomationProperties.Name="Assistant turn">
+                                        <StackPanel>
+                                            <StackPanel Visibility="{Binding ShowsCommentaryChannel, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                        AutomationProperties.Name="Assistant commentary">
+                                                <Expander Header="{Binding WorkSummary}"
+                                                          IsExpanded="{Binding IsActivityExpanded, Mode=TwoWay}"
+                                                          AutomationProperties.Name="Work details">
+                                                    <ItemsControl ItemsSource="{Binding Activity}" Margin="0,6,0,0">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Grid>
+                                                                    <controls:MarkdownTextBlock Markdown="{Binding Detail}"
+                                                                                                LinkCommand="{Binding DataContext.TaskWorkspace.OpenExternalUriCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                                                Style="{StaticResource ConversationBodyText}"
+                                                                                                Margin="0,5,0,8"
+                                                                                                Visibility="{Binding IsAssistantCommentary, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                                                                AutomationProperties.LiveSetting="Polite"/>
+                                                                    <Border BorderBrush="{DynamicResource LineBrush}"
+                                                                            BorderThickness="0,0,0,1"
+                                                                            Padding="0,7"
+                                                                            Visibility="{Binding IsSupportingActivity, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                                        <Grid>
+                                                                            <Grid.ColumnDefinitions><ColumnDefinition Width="8"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                                            <Ellipse Width="7" Height="7" Fill="{DynamicResource SignalBrush}" VerticalAlignment="Top" Margin="0,5,0,0"/>
+                                                                            <StackPanel Grid.Column="2"><TextBlock Text="{Binding Title}" Style="{StaticResource ConversationActivityTitleText}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource ConversationActivityDetailText}" Margin="0,2,0,0"/></StackPanel>
+                                                                            <TextBlock Grid.Column="3" Text="{Binding CategoryLabel}" Style="{StaticResource ConversationMetadataText}" Margin="8,2,0,0"/>
+                                                                        </Grid>
+                                                                    </Border>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </Expander>
+                                            </StackPanel>
+                                            <StackPanel Visibility="{Binding ShowsAssistantChannel, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                        AutomationProperties.Name="Assistant message">
+                                                <controls:MarkdownTextBlock Markdown="{Binding AssistantResponseDisplay}"
+                                                                            LinkCommand="{Binding DataContext.TaskWorkspace.OpenExternalUriCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                            Style="{StaticResource ConversationBodyText}"
+                                                                            AutomationProperties.LiveSetting="Polite"/>
+                                            </StackPanel>
                                         </StackPanel>
-                                        <StackPanel Visibility="{Binding ShowsAssistantChannel, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                    AutomationProperties.Name="Assistant message">
-                                            <TextBlock Text="Assistant" Style="{StaticResource ConversationRoleText}" Foreground="{DynamicResource CreateActionBrush}" Margin="0,0,0,6"/>
-                                            <controls:MarkdownTextBlock Markdown="{Binding AssistantResponseDisplay}"
-                                                                        LinkCommand="{Binding DataContext.TaskWorkspace.OpenExternalUriCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                                        Style="{StaticResource ConversationBodyText}"
-                                                                        AutomationProperties.LiveSetting="Polite"/>
-                                            <Grid Margin="0,10,0,0">
-                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                <TextBlock Grid.Column="1"
-                                                           Text="{Binding CompletedAtLocalTime, StringFormat={}{0:g}}"
-                                                           Style="{StaticResource ConversationMetadataText}"
-                                                           VerticalAlignment="Center"
-                                                           Margin="0,0,8,0"
-                                                           AutomationProperties.Name="Assistant message date and time"/>
-                                                <Button Grid.Column="2"
-                                                        Content="Copy"
-                                                        CommandParameter="{Binding AssistantResponse}"
-                                                        IsEnabled="{Binding HasAssistantResponse}"
-                                                        Style="{StaticResource CompactButton}"
-                                                        MinHeight="24"
-                                                        Padding="7,2"
-                                                        Click="OnCopyMessageClick"
-                                                        ToolTip="Copy assistant message"
-                                                        AutomationProperties.Name="Copy assistant message"/>
-                                            </Grid>
-                                        </StackPanel>
-                                    </StackPanel>
-                                </Border>
+                                    </Border>
+                                    <Grid Margin="0,6,0,0"
+                                          Visibility="{Binding ShowsAssistantChannel, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                          AutomationProperties.Name="Assistant message footer">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0"
+                                                   Text="{Binding CompletedAtLocalTime, StringFormat={}{0:g}}"
+                                                   Style="{StaticResource ConversationMetadataText}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,8,0"
+                                                   AutomationProperties.Name="Assistant message date and time"/>
+                                        <Button Grid.Column="1"
+                                                Content="Copy"
+                                                CommandParameter="{Binding AssistantResponse}"
+                                                IsEnabled="{Binding HasAssistantResponse}"
+                                                Style="{StaticResource CompactButton}"
+                                                MinHeight="24"
+                                                Padding="7,2"
+                                                Margin="0,0,6,0"
+                                                Click="OnCopyMessageClick"
+                                                ToolTip="Copy assistant message"
+                                                AutomationProperties.Name="Copy assistant message"/>
+                                        <Button Grid.Column="2"
+                                                Content="Fork"
+                                                Command="{Binding DataContext.TaskWorkspace.ForkConversationCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource CompactButton}"
+                                                MinHeight="24"
+                                                Padding="7,2"
+                                                ToolTip="Continue from this response in a new chat"
+                                                AutomationProperties.Name="Fork conversation from assistant message"/>
+                                    </Grid>
+                                </StackPanel>
                             </StackPanel>
                         </Border>
                     </DataTemplate>

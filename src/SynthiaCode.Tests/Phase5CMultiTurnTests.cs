@@ -13,6 +13,7 @@ internal static class Phase5CMultiTurnTests
         ("conversation persistence remains backward compatible", ConversationPersistenceIsCompatibleAsync),
         ("task composer distinguishes first turn and follow-up", ComposerLabelsFollowUpAsync),
         ("turn activity presentation follows content and status", ActivityPresentationFollowsTurnStateAsync),
+        ("turn presentation retains expandable commentary with the final response", CommentaryRemainsExpandableWithFinalResponseAsync),
         ("turn activity suppresses protocol noise", ActivitySuppressesProtocolNoiseAsync),
         ("command and tool activity updates stable rows", ActivityUpdatesStableRowsAsync),
         ("interleaved activities retain independent identity", InterleavedActivitiesRetainIdentityAsync),
@@ -161,6 +162,58 @@ internal static class Phase5CMultiTurnTests
         turn.Status = CodexTurnStatus.Completed;
         Assert(!turn.IsActivityExpanded, "completed turn collapses historical activity");
         Assert(turn.HasActivity, "completed turn retains its activity region");
+        return Task.CompletedTask;
+    }
+
+    private static Task CommentaryRemainsExpandableWithFinalResponseAsync()
+    {
+        var turn = new CodexConversationTurn
+        {
+            StartedAt = DateTimeOffset.Parse("2026-07-25T10:00:00+08:00"),
+            Status = CodexTurnStatus.Running
+        };
+        var changedProperties = new List<string>();
+        turn.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is not null)
+            {
+                changedProperties.Add(args.PropertyName);
+            }
+        };
+
+        Assert(!turn.ShowsCommentaryChannel, "commentary is hidden before activity arrives");
+        Assert(turn.ShowsAssistantChannel, "assistant working state is visible before activity arrives");
+
+        turn.Activity.Add(new CodexTimelineItem(
+            CodexTimelineItemKind.AssistantCommentary,
+            "Assistant update",
+            "I am **checking** the tests.",
+            "item/agentMessage",
+            DateTimeOffset.UtcNow));
+
+        Assert(turn.ShowsCommentaryChannel, "activity appears in the commentary channel");
+        Assert(!turn.ShowsAssistantChannel, "commentary replaces the assistant placeholder while work is in progress");
+        Assert(turn.IsActivityExpanded, "live commentary is expanded");
+        Assert(turn.Activity[0].IsAssistantCommentary, "assistant updates are marked for message-style rendering");
+        Assert(!turn.Activity[0].IsSupportingActivity, "assistant updates are not rendered as activity rows");
+        Assert(changedProperties.Contains(nameof(CodexConversationTurn.ShowsCommentaryChannel)), "activity notifies commentary visibility");
+        Assert(changedProperties.Contains(nameof(CodexConversationTurn.ShowsAssistantChannel)), "activity notifies assistant visibility");
+
+        changedProperties.Clear();
+        turn.AssistantResponse = "All tests passed.";
+
+        Assert(turn.ShowsCommentaryChannel, "final response retains the commentary section");
+        Assert(turn.ShowsAssistantChannel, "final response appears below commentary");
+        Assert(turn.Activity.Count == 1, "final response preserves activity data");
+        Assert(changedProperties.Contains(nameof(CodexConversationTurn.ShowsAssistantChannel)), "response notifies assistant visibility");
+
+        turn.CompletedAt = DateTimeOffset.Parse("2026-07-25T10:02:05+08:00");
+        turn.Status = CodexTurnStatus.Completed;
+
+        Assert(!turn.IsActivityExpanded, "completed work details collapse by default");
+        Assert(turn.WorkSummary == "Worked for 2m 5s", "completed commentary reports total work duration");
+        turn.IsActivityExpanded = true;
+        Assert(turn.IsActivityExpanded, "completed work details can be expanded on demand");
         return Task.CompletedTask;
     }
 

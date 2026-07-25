@@ -1326,6 +1326,12 @@ public sealed record CodexTimelineItem(
     public string ActivityKey { get; init; } = string.Empty;
 
     [JsonIgnore]
+    public bool IsAssistantCommentary => Kind == CodexTimelineItemKind.AssistantCommentary;
+
+    [JsonIgnore]
+    public bool IsSupportingActivity => !IsAssistantCommentary;
+
+    [JsonIgnore]
     public string CategoryLabel => Kind switch
     {
         CodexTimelineItemKind.CommandStarted or CodexTimelineItemKind.CommandCompleted => "Command",

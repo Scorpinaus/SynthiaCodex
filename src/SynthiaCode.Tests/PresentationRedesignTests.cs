@@ -43,6 +43,7 @@ internal static partial class PresentationRedesignTests
         ("shared controls expose modern reusable primitives", SharedControlsExposeReusablePrimitivesAsync),
         ("window shell uses custom chrome and adaptive docked regions", WindowShellUsesAdaptiveRegionsAsync),
         ("feature surfaces follow the presentation accessibility contract", FeatureSurfacesFollowContractAsync),
+        ("turn activity uses a commentary-to-final channel handoff", TurnActivityUsesCommentaryHandoffAsync),
         ("redesign preserves presentation performance guardrails", PerformanceGuardrailsAsync),
         ("redesign phase ledger records completed implementation slices", PhaseLedgerRecordsCompletedSlicesAsync)
     ];
@@ -206,6 +207,21 @@ internal static partial class PresentationRedesignTests
         Assert(terminal.Contains("Background=\"{DynamicResource TerminalBrush}\"", StringComparison.Ordinal), "terminal uses its dedicated dark surface");
         Assert(terminal.Contains("Terminal.ToggleMaximizeCommand", StringComparison.Ordinal), "terminal exposes maximize-within-workspace");
         Assert(terminal.Contains("Terminal.ToggleCommand", StringComparison.Ordinal), "terminal dock exposes a close action");
+        return Task.CompletedTask;
+    }
+
+    private static Task TurnActivityUsesCommentaryHandoffAsync()
+    {
+        var task = ReadAppFile("Views", "TaskView.xaml");
+
+        Assert(task.Contains("AutomationProperties.Name=\"Assistant commentary\"", StringComparison.Ordinal), "commentary channel is accessible");
+        Assert(task.Contains("Visibility=\"{Binding ShowsCommentaryChannel", StringComparison.Ordinal), "commentary visibility follows turn presentation state");
+        Assert(task.Contains("Visibility=\"{Binding ShowsAssistantChannel", StringComparison.Ordinal), "assistant visibility follows final-response state");
+        Assert(task.Contains("<Expander Header=\"{Binding WorkSummary}\"", StringComparison.Ordinal), "work details expose a duration summary");
+        Assert(task.Contains("IsExpanded=\"{Binding IsActivityExpanded, Mode=TwoWay}\"", StringComparison.Ordinal), "work details remain user-expandable");
+        Assert(task.Contains("Markdown=\"{Binding Detail}\"", StringComparison.Ordinal), "assistant commentary uses message-style Markdown rendering");
+        Assert(task.Contains("Visibility=\"{Binding IsAssistantCommentary", StringComparison.Ordinal), "assistant commentary selects message-style presentation");
+        Assert(task.Contains("Visibility=\"{Binding IsSupportingActivity", StringComparison.Ordinal), "commands and searches retain structured activity rows");
         return Task.CompletedTask;
     }
 

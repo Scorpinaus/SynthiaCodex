@@ -56,6 +56,8 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
             {
                 OnPropertyChanged(nameof(AssistantResponseDisplay));
                 OnPropertyChanged(nameof(HasAssistantResponse));
+                OnPropertyChanged(nameof(ShowsCommentaryChannel));
+                OnPropertyChanged(nameof(ShowsAssistantChannel));
             }
         }
     }
@@ -76,6 +78,7 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
                 IsActivityExpanded = value == CodexTurnStatus.Running;
                 OnPropertyChanged(nameof(StatusLabel));
                 OnPropertyChanged(nameof(AssistantResponseDisplay));
+                OnPropertyChanged(nameof(WorkSummary));
                 OnPropertyChanged(nameof(CanEditPrompt));
             }
         }
@@ -95,6 +98,7 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
             if (SetProperty(ref completedAt, value))
             {
                 OnPropertyChanged(nameof(CompletedAtLocalTime));
+                OnPropertyChanged(nameof(WorkSummary));
             }
         }
     }
@@ -206,7 +210,26 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
 
     public bool HasActivity => Activity.Count > 0;
 
+    public bool ShowsCommentaryChannel => HasActivity;
+
+    public bool ShowsAssistantChannel => !HasActivity || HasAssistantResponse;
+
     public string ActivitySummary => Activity.Count == 1 ? "1 activity item" : $"{Activity.Count} activity items";
+
+    public string WorkSummary
+    {
+        get
+        {
+            if (Status == CodexTurnStatus.Running)
+            {
+                return "Working\u2026";
+            }
+
+            return CompletedAt is { } completed
+                ? $"Worked for {FormatWorkDuration(completed - StartedAt)}"
+                : "Work details";
+        }
+    }
 
     public CodexConversationTurnSnapshot ToSnapshot() => new()
     {
@@ -248,6 +271,8 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
     private void OnActivityChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         OnPropertyChanged(nameof(HasActivity));
+        OnPropertyChanged(nameof(ShowsCommentaryChannel));
+        OnPropertyChanged(nameof(ShowsAssistantChannel));
         OnPropertyChanged(nameof(ActivitySummary));
     }
 
@@ -255,6 +280,24 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
     {
         OnPropertyChanged(nameof(HasUserAttachments));
         OnPropertyChanged(nameof(HasUserImages));
+    }
+
+    private static string FormatWorkDuration(TimeSpan duration)
+    {
+        var totalSeconds = Math.Max(0, (long)Math.Floor(duration.TotalSeconds));
+        if (totalSeconds == 0)
+        {
+            return "<1s";
+        }
+
+        var hours = totalSeconds / 3600;
+        var minutes = totalSeconds % 3600 / 60;
+        var seconds = totalSeconds % 60;
+        return hours > 0
+            ? $"{hours}h {minutes}m {seconds}s"
+            : minutes > 0
+                ? $"{minutes}m {seconds}s"
+                : $"{seconds}s";
     }
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

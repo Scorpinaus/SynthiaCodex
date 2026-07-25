@@ -334,24 +334,28 @@ internal static class ResponsiveLayoutTests
     {
         var longLine = string.Join(' ', Enumerable.Repeat("A responsive assistant response with [release notes](https://example.com/releases) must stay inside the transcript column.", 18));
         var longActivity = string.Join(' ', Enumerable.Repeat("Complete activity details must remain visible inside the assistant message.", 20));
+        var longCommentary = string.Join(' ', Enumerable.Repeat("I am **checking** the [responsive transcript](https://example.com/transcript) before the final response.", 12));
         var table = "| Model | Availability | Best suited for |\n|---|---|---|\n| **Qwen3.7-Max** | Hosted/API | Long-running agents |";
         var tallResponse = $"{table}{Environment.NewLine}{Environment.NewLine}{string.Join(Environment.NewLine, Enumerable.Repeat(longLine, 12))}";
         var turn = new CodexConversationTurn
         {
             TurnId = "responsive-turn",
             UserPrompt = longLine,
-            AssistantResponse = tallResponse,
-            Status = CodexTurnStatus.Completed,
-            StartedAt = DateTimeOffset.Parse("2026-07-20T12:43:00+08:00"),
-            CompletedAt = DateTimeOffset.Parse("2026-07-20T12:45:00+08:00")
+            Status = CodexTurnStatus.Running,
+            StartedAt = DateTimeOffset.Parse("2026-07-20T12:43:00+08:00")
         };
+        turn.Activity.Add(new CodexTimelineItem(
+            CodexTimelineItemKind.AssistantCommentary,
+            "Assistant update",
+            longCommentary,
+            "item/agentMessage",
+            DateTimeOffset.UtcNow));
         turn.Activity.Add(new CodexTimelineItem(
             CodexTimelineItemKind.WebSearch,
             "Searched the web",
             longActivity,
             "item/webSearch",
             DateTimeOffset.UtcNow));
-        turn.IsActivityExpanded = true;
         var turns = new ObservableCollection<CodexConversationTurn> { turn };
         var view = new TaskView { Width = 620, Height = 520 };
         var conversationList = (ListBox?)view.FindName("ConversationList")
@@ -369,28 +373,52 @@ internal static class ResponsiveLayoutTests
         PumpLayout(view);
         var scroller = FindVisualDescendant<ScrollViewer>(conversationList)
             ?? throw new InvalidOperationException("conversation scroll viewer was not created");
-        var responseText = FindVisualDescendants<MarkdownTextBlock>(conversationList)
-            .Single(block => block.Markdown == tallResponse);
         var assistantSurface = FindVisualDescendants<Border>(conversationList)
-            .Single(border => AutomationProperties.GetName(border) == "Assistant message");
-        var activityExpander = FindVisualDescendants<Expander>(conversationList)
-            .Single(expander => AutomationProperties.GetName(expander) == "Turn activity");
-        var activityDetail = FindVisualDescendants<TextBlock>(activityExpander)
+            .Single(border => AutomationProperties.GetName(border) == "Assistant turn");
+        var commentaryChannel = FindVisualDescendants<StackPanel>(assistantSurface)
+            .Single(panel => AutomationProperties.GetName(panel) == "Assistant commentary");
+        var activityDetail = FindVisualDescendants<TextBlock>(commentaryChannel)
             .Single(block => block.Text == longActivity);
+        var commentaryText = FindVisualDescendants<MarkdownTextBlock>(commentaryChannel)
+            .Single(block => block.Markdown == longCommentary);
 
         AssertNear(0, scroller.ScrollableWidth, "transcript has no horizontal scroll extent");
-        Assert(IsVisualDescendantOf(activityExpander, assistantSurface), "turn activity is contained by the assistant message surface");
-        Assert(IsVisualDescendantOf(responseText, assistantSurface), "assistant response shares the activity message surface");
+        Assert(commentaryChannel.Visibility == Visibility.Visible, "activity channel is visible before the final response");
+        Assert(IsVisualDescendantOf(commentaryChannel, assistantSurface), "turn activity is contained by the assistant turn surface");
+        Assert(commentaryText.Inlines.OfType<Hyperlink>().Any(), "assistant commentary renders as linked Markdown text");
+        Assert(commentaryText.ActualHeight > commentaryText.FontSize * 3, "assistant commentary wraps as readable message text");
+        Assert(commentaryText.ActualWidth <= assistantSurface.ActualWidth + 0.5, "assistant commentary stays within the assistant turn width");
         Assert(activityDetail.TextTrimming == TextTrimming.None, "activity details are not visually trimmed");
         Assert(activityDetail.TextWrapping != TextWrapping.NoWrap, "activity details wrap within the assistant message");
         Assert(activityDetail.ActualHeight > activityDetail.FontSize * 3, "complete activity detail occupies multiple wrapped lines");
         Assert(activityDetail.ActualWidth <= assistantSurface.ActualWidth + 0.5, "activity detail stays within the assistant message width");
+
+        turn.AssistantResponse = tallResponse;
+        turn.CompletedAt = DateTimeOffset.Parse("2026-07-20T12:45:00+08:00");
+        turn.Status = CodexTurnStatus.Completed;
+        PumpLayout(view);
+
+        var responseText = FindVisualDescendants<MarkdownTextBlock>(conversationList)
+            .Single(block => block.Markdown == tallResponse);
+        var assistantChannel = FindVisualDescendants<StackPanel>(assistantSurface)
+            .Single(panel => AutomationProperties.GetName(panel) == "Assistant message");
+        var workDetails = FindVisualDescendants<Expander>(commentaryChannel)
+            .Single(expander => AutomationProperties.GetName(expander) == "Work details");
+        Assert(commentaryChannel.Visibility == Visibility.Visible, "final response retains the commentary channel");
+        Assert(!workDetails.IsExpanded, "completed work details collapse beside the final response");
+        Assert(Equals(workDetails.Header, "Worked for 2m 0s"), "completed work details report total turn duration");
+        Assert(assistantChannel.Visibility == Visibility.Visible, "assistant channel is visible for the final response");
+        Assert(IsVisualDescendantOf(responseText, assistantSurface), "assistant response stays in the assistant turn surface");
+        AssertNear(0, scroller.ScrollableWidth, "final response has no horizontal scroll extent");
         Assert(responseText.ActualWidth <= scroller.ViewportWidth + 0.5, "assistant response stays within transcript viewport");
         Assert(responseText.ActualHeight > responseText.FontSize * 3, "assistant response wraps to multiple lines");
         Assert(responseText.Inlines.OfType<Hyperlink>().Any(), "assistant response renders a clickable markdown link");
         var markdownTable = (Grid)responseText.Inlines.OfType<InlineUIContainer>().Single().Child;
         Assert(markdownTable.ActualWidth > 0, "assistant markdown table participates in layout");
         Assert(markdownTable.ActualWidth <= responseText.ActualWidth + 0.5, "assistant markdown table stays within the message width");
+        workDetails.IsExpanded = true;
+        PumpLayout(view);
+        Assert(commentaryText.ActualHeight > commentaryText.FontSize * 3, "completed commentary can be expanded again");
         var transcriptText = FindVisualDescendants<TextBlock>(conversationList).ToList();
         var userTimestamp = transcriptText.Single(block =>
             AutomationProperties.GetName(block) == "User message date and time");

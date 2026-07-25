@@ -253,8 +253,10 @@ public sealed class ThreadStore
             Status = turn.Status,
             StartedAt = turn.StartedAt,
             CompletedAt = turn.CompletedAt,
+            IsSuperseded = turn.IsSuperseded,
             Activity = [.. turn.Activity],
-            UserAttachments = [.. turn.UserAttachments.Select(attachment => attachment.Clone())]
+            UserAttachments = [.. turn.UserAttachments.Select(attachment => attachment.Clone())],
+            GeneratedImagePaths = [.. turn.GeneratedImagePaths]
         }).ToList();
 
     private static List<QueuedFollowUpSnapshot> CloneQueuedFollowUps(

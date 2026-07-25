@@ -25,6 +25,7 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
     {
         Activity.CollectionChanged += OnActivityChanged;
         UserAttachments.CollectionChanged += OnUserAttachmentsChanged;
+        GeneratedImagePaths.CollectionChanged += OnGeneratedImagePathsChanged;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -56,6 +57,7 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
             {
                 OnPropertyChanged(nameof(AssistantResponseDisplay));
                 OnPropertyChanged(nameof(HasAssistantResponse));
+                OnPropertyChanged(nameof(HasAssistantContent));
                 OnPropertyChanged(nameof(ShowsCommentaryChannel));
                 OnPropertyChanged(nameof(ShowsAssistantChannel));
             }
@@ -64,9 +66,28 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
 
     public bool HasAssistantResponse => !string.IsNullOrWhiteSpace(AssistantResponse);
 
-    public string AssistantResponseDisplay => string.IsNullOrWhiteSpace(AssistantResponse)
-        ? Status == CodexTurnStatus.Running ? "Working…" : "No assistant response"
-        : AssistantResponse;
+    public bool HasGeneratedImages => GeneratedImagePaths.Count > 0;
+
+    public bool HasAssistantContent => HasAssistantResponse || HasGeneratedImages;
+
+    public string AssistantResponseDisplay
+    {
+        get
+        {
+            var parts = GeneratedImagePaths
+                .Select(CreateGeneratedImageMarkdown)
+                .Where(markdown => !string.IsNullOrWhiteSpace(markdown))
+                .ToList();
+            if (HasAssistantResponse)
+            {
+                parts.Add(AssistantResponse);
+            }
+
+            return parts.Count > 0
+                ? string.Join($"{Environment.NewLine}{Environment.NewLine}", parts)
+                : Status == CodexTurnStatus.Running ? "Working…" : "No assistant response";
+        }
+    }
 
     public CodexTurnStatus Status
     {
@@ -110,6 +131,8 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
     public ObservableCollection<AttachmentReference> UserAttachments { get; } = [];
 
     public ObservableCollection<AttachmentReference> UserImages => UserAttachments;
+
+    public ObservableCollection<string> GeneratedImagePaths { get; } = [];
 
     public bool HasUserAttachments => UserAttachments.Count > 0;
 
@@ -212,7 +235,7 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
 
     public bool ShowsCommentaryChannel => HasActivity;
 
-    public bool ShowsAssistantChannel => !HasActivity || HasAssistantResponse;
+    public bool ShowsAssistantChannel => !HasActivity || HasAssistantContent;
 
     public string ActivitySummary => Activity.Count == 1 ? "1 activity item" : $"{Activity.Count} activity items";
 
@@ -241,7 +264,8 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
         CompletedAt = CompletedAt,
         IsSuperseded = IsSuperseded,
         Activity = [.. Activity],
-        UserAttachments = [.. UserAttachments.Select(attachment => attachment.Clone())]
+        UserAttachments = [.. UserAttachments.Select(attachment => attachment.Clone())],
+        GeneratedImagePaths = [.. GeneratedImagePaths]
     };
 
     public static CodexConversationTurn FromSnapshot(CodexConversationTurnSnapshot snapshot)
@@ -264,6 +288,10 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
         {
             turn.UserAttachments.Add(attachment.Clone());
         }
+        foreach (var path in snapshot.GeneratedImagePaths)
+        {
+            turn.GeneratedImagePaths.Add(path);
+        }
 
         return turn;
     }
@@ -280,6 +308,49 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
     {
         OnPropertyChanged(nameof(HasUserAttachments));
         OnPropertyChanged(nameof(HasUserImages));
+    }
+
+    private void OnGeneratedImagePathsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasGeneratedImages));
+        OnPropertyChanged(nameof(HasAssistantContent));
+        OnPropertyChanged(nameof(AssistantResponseDisplay));
+        OnPropertyChanged(nameof(ShowsAssistantChannel));
+    }
+
+    private static string? CreateGeneratedImageMarkdown(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            var candidate = Uri.TryCreate(path, UriKind.Absolute, out var parsed) && parsed.IsFile
+                ? parsed.LocalPath
+                : path;
+            if (!Path.IsPathFullyQualified(candidate) ||
+                candidate.StartsWith(@"\\", StringComparison.Ordinal) ||
+                Path.GetExtension(candidate).ToLowerInvariant() is not (".png" or ".jpg" or ".jpeg" or ".webp" or ".gif"))
+            {
+                return null;
+            }
+
+            var target = new Uri(Path.GetFullPath(candidate), UriKind.Absolute)
+                .AbsoluteUri
+                .Replace("(", "%28", StringComparison.Ordinal)
+                .Replace(")", "%29", StringComparison.Ordinal);
+            return $"[Generated image]({target})";
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or
+            NotSupportedException or
+            PathTooLongException or
+            UriFormatException)
+        {
+            return null;
+        }
     }
 
     private static string FormatWorkDuration(TimeSpan duration)
@@ -327,6 +398,7 @@ public sealed class CodexConversationTurnSnapshot
     public bool IsSuperseded { get; set; }
     public List<CodexTimelineItem> Activity { get; set; } = [];
     public List<AttachmentReference> UserAttachments { get; set; } = [];
+    public List<string> GeneratedImagePaths { get; set; } = [];
 
     [JsonIgnore]
     public List<AttachmentReference> UserImages

@@ -115,12 +115,10 @@ public sealed class CodexThreadService
             }
         }
 
-        if (rawEvents is not null)
+        var restoredRawEvents = rawEvents?.TakeLast(MaximumRawEvents).ToList() ?? [];
+        foreach (var rawEvent in restoredRawEvents)
         {
-            foreach (var rawEvent in rawEvents)
-            {
-                AddBounded(RawEvents, rawEvent, MaximumRawEvents);
-            }
+            AddBounded(RawEvents, SanitizeStoredRawEvent(rawEvent), MaximumRawEvents);
         }
 
         if (conversationTurns is not null)
@@ -152,6 +150,7 @@ public sealed class CodexThreadService
             ConversationTurns.Add(legacyTurn);
         }
 
+        RecoverGeneratedImages(restoredRawEvents);
         RefreshCompatibilityResponse();
     }
 
@@ -324,6 +323,14 @@ public sealed class CodexThreadService
                     turn.UserAttachments.Add(attachment.Clone());
                 }
             }
+            if (snapshot.GeneratedImagePaths.Count > 0)
+            {
+                turn.GeneratedImagePaths.Clear();
+                foreach (var path in snapshot.GeneratedImagePaths)
+                {
+                    turn.GeneratedImagePaths.Add(path);
+                }
+            }
             turn.AssistantResponse = UnicodeTextNormalizer.RepairLegacyMojibake(snapshot.AssistantResponse);
             turn.Status = snapshot.Status;
             turn.StartedAt = snapshot.StartedAt;
@@ -352,7 +359,7 @@ public sealed class CodexThreadService
         {
             AddBounded(
                 RawEvents,
-                $"{notification.Method}: {notification.Params.ToJsonString()}",
+                SerializeRawEvent(notification),
                 MaximumRawEvents);
             CaptureErrorState(notification.Params);
 
@@ -438,7 +445,8 @@ public sealed class CodexThreadService
 
     private void ApplyCompletedItem(AppServerNotification notification)
     {
-        if (ReadString(notification.Params, "item.type") == "contextCompaction")
+        var itemType = ReadString(notification.Params, "item.type");
+        if (itemType == "contextCompaction")
         {
             RecordContextCompaction(notification.Params, "item");
         }
@@ -449,9 +457,65 @@ public sealed class CodexThreadService
         {
             ApplyCompletedAgentMessage(notification);
         }
+        else if (itemType == "imageGeneration")
+        {
+            ApplyCompletedImageGeneration(notification);
+        }
 
         AddTimeline(kind, "Item completed", detail, notification);
         ProjectItemActivity(notification, completed: true);
+    }
+
+    private void ApplyCompletedImageGeneration(AppServerNotification notification)
+    {
+        if (IsFailureStatus(ReadString(notification.Params, "item.status")) ||
+            GetNotificationTurn(notification) is not { } turn ||
+            !TryNormalizeGeneratedImagePath(
+                ReadString(notification.Params, "item.savedPath"),
+                out var savedPath) ||
+            turn.GeneratedImagePaths.Any(path =>
+                string.Equals(path, savedPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        turn.GeneratedImagePaths.Add(savedPath);
+    }
+
+    private void RecoverGeneratedImages(IEnumerable<string> rawEvents)
+    {
+        foreach (var rawEvent in rawEvents)
+        {
+            if (!rawEvent.Contains("\"imageGeneration\"", StringComparison.Ordinal) ||
+                !TryParseStoredNotification(rawEvent, out var notification) ||
+                !string.Equals(notification.Method, "item/completed", StringComparison.Ordinal) ||
+                !string.Equals(
+                    ReadString(notification.Params, "item.type"),
+                    "imageGeneration",
+                    StringComparison.Ordinal) ||
+                !string.Equals(
+                    ReadString(notification.Params, "item.status"),
+                    "completed",
+                    StringComparison.Ordinal) ||
+                !TryNormalizeGeneratedImagePath(
+                    ReadString(notification.Params, "item.savedPath"),
+                    out var savedPath))
+            {
+                continue;
+            }
+
+            var turnId = ReadString(notification.Params, "turnId") ??
+                ReadString(notification.Params, "turn.id");
+            var turn = ConversationTurns.FirstOrDefault(candidate =>
+                !string.IsNullOrWhiteSpace(turnId) &&
+                string.Equals(candidate.TurnId, turnId, StringComparison.Ordinal));
+            if (turn is not null &&
+                !turn.GeneratedImagePaths.Any(path =>
+                    string.Equals(path, savedPath, StringComparison.OrdinalIgnoreCase)))
+            {
+                turn.GeneratedImagePaths.Add(savedPath);
+            }
+        }
     }
 
     private void ApplyContextTokenUsage(JsonObject parameters)
@@ -995,6 +1059,100 @@ public sealed class CodexThreadService
         status?.Contains("error", StringComparison.OrdinalIgnoreCase) == true ||
         status?.Contains("cancel", StringComparison.OrdinalIgnoreCase) == true ||
         status?.Contains("declin", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static bool TryNormalizeGeneratedImagePath(string? value, out string path)
+    {
+        path = string.Empty;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        try
+        {
+            var candidate = Uri.TryCreate(value, UriKind.Absolute, out var parsed) && parsed.IsFile
+                ? parsed.LocalPath
+                : value;
+            if (!Path.IsPathFullyQualified(candidate) ||
+                candidate.StartsWith(@"\\", StringComparison.Ordinal) ||
+                Path.GetExtension(candidate).ToLowerInvariant() is not (".png" or ".jpg" or ".jpeg" or ".webp" or ".gif"))
+            {
+                return false;
+            }
+
+            path = Path.GetFullPath(candidate);
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or
+            NotSupportedException or
+            PathTooLongException or
+            UriFormatException)
+        {
+            return false;
+        }
+    }
+
+    private static string SerializeRawEvent(AppServerNotification notification)
+    {
+        if (!string.Equals(
+                ReadString(notification.Params, "item.type"),
+                "imageGeneration",
+                StringComparison.Ordinal))
+        {
+            return $"{notification.Method}: {notification.Params.ToJsonString()}";
+        }
+
+        var item = new JsonObject
+        {
+            ["id"] = ReadString(notification.Params, "item.id"),
+            ["type"] = "imageGeneration",
+            ["status"] = ReadString(notification.Params, "item.status"),
+            ["savedPath"] = ReadString(notification.Params, "item.savedPath"),
+            ["result"] = "[encoded image omitted]"
+        };
+        var parameters = new JsonObject
+        {
+            ["threadId"] = ReadString(notification.Params, "threadId"),
+            ["turnId"] = ReadString(notification.Params, "turnId"),
+            ["itemId"] = ReadString(notification.Params, "itemId"),
+            ["item"] = item
+        };
+        return $"{notification.Method}: {parameters.ToJsonString()}";
+    }
+
+    private static string SanitizeStoredRawEvent(string rawEvent) =>
+        rawEvent.Contains("\"imageGeneration\"", StringComparison.Ordinal) &&
+        TryParseStoredNotification(rawEvent, out var notification)
+            ? SerializeRawEvent(notification)
+            : rawEvent;
+
+    private static bool TryParseStoredNotification(
+        string rawEvent,
+        out AppServerNotification notification)
+    {
+        notification = null!;
+        var separator = rawEvent.IndexOf(": ", StringComparison.Ordinal);
+        if (separator <= 0 || separator + 2 >= rawEvent.Length)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (JsonNode.Parse(rawEvent[(separator + 2)..]) is not JsonObject parameters)
+            {
+                return false;
+            }
+
+            notification = new AppServerNotification(rawEvent[..separator], parameters);
+            return true;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
 
     private static string NormalizeActivityDetail(string? detail) => detail?.Trim() ?? string.Empty;
 

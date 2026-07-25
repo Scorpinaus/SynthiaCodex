@@ -3775,7 +3775,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         CompletedAt = source.CompletedAt,
         IsSuperseded = source.IsSuperseded,
         Activity = [.. source.Activity],
-        UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())]
+        UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())],
+        GeneratedImagePaths = [.. source.GeneratedImagePaths]
     };
 
     public async ValueTask DisposeAsync()

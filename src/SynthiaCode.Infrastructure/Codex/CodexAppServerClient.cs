@@ -1920,6 +1920,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
             var prompts = new List<string>();
             var assistantMessages = new List<string>();
+            var generatedImagePaths = new List<string>();
             if (turn["items"] is JsonArray items)
             {
                 foreach (var item in items.OfType<JsonObject>())
@@ -1940,6 +1941,15 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                                 assistantMessages.Add(UnicodeTextNormalizer.RepairLegacyMojibake(message));
                             }
                             break;
+                        case "imageGeneration":
+                            var savedPath = ReadString(item, "savedPath");
+                            if (string.Equals(ReadString(item, "status"), "completed", StringComparison.Ordinal) &&
+                                !string.IsNullOrWhiteSpace(savedPath) &&
+                                !generatedImagePaths.Contains(savedPath, StringComparer.OrdinalIgnoreCase))
+                            {
+                                generatedImagePaths.Add(savedPath);
+                            }
+                            break;
                     }
                 }
             }
@@ -1951,7 +1961,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                 AssistantResponse = assistantMessages.LastOrDefault() ?? string.Empty,
                 Status = ParseTurnStatus(ReadString(turn, "status")),
                 StartedAt = ReadUnixTimestamp(turn, "startedAt") ?? DateTimeOffset.UtcNow,
-                CompletedAt = ReadUnixTimestamp(turn, "completedAt")
+                CompletedAt = ReadUnixTimestamp(turn, "completedAt"),
+                GeneratedImagePaths = generatedImagePaths
             });
         }
 

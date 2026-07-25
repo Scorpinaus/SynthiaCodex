@@ -63,6 +63,16 @@
 | Phase 6B.2 - Explicit app-server input | Added typed `CodexSkillInput` validation and `{ type: "skill", name, path }` serialization while retaining the visible `$name` marker. Unique manual markers resolve from enabled metadata, duplicate names require path-aware picker selection, removed markers discard stale bindings, and start, steer, queued snapshots, restore, manual queued steer, and later queued dispatch preserve the exact absolute path. Three additional focused tests pass as part of the 215-test suite. | **Complete** |
 | Phase 6B.3 - Verification | All 215 behavioral tests pass in Debug and Release. The complete solution test command succeeds, `git diff --check` is clean, and non-incremental Debug and Release rebuilds complete with zero warnings and errors. Both `SynthiaCode.App.exe` artifacts were verified after the rebuild. The final review also added coverage and fixes for full-token replacement when the caret is inside `$name`, and fail-closed composer discovery after a stale workspace refresh. | **Complete** |
 
+## Phase 6C generated-image result implementation parity
+
+| Phase | Implemented outcome | Status |
+| --- | --- | --- |
+| Phase 6C.1 - Test contract | Added red-test coverage for canonical `imageGeneration` completion events, duplicate-event suppression, coexistence with final-answer text, conversation persistence, `thread/read` restoration, and a rendered-WPF inline preview using paths with spaces and parentheses. The expected compile failure confirmed that generated-image state was absent from turns and snapshots. | **Complete** |
+| Phase 6C.2 - Live, persisted, and restored rendering | Added first-class generated-image paths to conversation turns and snapshots, projected successful app-server `savedPath` results into the existing safe local-image Markdown surface before final response text, retained them across settings saves, forks, and history reconciliation, and restored them from canonical thread items. Invalid, failed, unsupported, UNC, and duplicate results remain excluded. Snapshot review also repaired two clone paths that previously dropped `IsSuperseded`. | **Complete** |
+| Phase 6C.3 - Verification | All 218 behavioral tests pass in Debug and Release, including focused reducer, history, persistence, generated-image viewer, and rendered-WPF coverage. `git diff --check` is clean, and non-incremental Debug and Release solution rebuilds complete with zero warnings and errors. Both `SynthiaCode.App.exe` artifacts were verified after the rebuild. One transient five-second fake-transport timeout in an unrelated fork test passed immediately in isolation and on the complete Release rerun, so no product or harness change was required. | **Complete** |
+| Phase 6C.4 - Runtime investigation and legacy recovery | Inspection of real app-server state confirmed that completed image events contain valid `savedPath` values but older local conversation snapshots have no generated-image field. Restore now recovers those existing images from bounded raw completion events. Live and legacy image diagnostics retain identifiers, status, and path while dropping multi-megabyte encoded `result` data; layout coverage now verifies a portrait image receives visible dimensions inside the actual virtualized transcript. | **Complete** |
+| Phase 6C.5 - Follow-up verification | Focused legacy recovery, payload redaction, protocol, and full-transcript portrait-layout tests pass. All 218 behavioral tests pass in Debug and Release. Clean non-incremental executable rebuilds and final repository checks are complete. | **Complete** |
+
 ## Status legend
 
 | Status | Meaning |
@@ -154,7 +164,8 @@
 | Computer Use | No screen/desktop control surface | **Missing** | ChatGPT can control supported desktop apps and browser UI with explicit permissions. |
 | File attachments and image inputs | Image/file/folder pickers, clipboard file-list paste, Explorer drag/drop, ordered previews, image capability checks, attachment-only/mixed input, queue/transcript persistence, contained live workspace references, and immutable managed snapshots for external images/files/folders | **Near** | Interactive folder review/exclusions, optional live external roots, app-server history mention materialization, bounded thumbnail decoding, attachment-specific permission preflight, and installed-runtime managed-mention smoke coverage remain follow-up work. |
 | Artifact/file viewer | Rich assistant Markdown renders in the transcript, but there is no document/spreadsheet/slide/PDF artifact viewer | **Missing** | ChatGPT can create and preview files in conversation. |
-| Image generation, Sites, and visualizations | No dedicated generation or interactive artifact surfaces | **Missing** | These are broader ChatGPT capabilities rather than core local coding requirements. |
+| Image generation | Explicit skill invocation can run image generation; canonical and legacy-restored generated-image results render inline before final text, open in the expanded viewer, and survive conversation persistence and `thread/read` restoration without retaining encoded image bytes in diagnostics | **Near** | No dedicated generation settings, variant gallery, or image-editing workflow outside the skill/tool path. |
+| Sites and visualizations | No dedicated interactive artifact surfaces | **Missing** | These are broader ChatGPT capabilities rather than core local coding requirements. |
 | Scheduled tasks | No create/manage/run history or recurring local project tasks | **Missing** | ChatGPT Scheduled supports local/worktree runs, chat continuity, skills, plugins, and RRULE schedules. |
 | Remote/cloud connections | Local stdio app-server only; no SSH/device/cloud chat surface | **Missing** | ChatGPT supports remote connections, cloud environments, and cloud-operated work. |
 
@@ -321,7 +332,7 @@ P0 attachments and image input moved from **Missing** to **Near**:
 2. Plugin/connector directory and authorization.
 3. Scheduled tasks and run history.
 4. Remote connections and cloud chats.
-5. Artifact viewer, visualizations, image generation, and Sites.
+5. Artifact viewer, visualizations, Sites, and richer native image-generation controls.
 6. Rich appearance, shortcut customization, dictation, quick chat, deep links, personalization, and memories.
 
 ## Product recommendation

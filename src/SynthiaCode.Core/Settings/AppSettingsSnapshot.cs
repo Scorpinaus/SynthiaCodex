@@ -71,7 +71,9 @@ public static class AppSettingsSnapshot
         Status = source.Status,
         StartedAt = source.StartedAt,
         CompletedAt = source.CompletedAt,
+        IsSuperseded = source.IsSuperseded,
         Activity = [.. source.Activity],
-        UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())]
+        UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())],
+        GeneratedImagePaths = [.. source.GeneratedImagePaths]
     };
 }

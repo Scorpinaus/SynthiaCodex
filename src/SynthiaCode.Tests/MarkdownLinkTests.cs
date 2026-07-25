@@ -4,9 +4,11 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Navigation;
+using System.Text.Json.Nodes;
 using SynthiaCode.App.Controls;
 using SynthiaCode.App.Services;
 using SynthiaCode.App.ViewModels;
+using SynthiaCode.Core.Codex.AppServer;
 
 internal static class MarkdownLinkTests
 {
@@ -19,6 +21,7 @@ internal static class MarkdownLinkTests
         ("markdown renderer lays out pipe tables", RendererLaysOutPipeTablesAsync),
         ("markdown link renderer recognizes safe assistant links", RendererRecognizesSafeLinksAsync),
         ("markdown renderer embeds generated local images", RendererEmbedsGeneratedLocalImagesAsync),
+        ("image-generation notifications render an inline chat preview", ImageGenerationNotificationsRenderInlinePreviewAsync),
         ("generated image viewer loads an expanded image", GeneratedImageViewerLoadsExpandedImageAsync),
         ("markdown link renderer preserves unsafe and malformed links", RendererPreservesUnsafeAndMalformedLinksAsync),
         ("markdown link renderer routes link activation through its command", RendererRoutesLinkActivationAsync),
@@ -289,6 +292,87 @@ internal static class MarkdownLinkTests
             var unsupported = new MarkdownTextBlock { Markdown = $"[Open notes]({textPath})" };
             Assert(!unsupported.Inlines.OfType<InlineUIContainer>().Any(), "non-image local files are not embedded");
             Assert(InlineText(unsupported) == $"[Open notes]({textPath})", "unsupported local files remain visible as literal text");
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    });
+
+    private static Task ImageGenerationNotificationsRenderInlinePreviewAsync() => RunOnStaAsync(() =>
+    {
+        var tempDirectory = Path.Combine(Path.GetTempPath(), $"synthiacode-image-event-({Guid.NewGuid():N})");
+        Directory.CreateDirectory(tempDirectory);
+        var imagePath = Path.Combine(tempDirectory, "generated infographic (1).png");
+        var bitmap = System.Windows.Media.Imaging.BitmapSource.Create(
+            864,
+            1821,
+            96,
+            96,
+            System.Windows.Media.PixelFormats.Bgra32,
+            null,
+            new byte[864 * 1821 * 4],
+            864 * 4);
+        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+        using (var stream = File.Create(imagePath))
+        {
+            encoder.Save(stream);
+        }
+
+        try
+        {
+            var service = new CodexThreadService();
+            service.Restore("thread-image", null, null, null);
+            service.BeginTurn("Generate an infographic");
+            service.BindPendingTurn("turn-image");
+            service.ApplyNotification(new AppServerNotification(
+                "item/completed",
+                new JsonObject
+                {
+                    ["threadId"] = "thread-image",
+                    ["turnId"] = "turn-image",
+                    ["item"] = new JsonObject
+                    {
+                        ["id"] = "image-1",
+                        ["type"] = "imageGeneration",
+                        ["status"] = "completed",
+                        ["result"] = "generated",
+                        ["savedPath"] = imagePath
+                    }
+                }));
+
+            var renderer = new MarkdownTextBlock
+            {
+                Markdown = service.ActiveConversationTurn!.AssistantResponseDisplay,
+                Width = 760,
+                LineHeight = 22,
+                TextWrapping = TextWrapping.Wrap
+            };
+            var preview = renderer.Inlines.OfType<InlineUIContainer>()
+                .Single(container =>
+                    AutomationProperties.GetName(container.Child).StartsWith(
+                        "Generated image preview:",
+                        StringComparison.Ordinal));
+            var image = ((StackPanel)((Border)preview.Child).Child)
+                .Children
+                .OfType<Button>()
+                .Select(button => button.Content)
+                .OfType<Image>()
+                .Single();
+
+            Assert(image.Source is not null, "the canonical image-generation event decodes into an inline transcript preview");
+            renderer.Measure(new Size(760, double.PositiveInfinity));
+            renderer.Arrange(new Rect(0, 0, 760, renderer.DesiredSize.Height));
+            renderer.UpdateLayout();
+            renderer.Measure(new Size(760, double.PositiveInfinity));
+            renderer.Arrange(new Rect(0, 0, 760, renderer.DesiredSize.Height));
+            Assert(
+                preview.Child.RenderSize.Height >= 400,
+                $"the generated-image card receives visible portrait layout height (actual {preview.Child.RenderSize})");
+            Assert(
+                renderer.RenderSize.Height >= 400,
+                $"the transcript Markdown surface does not clip the generated-image card (actual {renderer.RenderSize})");
         }
         finally
         {

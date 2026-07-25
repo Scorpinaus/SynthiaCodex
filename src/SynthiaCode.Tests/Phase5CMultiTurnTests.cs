@@ -10,6 +10,7 @@ internal static class Phase5CMultiTurnTests
     [
         ("multi-turn reducer keeps sequential turns independent", ReducerKeepsTurnsIndependentAsync),
         ("thread read parses canonical conversation history", ThreadReadParsesHistoryAsync),
+        ("thread read restores generated images", ThreadReadRestoresGeneratedImagesAsync),
         ("conversation persistence remains backward compatible", ConversationPersistenceIsCompatibleAsync),
         ("task composer distinguishes first turn and follow-up", ComposerLabelsFollowUpAsync),
         ("turn activity presentation follows content and status", ActivityPresentationFollowsTurnStateAsync),
@@ -18,6 +19,7 @@ internal static class Phase5CMultiTurnTests
         ("command and tool activity updates stable rows", ActivityUpdatesStableRowsAsync),
         ("interleaved activities retain independent identity", InterleavedActivitiesRetainIdentityAsync),
         ("assistant commentary stays separate from final response", CommentaryStaysSeparateFromFinalResponseAsync),
+        ("generated images remain visible with final response text", GeneratedImagesRemainVisibleWithFinalResponseAsync),
         ("Unicode repair is conservative and idempotent", UnicodeRepairIsConservativeAsync),
         ("streamed and restored mojibake is repaired for presentation", StreamedAndRestoredMojibakeIsRepairedAsync),
         ("supported work items project friendly activity", SupportedWorkItemsProjectFriendlyActivityAsync),
@@ -82,6 +84,32 @@ internal static class Phase5CMultiTurnTests
         Assert(result.Turns[0].AssistantResponse == "I\u2019m ready", "canonical response is repaired while parsed");
     }
 
+    private static async Task ThreadReadRestoresGeneratedImagesAsync()
+    {
+        await using var transport = new FakeAppServerTransport();
+        await using var client = new CodexAppServerClient(
+            transport,
+            new CodexAppServerClientMetadata("generated_images", "Generated Images", "1.0"));
+
+        var initialize = client.InitializeAsync();
+        await transport.WaitForClientMessageCountAsync(2);
+        transport.ServerSend("""{"id":0,"result":{"userAgent":"test"}}""");
+        await initialize;
+
+        var read = client.ReadThreadAsync(new CodexThreadReadRequest("thread-images"));
+        await transport.WaitForClientMessageCountAsync(3);
+        transport.ServerSend(
+            """
+            {"id":1,"result":{"thread":{"id":"thread-images","turns":[{"id":"turn-images","status":"completed","items":[{"id":"u1","type":"userMessage","content":[{"type":"text","text":"Generate an infographic"}]},{"id":"image-1","type":"imageGeneration","status":"completed","result":"generated","revisedPrompt":"A comparison infographic","savedPath":"C:\\Temp\\generated image (1).png"},{"id":"image-failed","type":"imageGeneration","status":"failed","result":"generation failed","savedPath":"C:\\Temp\\partial.png"},{"id":"a1","type":"agentMessage","text":"Generated the infographic."}]}]}}}
+            """);
+
+        var result = await read;
+        Assert(result.Turns.Count == 1, "one generated-image turn parsed");
+        Assert(
+            result.Turns[0].GeneratedImagePaths.SequenceEqual([@"C:\Temp\generated image (1).png"]),
+            "thread history retains the canonical image-generation saved path");
+    }
+
     private static Task ConversationPersistenceIsCompatibleAsync()
     {
         var legacy = new ProjectThreadState
@@ -97,11 +125,13 @@ internal static class Phase5CMultiTurnTests
         Assert(restored.ConversationTurns[0].UserPrompt == "Legacy prompt", "legacy prompt retained");
 
         legacy.ConversationTurns = [.. restored.SnapshotConversation()];
+        legacy.ConversationTurns[0].IsSuperseded = true;
         var settings = new AppSettings();
         new ThreadStore().Upsert(settings, legacy);
         var snapshot = AppSettingsSnapshot.Create(settings);
         legacy.ConversationTurns[0].UserPrompt = "Changed";
         Assert(snapshot.ProjectThreads[0].ConversationTurns[0].UserPrompt == "Legacy prompt", "settings snapshot deep-copies turns");
+        Assert(snapshot.ProjectThreads[0].ConversationTurns[0].IsSuperseded, "thread and settings clones retain superseded history state");
 
         var bounded = new CodexThreadService();
         bounded.Restore("bounded", null, null, null);
@@ -347,6 +377,89 @@ internal static class Phase5CMultiTurnTests
             "item/agentMessage/delta",
             Params("turn-legacy-message", "legacy-message", delta: "Legacy final text")));
         Assert(legacy.ActiveConversationTurn!.AssistantResponse == "Legacy final text", "unknown message phase preserves streaming compatibility");
+        return Task.CompletedTask;
+    }
+
+    private static Task GeneratedImagesRemainVisibleWithFinalResponseAsync()
+    {
+        const string imagePath = @"C:\Temp\generated image (1).png";
+        var service = CreateRunningService("turn-image");
+        var completedImage = NotificationWithItem(
+            "item/completed",
+            "turn-image",
+            "image-1",
+            "imageGeneration",
+            item =>
+            {
+                item["status"] = "completed";
+                item["result"] = $"data:image/png;base64,{new string('A', 100_000)}";
+                item["revisedPrompt"] = "A comparison infographic";
+                item["savedPath"] = imagePath;
+            });
+
+        service.ApplyNotification(completedImage);
+        service.ApplyNotification(completedImage);
+        service.ApplyNotification(NotificationWithItem(
+            "item/completed",
+            "turn-image",
+            "message-final",
+            "agentMessage",
+            item =>
+            {
+                item["phase"] = "final_answer";
+                item["text"] = "Generated the infographic.";
+            }));
+
+        var turn = service.ActiveConversationTurn!;
+        Assert(turn.GeneratedImagePaths.SequenceEqual([imagePath]), "duplicate completion notifications retain one generated image");
+        Assert(
+            service.RawEvents.All(rawEvent =>
+                rawEvent.Length < 2_000 &&
+                !rawEvent.Contains("data:image", StringComparison.Ordinal)),
+            "raw image-generation diagnostics omit encoded image bytes");
+        Assert(turn.ShowsAssistantChannel, "an image-generation result keeps the assistant channel visible");
+        Assert(
+            turn.AssistantResponseDisplay.StartsWith(
+                "[Generated image](file:///C:/Temp/generated%20image%20%281%29.png)",
+                StringComparison.Ordinal),
+            "the generated image is projected as safe renderable Markdown before the final response");
+        Assert(
+            turn.AssistantResponseDisplay.EndsWith("Generated the infographic.", StringComparison.Ordinal),
+            "final response text remains visible beneath the generated image");
+
+        var restored = new CodexThreadService();
+        restored.Restore(
+            "thread-restored-image",
+            null,
+            null,
+            null,
+            conversationTurns: service.SnapshotConversation());
+        Assert(
+            restored.ConversationTurns[0].GeneratedImagePaths.SequenceEqual([imagePath]),
+            "generated images survive conversation persistence");
+
+        var legacyRestored = new CodexThreadService();
+        legacyRestored.Restore(
+            "thread-legacy-image",
+            null,
+            null,
+            [$"item/completed: {completedImage.Params.ToJsonString()}"],
+            conversationTurns:
+            [
+                new CodexConversationTurnSnapshot
+                {
+                    TurnId = "turn-image",
+                    AssistantResponse = "Generated the infographic.",
+                    Status = CodexTurnStatus.Completed
+                }
+            ]);
+        Assert(
+            legacyRestored.ConversationTurns[0].GeneratedImagePaths.SequenceEqual([imagePath]),
+            "legacy raw image-generation events recover images missing from older conversation snapshots");
+        Assert(
+            legacyRestored.RawEvents[0].Length < 2_000 &&
+            !legacyRestored.RawEvents[0].Contains("data:image", StringComparison.Ordinal),
+            "restoring legacy image events removes previously persisted encoded image bytes");
         return Task.CompletedTask;
     }
 

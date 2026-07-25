@@ -33,6 +33,7 @@ internal static class ResponsiveLayoutTests
         VerifyCollapsibleNavigationSections();
         VerifyProjectNavigationWraps();
         VerifyTranscriptWrapsAndScrolls();
+        VerifyGeneratedImageLayout();
         VerifyQueuedFollowUpControls();
         VerifyInstructionSettingsSurface();
     });
@@ -484,6 +485,69 @@ internal static class ResponsiveLayoutTests
         scroller.ScrollToTop();
         PumpLayout(view);
         AssertNear(0, scroller.VerticalOffset, "compact composer preserves a user-scrolled-up position");
+    }
+
+    private static void VerifyGeneratedImageLayout()
+    {
+        var tempDirectory = Path.Combine(Path.GetTempPath(), $"synthiacode-responsive-image-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+        var imagePath = Path.Combine(tempDirectory, "generated portrait.png");
+        var bitmap = System.Windows.Media.Imaging.BitmapSource.Create(
+            864,
+            1821,
+            96,
+            96,
+            PixelFormats.Bgra32,
+            null,
+            new byte[864 * 1821 * 4],
+            864 * 4);
+        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+        using (var stream = File.Create(imagePath))
+        {
+            encoder.Save(stream);
+        }
+
+        try
+        {
+            var turn = new CodexConversationTurn
+            {
+                TurnId = "generated-image-turn",
+                UserPrompt = "Generate an infographic",
+                AssistantResponse = "Generated the infographic.",
+                Status = CodexTurnStatus.Completed
+            };
+            turn.GeneratedImagePaths.Add(imagePath);
+            var turns = new ObservableCollection<CodexConversationTurn> { turn };
+            var view = new TaskView { Width = 620, Height = 520 };
+            var conversationList = (ListBox?)view.FindName("ConversationList")
+                ?? throw new InvalidOperationException("conversation list was not found");
+            conversationList.ItemsSource = turns;
+            typeof(TaskView)
+                .GetField("observedTurns", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(view, turns);
+
+            PumpLayout(view);
+            var response = FindVisualDescendants<MarkdownTextBlock>(conversationList)
+                .Single(block => block.Markdown == turn.AssistantResponseDisplay);
+            var preview = response.Inlines
+                .OfType<InlineUIContainer>()
+                .Select(container => container.Child)
+                .OfType<Border>()
+                .Single(border =>
+                    AutomationProperties.GetName(border).StartsWith(
+                        "Generated image preview:",
+                        StringComparison.Ordinal));
+            var image = FindVisualDescendants<Image>(preview).Single();
+
+            Assert(preview.ActualWidth > 200, $"generated-image card has visible transcript width (actual {preview.RenderSize})");
+            Assert(preview.ActualHeight > 400, $"generated-image card has visible transcript height (actual {preview.RenderSize})");
+            Assert(image.ActualWidth > 150 && image.ActualHeight > 300, $"generated image is visibly laid out (actual {image.RenderSize})");
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
     }
 
     private static void VerifyModelPickerRowsStayCompact(Popup popup)

@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Automation;
@@ -5,6 +6,8 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using SynthiaCode.App.Services;
 
@@ -164,6 +167,24 @@ public sealed class MarkdownTextBlock : TextBlock
                 AppendInlineMarkdown(emphasis.Inlines, emphasisContent);
                 inlines.Add(emphasis);
                 index = emphasisEnd;
+                continue;
+            }
+
+            if (source[index] == '!' &&
+                TryReadLocalImageLink(source, index, hasImageMarker: true, out var imageEnd, out var imageLabel, out var imageUri, out var imagePath) &&
+                TryCreateGeneratedImagePreview(imageLabel, imageUri, imagePath, out var markedPreview))
+            {
+                inlines.Add(new InlineUIContainer(markedPreview));
+                index = imageEnd;
+                continue;
+            }
+
+            if (source[index] == '[' &&
+                TryReadLocalImageLink(source, index, hasImageMarker: false, out var localImageEnd, out var localImageLabel, out var localImageUri, out var localImagePath) &&
+                TryCreateGeneratedImagePreview(localImageLabel, localImageUri, localImagePath, out var linkedPreview))
+            {
+                inlines.Add(new InlineUIContainer(linkedPreview));
+                index = localImageEnd;
                 continue;
             }
 
@@ -379,6 +400,95 @@ public sealed class MarkdownTextBlock : TextBlock
         };
         link.RequestNavigate += OnLinkRequestNavigate;
         inlines.Add(link);
+    }
+
+    private bool TryCreateGeneratedImagePreview(
+        string label,
+        Uri target,
+        string path,
+        out Border preview)
+    {
+        preview = null!;
+        try
+        {
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.DecodePixelWidth = 960;
+            bitmap.UriSource = target;
+            bitmap.EndInit();
+            bitmap.Freeze();
+
+            var image = new Image
+            {
+                Source = bitmap,
+                MaxWidth = 720,
+                MaxHeight = 480,
+                Stretch = Stretch.Uniform,
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            AutomationProperties.SetName(image, $"Generated image: {label}");
+
+            var previewButton = new Button
+            {
+                Content = image,
+                Tag = target,
+                Padding = new Thickness(0),
+                BorderThickness = new Thickness(0),
+                Background = Brushes.Transparent,
+                Cursor = Cursors.Hand,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                ToolTip = $"Expand {label}"
+            };
+            previewButton.SetResourceReference(Control.FocusVisualStyleProperty, "FocusVisual");
+            previewButton.Click += OnGeneratedImagePreviewClick;
+            AutomationProperties.SetName(previewButton, $"Expand generated image: {label}");
+
+            var linkText = new TextBlock
+            {
+                Margin = new Thickness(0, 8, 0, 0),
+                TextWrapping = TextWrapping.Wrap
+            };
+            AddLink(linkText.Inlines, label, target);
+
+            var content = new StackPanel();
+            content.Children.Add(previewButton);
+            content.Children.Add(linkText);
+
+            preview = new Border
+            {
+                Child = content,
+                Padding = new Thickness(8),
+                Margin = new Thickness(0, 8, 0, 8),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                ToolTip = path
+            };
+            preview.SetResourceReference(Border.BackgroundProperty, "SurfaceSunkenBrush");
+            preview.SetResourceReference(Border.BorderBrushProperty, "BorderSubtleBrush");
+            preview.SetBinding(
+                FrameworkElement.MaxWidthProperty,
+                new Binding(nameof(ActualWidth)) { Source = this });
+            AutomationProperties.SetName(preview, $"Generated image preview: {label}");
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is IOException or
+            NotSupportedException or
+            UnauthorizedAccessException or
+            FileFormatException)
+        {
+            return false;
+        }
+    }
+
+    private void OnGeneratedImagePreviewClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: Uri target } &&
+            LinkCommand?.CanExecute(target) == true)
+        {
+            LinkCommand.Execute(target);
+        }
     }
 
     private void OnLinkRequestNavigate(object sender, RequestNavigateEventArgs e)
@@ -860,6 +970,49 @@ public sealed class MarkdownTextBlock : TextBlock
         return true;
     }
 
+    private static bool TryReadLocalImageLink(
+        string source,
+        int start,
+        bool hasImageMarker,
+        out int end,
+        out string label,
+        out Uri target,
+        out string path)
+    {
+        end = start;
+        label = string.Empty;
+        target = null!;
+        path = string.Empty;
+
+        var linkStart = hasImageMarker ? start + 1 : start;
+        if (linkStart >= source.Length ||
+            source[linkStart] != '[' ||
+            (hasImageMarker && source[start] != '!'))
+        {
+            return false;
+        }
+
+        var labelEnd = source.IndexOf("](", linkStart + 1, StringComparison.Ordinal);
+        if (labelEnd <= linkStart + 1)
+        {
+            return false;
+        }
+
+        var targetEnd = source.IndexOf(')', labelEnd + 2);
+        if (targetEnd < 0 ||
+            !LocalImageResourcePolicy.TryCreateSupportedUri(
+                source[(labelEnd + 2)..targetEnd],
+                out target,
+                out path))
+        {
+            return false;
+        }
+
+        label = source[(linkStart + 1)..labelEnd];
+        end = targetEnd + 1;
+        return true;
+    }
+
     private static bool TryReadUnfinishedMarkdownLink(string source, int start, out int end)
     {
         end = start;
@@ -930,6 +1083,7 @@ public sealed class MarkdownTextBlock : TextBlock
         for (var index = start; index < source.Length; index++)
         {
             if (source[index] is '[' or '<' or '`' ||
+                (source[index] == '!' && index + 1 < source.Length && source[index + 1] == '[') ||
                 IsEscapedPunctuation(source, index) ||
                 IsCombinedEmphasisMarkerStart(source, index) ||
                 IsStrongMarkerStart(source, index) ||

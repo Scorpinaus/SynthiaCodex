@@ -3403,6 +3403,10 @@ internal sealed class FakeUserInteractionService : IUserInteractionService
     {
     }
 
+    public void ShowImagePreview(string path)
+    {
+    }
+
     public void RevealInExplorer(string path)
     {
     }

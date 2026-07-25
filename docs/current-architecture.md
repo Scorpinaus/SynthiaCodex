@@ -199,9 +199,9 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 
 | Measure | Final local result | Comparison |
 | --- | --- | --- |
-| `MainViewModel.cs` | 3,812 physical lines | Includes later projectless-chat, attachment, queue, rename/search, responsive-shell, and presentation coordination added after the original extraction audit. |
+| `MainViewModel.cs` | 3,813 physical lines | Includes later projectless-chat, attachment, queue, rename/search, responsive-shell, generated-image expansion, and presentation coordination added after the original extraction audit. |
 | `MainWindow.xaml` | 444 physical lines | Custom chrome, adaptive three-zone shell, compact drawers, lower terminal dock, inspector, status, and approval hosting. |
-| Behavioral suite | 194 passing tests | Includes coordinator, lifecycle, history, persistence, multi-turn, activity, presentation, attachment, permission, Markdown, projectless-thread, navigation, redesign-resource, adaptive-shell, accessibility, and performance regressions. |
+| Behavioral suite | 197 passing tests | Includes coordinator, lifecycle, history, persistence, multi-turn, activity, presentation, attachment, permission, Markdown, generated-image preview/expansion, projectless-thread, navigation, redesign-resource, adaptive-shell, accessibility, and performance regressions. |
 | Startup shell/readiness | 541 ms / 759 ms | unchanged |
 | Codex long stream | 25,001 notifications, 2 UI batches, 20.71 MiB, 40.25 ms | same batching/allocation bound; synthetic CPU time varies locally |
 | Terminal storage/presentation | 39.06 MiB in 2.24 ms; 250,000 retained; 100 chunks to 1 UI update | faster storage run; same presentation bound |
@@ -209,7 +209,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 | Recovery | 27 ms | 5 ms slower locally, still well below interactive latency |
 | Active-resource shutdown | 2 ms | 10 ms faster locally |
 
-The earlier Phase 5D release record completed with zero warnings/errors and 75 passing tests. The modern-redesign release gate supersedes that historical count with the current warning-free Debug/Release builds and 194-test suite.
+The earlier Phase 5D release record completed with zero warnings/errors and 75 passing tests. The modern-redesign release gate supersedes that historical count with the current warning-free Debug/Release builds and 197-test suite.
 
 A no-build behavioral-runner invocation took approximately 12 seconds during the initial audit; this is a coarse runner-duration observation, not a product performance metric.
 

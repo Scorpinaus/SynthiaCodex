@@ -18,6 +18,8 @@ internal static class MarkdownLinkTests
         ("markdown renderer formats quotes and fenced code", RendererFormatsQuotesAndFencedCodeAsync),
         ("markdown renderer lays out pipe tables", RendererLaysOutPipeTablesAsync),
         ("markdown link renderer recognizes safe assistant links", RendererRecognizesSafeLinksAsync),
+        ("markdown renderer embeds generated local images", RendererEmbedsGeneratedLocalImagesAsync),
+        ("generated image viewer loads an expanded image", GeneratedImageViewerLoadsExpandedImageAsync),
         ("markdown link renderer preserves unsafe and malformed links", RendererPreservesUnsafeAndMalformedLinksAsync),
         ("markdown link renderer routes link activation through its command", RendererRoutesLinkActivationAsync),
         ("external link policy permits only web destinations", ExternalLinkPolicyPermitsOnlyWebDestinations)
@@ -215,6 +217,106 @@ internal static class MarkdownLinkTests
         Assert(links[1].NavigateUri?.AbsoluteUri == "https://reference.example.com/", "angle-bracket autolink is rendered");
         Assert(links[2].NavigateUri?.AbsoluteUri == "https://docs.example.com/guide", "bare URL excludes trailing punctuation");
         Assert(InlineText(links[2]) == "https://docs.example.com/guide", "bare URL is its own label");
+    });
+
+    private static Task RendererEmbedsGeneratedLocalImagesAsync() => RunOnStaAsync(() =>
+    {
+        var tempDirectory = Path.Combine(Path.GetTempPath(), $"synthiacode-markdown-image-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+        var imagePath = Path.Combine(tempDirectory, "generated-infographic.png");
+        var textPath = Path.Combine(tempDirectory, "notes.txt");
+        File.WriteAllBytes(
+            imagePath,
+            Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z6JkAAAAASUVORK5CYII="));
+        File.WriteAllText(textPath, "not an image");
+
+        try
+        {
+            Uri? activatedUri = null;
+            var renderer = new MarkdownTextBlock
+            {
+                Markdown = $"Created the infographic.{Environment.NewLine}{Environment.NewLine}[Download the PNG]({imagePath})",
+                LinkCommand = new RelayCommand(parameter => activatedUri = parameter as Uri)
+            };
+
+            var preview = renderer.Inlines.OfType<InlineUIContainer>()
+                .Single(container => AutomationProperties.GetName(container.Child).StartsWith("Generated image preview:", StringComparison.Ordinal));
+            var card = preview.Child as Border
+                ?? throw new InvalidOperationException("generated image preview does not use a bounded card");
+            var content = card.Child as StackPanel
+                ?? throw new InvalidOperationException("generated image preview content was not created");
+            var previewButton = content.Children.OfType<Button>().Single();
+            var image = previewButton.Content as Image
+                ?? throw new InvalidOperationException("generated image preview button does not contain the image");
+            var link = ((TextBlock)content.Children.OfType<TextBlock>().Single()).Inlines.OfType<Hyperlink>().Single();
+
+            Assert(image.Source is not null, "the generated image is decoded into the transcript");
+            Assert(image.MaxWidth <= 720 && image.MaxHeight <= 480, "the generated image preview is bounded");
+            Assert(
+                AutomationProperties.GetName(previewButton) == "Expand generated image: Download the PNG",
+                "the generated image preview exposes an accessible expansion action");
+            Assert(link.NavigateUri?.IsFile == true, "the embedded download link targets the local image");
+            Assert(InlineText(link) == "Download the PNG", "the assistant-provided image label remains clickable");
+
+            previewButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert(
+                activatedUri?.IsFile == true &&
+                string.Equals(activatedUri.LocalPath, imagePath, StringComparison.OrdinalIgnoreCase),
+                "clicking the image preview requests the expanded local image");
+
+            activatedUri = null;
+            link.RaiseEvent(new RequestNavigateEventArgs(link.NavigateUri!, null));
+            Assert(
+                activatedUri?.IsFile == true &&
+                string.Equals(activatedUri.LocalPath, imagePath, StringComparison.OrdinalIgnoreCase),
+                "local image link activation is routed through the transcript command");
+
+            string? revealedPath = null;
+            var taskWorkspace = new TaskViewModel(
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => false,
+                () => false,
+                showLocalImage: path => revealedPath = path);
+            Assert(taskWorkspace.OpenExternalUriCommand.CanExecute(link.NavigateUri), "the transcript command accepts an existing local image");
+            taskWorkspace.OpenExternalUriCommand.Execute(link.NavigateUri);
+            Assert(
+                string.Equals(revealedPath, imagePath, StringComparison.OrdinalIgnoreCase),
+                "the transcript command opens the expanded generated image through the interaction service");
+
+            var unsupported = new MarkdownTextBlock { Markdown = $"[Open notes]({textPath})" };
+            Assert(!unsupported.Inlines.OfType<InlineUIContainer>().Any(), "non-image local files are not embedded");
+            Assert(InlineText(unsupported) == $"[Open notes]({textPath})", "unsupported local files remain visible as literal text");
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    });
+
+    private static Task GeneratedImageViewerLoadsExpandedImageAsync() => RunOnStaAsync(() =>
+    {
+        var tempDirectory = Path.Combine(Path.GetTempPath(), $"synthiacode-expanded-image-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+        var imagePath = Path.Combine(tempDirectory, "expanded-infographic.png");
+        File.WriteAllBytes(
+            imagePath,
+            Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z6JkAAAAASUVORK5CYII="));
+
+        try
+        {
+            var viewer = new GeneratedImagePreviewWindow(imagePath);
+            Assert(viewer.Title.Contains("expanded-infographic.png", StringComparison.Ordinal), "the expanded viewer identifies the image");
+            Assert(viewer.Width > 720 && viewer.Height > 480, "the expanded viewer is larger than the transcript preview");
+            Assert(viewer.PreviewImage.Source is not null, "the expanded viewer decodes the full image");
+            Assert(viewer.PreviewImage.Stretch == System.Windows.Media.Stretch.Uniform, "the expanded image retains its aspect ratio");
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
     });
 
     private static Task RendererPreservesUnsafeAndMalformedLinksAsync() => RunOnStaAsync(() =>

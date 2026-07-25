@@ -149,6 +149,22 @@ public sealed class WpfUserInteractionService : IUserInteractionService
         });
     }
 
+    public void ShowImagePreview(string path)
+    {
+        var viewer = new GeneratedImagePreviewWindow(path);
+        if (Application.Current?.MainWindow is { IsVisible: true } owner)
+        {
+            viewer.Owner = owner;
+        }
+        else
+        {
+            viewer.ShowInTaskbar = true;
+            viewer.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        }
+
+        viewer.ShowDialog();
+    }
+
     public void RevealInExplorer(string path)
     {
         var startInfo = new ProcessStartInfo

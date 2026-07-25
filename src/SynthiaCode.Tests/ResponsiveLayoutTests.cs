@@ -246,11 +246,19 @@ internal static class ResponsiveLayoutTests
             .Single(button => AutomationProperties.GetName(button) == "Toggle Chats");
         var projectsToggle = FindVisualDescendants<Button>(view)
             .Single(button => AutomationProperties.GetName(button) == "Toggle Projects");
+        var newChatButton = FindVisualDescendants<Button>(view)
+            .Single(button => AutomationProperties.GetName(button) == "New chat");
+        var addProjectButton = FindVisualDescendants<Button>(view)
+            .Single(button => AutomationProperties.GetName(button) == "Add project");
         var chatsList = FindVisualDescendants<ListBox>(view)
             .Single(listBox => ReferenceEquals(listBox.ItemsSource, workspace.GeneralThreads));
         var projectsList = FindVisualDescendants<ListBox>(view)
             .Single(listBox => ReferenceEquals(listBox.ItemsSource, workspace.Projects));
 
+        AssertNear(newChatButton.ActualHeight, chatsToggle.ActualHeight, "Chats header and New action have equal height");
+        AssertNear(addProjectButton.ActualHeight, projectsToggle.ActualHeight, "Projects header and Add action have equal height");
+        Assert(chatsToggle.VerticalContentAlignment == VerticalAlignment.Center, "Chats label is vertically centered");
+        Assert(projectsToggle.VerticalContentAlignment == VerticalAlignment.Center, "Projects label is vertically centered");
         Assert(chatsList.Visibility == Visibility.Visible, "Chats content starts visible");
         Assert(projectsList.Visibility == Visibility.Visible, "Projects content starts visible");
         Assert(ReferenceEquals(chatsToggle.Command, workspace.ToggleChatsCommand), "Chats header is wired to the Chats toggle command");

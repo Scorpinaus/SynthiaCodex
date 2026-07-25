@@ -10,5 +10,7 @@ public interface IUserInteractionService
 
     void OpenExternalUri(Uri uri);
 
+    void ShowImagePreview(string path);
+
     void RevealInExplorer(string path);
 }

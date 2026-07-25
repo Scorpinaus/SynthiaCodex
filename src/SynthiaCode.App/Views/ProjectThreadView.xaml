@@ -19,6 +19,14 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="NavigationSectionToggleButton"
+               TargetType="Button"
+               BasedOn="{StaticResource CompactButton}">
+            <Setter Property="MinHeight" Value="{StaticResource ControlHeightStandard}"/>
+            <Setter Property="Padding" Value="4,2"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
     </UserControl.Resources>
 
     <Border Background="{DynamicResource RailBrush}"
@@ -59,18 +67,26 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <Button Command="{Binding ProjectWorkspace.ToggleChatsCommand}"
-                        Style="{StaticResource CompactButton}"
-                        HorizontalContentAlignment="Left"
-                        Padding="4,2"
+                        Style="{StaticResource NavigationSectionToggleButton}"
                         AutomationProperties.Name="Toggle Chats">
                     <StackPanel Orientation="Horizontal">
-                        <Path Data="{StaticResource IconChevronDown}"
-                              Width="11"
+                        <Path Width="11"
                               Height="7"
                               Margin="2,0,7,0"
                               Stroke="{DynamicResource TextSecondaryBrush}"
                               StrokeThickness="1.5"
-                              Stretch="Uniform"/>
+                              Stretch="Uniform">
+                            <Path.Style>
+                                <Style TargetType="Path">
+                                    <Setter Property="Data" Value="{StaticResource IconChevronRight}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ProjectWorkspace.IsChatsExpanded}" Value="True">
+                                            <Setter Property="Data" Value="{StaticResource IconChevronDown}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Path.Style>
+                        </Path>
                         <TextBlock Text="Chats" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
@@ -170,18 +186,26 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <Button Command="{Binding ProjectWorkspace.ToggleProjectsCommand}"
-                        Style="{StaticResource CompactButton}"
-                        HorizontalContentAlignment="Left"
-                        Padding="4,2"
+                        Style="{StaticResource NavigationSectionToggleButton}"
                         AutomationProperties.Name="Toggle Projects">
                     <StackPanel Orientation="Horizontal">
-                        <Path Data="{StaticResource IconChevronDown}"
-                              Width="11"
+                        <Path Width="11"
                               Height="7"
                               Margin="2,0,7,0"
                               Stroke="{DynamicResource TextSecondaryBrush}"
                               StrokeThickness="1.5"
-                              Stretch="Uniform"/>
+                              Stretch="Uniform">
+                            <Path.Style>
+                                <Style TargetType="Path">
+                                    <Setter Property="Data" Value="{StaticResource IconChevronRight}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ProjectWorkspace.IsProjectsExpanded}" Value="True">
+                                            <Setter Property="Data" Value="{StaticResource IconChevronDown}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Path.Style>
+                        </Path>
                         <TextBlock Text="Projects" Style="{StaticResource SectionLabel}" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
@@ -189,6 +213,7 @@
                         Content="Add"
                         Command="{Binding ProjectWorkspace.BrowseProjectCommand}"
                         Style="{StaticResource CompactButton}"
+                        MinHeight="{StaticResource ControlHeightStandard}"
                         ToolTip="Add project (Ctrl+O)"
                         AutomationProperties.Name="Add project"/>
             </Grid>
@@ -221,7 +246,7 @@
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <Button Command="{Binding DataContext.ProjectWorkspace.OpenRecentProjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                <Button Command="{Binding DataContext.ProjectWorkspace.ToggleProjectExpansionCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                         CommandParameter="{Binding Path}"
                                         HorizontalContentAlignment="Stretch"
                                         BorderThickness="1"
@@ -245,13 +270,23 @@
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <Path Data="{StaticResource IconChevronDown}"
-                                              Width="10"
+                                        <Path Width="10"
                                               Height="6"
                                               Stroke="{DynamicResource TextSecondaryBrush}"
                                               StrokeThickness="1.4"
                                               Stretch="Uniform"
-                                              VerticalAlignment="Center"/>
+                                              VerticalAlignment="Center">
+                                            <Path.Style>
+                                                <Style TargetType="Path">
+                                                    <Setter Property="Data" Value="{StaticResource IconChevronRight}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                                            <Setter Property="Data" Value="{StaticResource IconChevronDown}"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Path.Style>
+                                        </Path>
                                         <TextBlock Grid.Column="1"
                                                    Text="{Binding Name}"
                                                    FontWeight="SemiBold"

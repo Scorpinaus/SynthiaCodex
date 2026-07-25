@@ -1,6 +1,6 @@
 # SynthiaCode and ChatGPT Desktop Feature Parity
 
-- **Audit date:** 24 July 2026
+- **Audit date:** 25 July 2026
 - **SynthiaCode baseline:** working tree based on commit `9b5a8bc`, including automatic first-message naming, manual thread rename, hover-visible sidebar chat actions, sidebar chat management, cross-chat search, find-in-chat, and the completed parity work recorded below
 - **Comparison surface:** ChatGPT desktop app with Codex/local-project capabilities
 - **Scope:** User-visible desktop functionality, local Codex workflows, and capabilities inherited through `codex app-server`
@@ -21,6 +21,8 @@
 | Phase 9 | Added a complete system-color high-contrast palette, system high-contrast selection, reduced-motion popup fallback, native-DPI vector icons, non-color state labels/structure, focus visuals, live-region metadata, focus-contained approval traversal, long-text wrapping/trimming, and keyboard-accessible drawers/splitters. | **Complete** |
 | Phase 10 | Preserved recycling virtualization, pixel transcript scrolling, 50 ms terminal presentation batching, bounded terminal/history behavior, native splitter resizing, and avoided large-surface effects/layout transforms; the warning-free build and focused performance guardrail tests pass. | **Complete** |
 | Phase 11 | Compared the implemented hierarchy and graphite palette with the approved concept, refreshed README/architecture documentation, completed rendered-WPF presentation checks, and produced warning-free Debug and Release executables after the complete regression gate. | **Complete** |
+| Phase 12 | Aligned and vertically centered the Chats/Projects section headers with their actions, separated project disclosure from workspace/thread activation so the active chat is retained, and added bounded in-chat previews plus safe clickable reveal links for generated local PNG/JPEG/WebP/GIF images. | **Complete** |
+| Phase 13 | Completed test-first generated-image expansion: generated-image cards expose a keyboard-accessible preview action, both the image and its embedded local link route through the validated image policy, and a resizable modal viewer loads the full image with aspect-ratio preservation, filename context, close action, and Esc dismissal. All 197 behavioral tests pass; Debug and Release rebuilds complete with zero warnings and errors. | **Complete** |
 
 ## Status legend
 

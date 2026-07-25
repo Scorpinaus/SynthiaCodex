@@ -49,6 +49,19 @@ public sealed class ProjectThreadViewModel : ObservableObject
         this.openRecentProject = openRecentProject;
         ToggleChatsCommand = new RelayCommand(() => IsChatsExpanded = !IsChatsExpanded);
         ToggleProjectsCommand = new RelayCommand(() => IsProjectsExpanded = !IsProjectsExpanded);
+        ToggleProjectExpansionCommand = new RelayCommand(parameter =>
+        {
+            if (parameter is not string path || string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            var project = Projects.FirstOrDefault(item => ProjectNavigationItemViewModel.PathsEqual(item.Path, path));
+            if (project is not null)
+            {
+                project.IsExpanded = !project.IsExpanded;
+            }
+        });
         ClearChatSearchCommand = new RelayCommand(() => ChatSearchText = string.Empty);
         OpenChatSearchResultCommand = new AsyncRelayCommand(OpenChatSearchResultAsync);
         BrowseProjectCommand = new AsyncRelayCommand(browseProject);
@@ -119,6 +132,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
 
     public ICommand ToggleChatsCommand { get; }
     public ICommand ToggleProjectsCommand { get; }
+    public ICommand ToggleProjectExpansionCommand { get; }
     public ICommand ClearChatSearchCommand { get; }
     public ICommand OpenChatSearchResultCommand { get; }
     public ICommand BrowseProjectCommand { get; }

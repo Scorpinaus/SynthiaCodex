@@ -7,6 +7,7 @@ internal static class Phase5DNavigationTests
     public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
     [
         ("project navigation groups threads and expands selection", NavigationGroupsThreadsAsync),
+        ("expanding a project retains the active chat", ExpandingProjectRetainsActiveChatAsync),
         ("chat and project sections toggle independently", NavigationSectionsToggleIndependentlyAsync),
         ("project navigation preserves compact actionable statuses", CompactStatusesAreActionableAsync),
         ("project plus creates current-checkout threads", ProjectCreationActionsChooseWorkspaceAsync)
@@ -58,6 +59,57 @@ internal static class Phase5DNavigationTests
 
         viewModel.OpenRecentProjectCommand.Execute(unicodePath);
         Assert(!viewModel.Projects[1].IsExpanded, "clicking the active project toggles its disclosure");
+        return Task.CompletedTask;
+    }
+
+    private static Task ExpandingProjectRetainsActiveChatAsync()
+    {
+        ProjectThreadViewModel? viewModel = null;
+        var openedProjects = new List<string>();
+        viewModel = CreateViewModel(parameter =>
+        {
+            openedProjects.Add((string)parameter!);
+            viewModel!.SetSelectedProjectPath((string)parameter!);
+            return Task.CompletedTask;
+        });
+
+        var activePath = @"C:\Work\Active";
+        var otherPath = @"C:\Work\Other";
+        var activeThread = new ProjectThreadState
+        {
+            ProjectPath = activePath,
+            ThreadId = "active-thread",
+            Title = "Active chat",
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        var otherThread = new ProjectThreadState
+        {
+            ProjectPath = otherPath,
+            ThreadId = "other-thread",
+            Title = "Newest other chat",
+            UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(1)
+        };
+
+        viewModel.RefreshProjectNavigation(
+            [
+                new RecentProject(activePath, "Active", DateTimeOffset.UtcNow),
+                new RecentProject(otherPath, "Other", DateTimeOffset.UtcNow)
+            ],
+            [activeThread, otherThread]);
+        viewModel.SetSelectedProjectPath(activePath);
+        viewModel.SelectedThread = activeThread;
+
+        viewModel.ToggleProjectExpansionCommand.Execute(otherPath);
+
+        Assert(ReferenceEquals(viewModel.SelectedThread, activeThread), "expanding another project retains the active chat");
+        Assert(ProjectNavigationItemViewModel.PathsEqual(viewModel.SelectedProjectPath, activePath), "expanding another project retains the active workspace");
+        Assert(viewModel.Projects.Single(project => ProjectNavigationItemViewModel.PathsEqual(project.Path, otherPath)).IsExpanded, "the requested project expands");
+        Assert(viewModel.Projects.Single(project => ProjectNavigationItemViewModel.PathsEqual(project.Path, activePath)).IsExpanded, "the active project remains expanded");
+        Assert(openedProjects.Count == 0, "project disclosure does not invoke workspace activation");
+
+        viewModel.ToggleProjectExpansionCommand.Execute(otherPath);
+        Assert(!viewModel.Projects.Single(project => ProjectNavigationItemViewModel.PathsEqual(project.Path, otherPath)).IsExpanded, "a second disclosure click collapses the project");
+        Assert(ReferenceEquals(viewModel.SelectedThread, activeThread), "collapsing another project still retains the active chat");
         return Task.CompletedTask;
     }
 

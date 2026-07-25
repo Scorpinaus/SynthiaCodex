@@ -72,7 +72,8 @@ public sealed class TaskViewModel : ObservableObject
         Func<Task>? alternateFollowUp = null,
         Func<Task>? persistFollowUpQueue = null,
         Func<QueuedFollowUp, Task>? sendQueuedFollowUp = null,
-        Func<CodexConversationTurn, string, Task<bool>>? editPrompt = null)
+        Func<CodexConversationTurn, string, Task<bool>>? editPrompt = null,
+        Action<string>? showLocalImage = null)
     {
         SubmitCommand = submitCommand = new AsyncRelayCommand(submit);
         ComposerSendCommand = composerSendCommand = new AsyncRelayCommand(
@@ -193,8 +194,16 @@ public sealed class TaskViewModel : ObservableObject
                 {
                     (openExternalUri ?? (_ => { }))(uri);
                 }
+                else if (parameter is Uri localUri &&
+                         showLocalImage is not null &&
+                         LocalImageResourcePolicy.IsSupported(localUri, out var imagePath))
+                {
+                    showLocalImage(imagePath);
+                }
             },
-            parameter => parameter is Uri uri && ExternalUriPolicy.IsSupported(uri));
+            parameter => parameter is Uri uri &&
+                (ExternalUriPolicy.IsSupported(uri) ||
+                 (showLocalImage is not null && LocalImageResourcePolicy.IsSupported(uri, out _))));
         OpenOptionsCommand = openOptionsCommand = new RelayCommand(
             () =>
             {

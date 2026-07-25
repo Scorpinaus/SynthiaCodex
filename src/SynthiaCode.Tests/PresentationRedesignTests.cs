@@ -213,7 +213,7 @@ internal static partial class PresentationRedesignTests
     {
         var parity = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "feature_parity.md"));
         Assert(parity.Contains("## Modern WPF redesign implementation parity", StringComparison.Ordinal), "feature parity contains redesign ledger");
-        for (var phase = 0; phase <= 11; phase++)
+        for (var phase = 0; phase <= 12; phase++)
         {
             Assert(
                 Regex.IsMatch(parity, $@"\|\s*Phase {phase}\s*\|[^\r\n]*\|\s*\*\*Complete\*\*\s*\|"),

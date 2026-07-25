@@ -552,6 +552,10 @@ internal static class ThreadRenameTests
         {
         }
 
+        public void ShowImagePreview(string path)
+        {
+        }
+
         public void RevealInExplorer(string path)
         {
         }

@@ -176,7 +176,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             SendAlternateFollowUpAsync,
             PersistSelectedFollowUpQueueAsync,
             SendQueuedFollowUpNowAsync,
-            EditPromptAsync);
+            EditPromptAsync,
+            userInteractionService.ShowImagePreview);
         TaskWorkspace.PropertyChanged += (_, args) => RelayTaskPropertyChanged(args.PropertyName);
 
         ApprovalQueue = new ApprovalQueueViewModel(appServerSessionCoordinator.RespondToServerRequestAsync);

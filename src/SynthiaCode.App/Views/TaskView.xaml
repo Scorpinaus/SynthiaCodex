@@ -266,6 +266,7 @@
                                                         AutomationProperties.Name="Assistant message">
                                                 <controls:MarkdownTextBlock Markdown="{Binding AssistantResponseDisplay}"
                                                                             LinkCommand="{Binding DataContext.TaskWorkspace.OpenExternalUriCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                            EditImageCommand="{Binding DataContext.TaskWorkspace.EditGeneratedImageCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                                                             Style="{StaticResource ConversationBodyText}"
                                                                             AutomationProperties.LiveSetting="Polite"/>
                                             </StackPanel>

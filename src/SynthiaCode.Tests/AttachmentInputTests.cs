@@ -343,13 +343,13 @@ internal static class AttachmentInputTests
 
     private static Task ComposerAttachmentStateValidatesCapabilityAsync()
     {
-        var viewModel = new TaskViewModel(
+        var viewModel = WorkspaceActionStubs.CreateTaskViewModel(WorkspaceActionStubs.Task(
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => false,
-            () => false);
+            () => false));
         var image = Reference("objects/aa/image.png");
         viewModel.AddAttachment(image);
         Assert(viewModel.HasAttachments, "composer exposes attachment state");

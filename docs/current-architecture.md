@@ -56,17 +56,17 @@ Feature controls bind directly to their existing feature view models. Timeline, 
 
 `UserAccountView` is anchored in an `Auto` row below the independently scrolling project list. Its upward-opening flyout presents the ChatGPT email-derived identity, plan, remaining rate-limit windows, reset times, optional credits, Settings, and authentication actions. `AccountViewModel` reads typed `account/read` and `account/rateLimits/read` results, consumes account notifications before thread routing, keeps account data in memory only, and treats refresh failures as nonfatal. The app-server does not currently expose an authoritative display name or avatar, so the UI uses the email local part and generated initials.
 
-`MainViewModel.cs` remains the main shell coordinator and now owns:
+`MainViewModel.cs` remains the shell coordinator. It owns UI validation, project/thread selection, cross-feature event routing, shell layout, theme/status projection, app-server warm-up, notification marshaling, and shutdown ordering.
 
-- project selection and recent projects;
-- thread creation, selection, resume, fork, archive, and worktree routing;
-- task start, cancellation, steering, model selection, and notification handling;
-- feature context and cross-feature event routing;
-- shell layout, theme selection, details visibility, and status text;
-- settings persistence and thread snapshots;
-- app-server warm-up, semantic notification routing, and shutdown orchestration.
+Application workflows no longer use `MainViewModel` as a hidden service layer:
 
-Concrete app-server lifecycle, terminal lifetime, diagnostics/auth operations, and Git operations are owned by their extracted coordinator or feature view models.
+- `ThreadLifecycleUseCaseService` owns durable create, resume/fallback, fork, archive, rename, delete, pin, and worktree transitions;
+- `TurnExecutionUseCaseService` owns start, edit/rollback, steer, cancel, automatic-title, and conversation state transitions;
+- `FollowUpQueueUseCaseService` owns queue mutation, durable queue snapshots, per-thread serialized dispatch, recovery, removal, and disposal;
+- `ThreadStatePersistenceUseCaseService` owns bounded transcript and active-thread snapshots;
+- `ConversationWorkflowController` is limited to runtime conversation identity, notification routing, and detached snapshots.
+
+`MainViewModel` composes resolved request inputs and projects returned snapshots into feature view models. Concrete app-server lifecycle, terminal lifetime, diagnostics/auth operations, Git operations, and the four application use-case boundaries are owned outside presentation.
 
 ## Runtime flows
 
@@ -75,17 +75,18 @@ Concrete app-server lifecycle, terminal lifetime, diagnostics/auth operations, a
 ```text
 Composer command
   -> TaskViewModel command
-  -> MainViewModel shell coordination
+  -> MainViewModel validation and request composition
+  -> TurnExecutionUseCaseService
   -> IAppServerSessionCoordinator
   -> CodexAppServerClient (Infrastructure)
   -> app-server process transport
   -> JSON-RPC notifications
   -> 50 ms Infrastructure notification batcher for agent-message deltas
   -> captured UI SynchronizationContext
-  -> MainViewModel routing
-  -> CodexThreadWorkspace / CodexThreadService
+  -> MainViewModel notification projection
+  -> ConversationWorkflowController / CodexThreadWorkspace
   -> observable response, activity, and raw-event surfaces
-  -> thread snapshot / settings.json
+  -> ThreadStatePersistenceUseCaseService / settings.json
 ```
 
 Protocol request construction, response correlation, parsing, and transport failure handling remain inside Infrastructure. Core owns app-server request/result records and notification-derived thread state.
@@ -182,7 +183,7 @@ Each terminal buffer is capped at 250,000 characters. Phase 5B replaced the orig
 
 ### Persistence
 
-The composition root exposes a `CoalescingSettingsStore` around `JsonSettingsStore`. The current application-level code has 12 direct `SaveAsync` call sites in `MainViewModel`, but requests arriving within 75 ms are collapsed into a single physical write containing the latest immutable deep snapshot.
+The composition root exposes a `CoalescingSettingsStore` around `JsonSettingsStore`. Thread transcript saves run through `ThreadStatePersistenceUseCaseService`; queued-follow-up saves run through `FollowUpQueueUseCaseService`; lifecycle transactions persist through `ThreadLifecycleUseCaseService`. Shell preferences remain narrow `MainViewModel` saves. Requests arriving within 75 ms are collapsed into one physical write containing the latest immutable deep snapshot.
 
 `JsonSettingsStore` serializes writes through a gate, flushes the complete settings graph to a write-through `settings.json.tmp`, and replaces `settings.json` with an overwrite move. Loading promotes a valid newer temporary file when an interrupted save left the primary missing or corrupt.
 
@@ -215,9 +216,9 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 
 | Measure | Final local result | Comparison |
 | --- | --- | --- |
-| `MainViewModel.cs` | 3,813 physical lines | Includes later projectless-chat, attachment, queue, rename/search, responsive-shell, generated-image expansion, and presentation coordination added after the original extraction audit. |
+| `MainViewModel.cs` | 3,408 physical lines | Thread lifecycle, turn execution, queue dispatch, and thread-state persistence now execute behind explicit application use-case services; the remaining size is shell/UI projection and unrelated feature coordination. |
 | `MainWindow.xaml` | 444 physical lines | Custom chrome, adaptive three-zone shell, compact drawers, lower terminal dock, inspector, status, and approval hosting. |
-| Behavioral suite | 209 passing tests | Includes coordinator, lifecycle, history, persistence, multi-turn, activity, presentation, attachment, permission, Markdown, generated-image preview/expansion, projectless-thread, navigation, redesign-resource, adaptive-shell, accessibility, performance, shared-configuration, and Phase 6A Skills/Settings regressions. |
+| Behavioral suite | 239 passing tests | Includes 224 end-to-end behavioral cases plus direct lifecycle, turn, queue, persistence, runtime-controller, and storage-mapper boundary tests. |
 | Startup shell/readiness | 541 ms / 759 ms | unchanged |
 | Codex long stream | 25,001 notifications, 2 UI batches, 20.71 MiB, 40.25 ms | same batching/allocation bound; synthetic CPU time varies locally |
 | Terminal storage/presentation | 39.06 MiB in 2.24 ms; 250,000 retained; 100 chunks to 1 UI update | faster storage run; same presentation bound |

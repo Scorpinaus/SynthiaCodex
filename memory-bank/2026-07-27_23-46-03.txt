@@ -1,0 +1,18 @@
+timestamp: 2026-07-27 23:46:03
+event: subtask
+title: Cleaned extracted architecture
+
+decision:
+Removed obsolete controller facades and queue dispatch state, narrowed composition parameters, stabilized asynchronous tests, and updated current architecture documentation.
+
+rationale:
+ConversationWorkflowController is now a 308-line runtime projection component rather than a second application service layer; queue dispatch lifetime is owned and disposed by FollowUpQueueUseCaseService.
+
+lesson:
+Cleanup must include ownership comments and disposal order, not only dead methods and imports.
+
+working_pattern:
+After a use-case cutover, delete old forwarding APIs so callers cannot reintroduce the hidden boundary.
+
+next_plan:
+No remaining implementation work; deliver verified results.

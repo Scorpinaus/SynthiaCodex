@@ -198,7 +198,7 @@ internal static class Phase5DNavigationTests
 
     private static ProjectThreadViewModel CreateViewModel(
         Func<object?, Task> openProject,
-        Func<Task>? createThread = null) => new(
+        Func<Task>? createThread = null) => WorkspaceActionStubs.CreateProjectThreadViewModel(WorkspaceActionStubs.Project(
         () => Task.CompletedTask,
         openProject,
         () => Task.CompletedTask,
@@ -215,7 +215,7 @@ internal static class Phase5DNavigationTests
         () => true,
         () => true,
         () => true,
-        _ => { });
+        _ => { }));
 
     private static void Assert(bool condition, string message)
     {

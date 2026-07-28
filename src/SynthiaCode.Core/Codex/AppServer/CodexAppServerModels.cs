@@ -210,6 +210,162 @@ public sealed record CodexServiceTierOption(string Id, string Name, string Descr
 
 public sealed record AppServerNotification(string Method, JsonObject Params);
 
+// This is the single seam between the app-server wire protocol and application
+// consumers. A generated protocol client can replace Decode without changing the
+// coordinator, view models, or thread projections.
+public enum CodexAppServerNotificationKind
+{
+    Unknown,
+    ThreadStarted,
+    ThreadArchived,
+    ThreadUnarchived,
+    ThreadTokenUsageUpdated,
+    ThreadCompacted,
+    TurnStarted,
+    TurnCompleted,
+    TurnPlanUpdated,
+    ItemStarted,
+    ItemCompleted,
+    AgentMessageDelta,
+    McpToolCallProgress,
+    AccountRateLimitsUpdated,
+    AccountUpdated,
+    AccountLoginCompleted,
+    AccountNotification,
+    SkillsChanged,
+    ServerRequestResolved
+}
+
+public static class CodexAppServerNotificationMethods
+{
+    public const string ThreadStarted = "thread/started";
+    public const string ThreadArchived = "thread/archived";
+    public const string ThreadUnarchived = "thread/unarchived";
+    public const string ThreadTokenUsageUpdated = "thread/tokenUsage/updated";
+    public const string ThreadCompacted = "thread/compacted";
+    public const string TurnStarted = "turn/started";
+    public const string TurnCompleted = "turn/completed";
+    public const string TurnPlanUpdated = "turn/plan/updated";
+    public const string ItemStarted = "item/started";
+    public const string ItemCompleted = "item/completed";
+    public const string AgentMessageDelta = "item/agentMessage/delta";
+    public const string McpToolCallProgress = "item/mcpToolCall/progress";
+    public const string AccountRateLimitsUpdated = "account/rateLimits/updated";
+    public const string AccountUpdated = "account/updated";
+    public const string AccountLoginCompleted = "account/login/completed";
+    public const string SkillsChanged = "skills/changed";
+    public const string ServerRequestResolved = "serverRequest/resolved";
+}
+
+public sealed record CodexAppServerNotification(
+    CodexAppServerNotificationKind Kind,
+    string Method,
+    JsonObject Params,
+    string? ThreadId,
+    string? TurnId,
+    string? ItemId,
+    string? TurnStatus,
+    CodexRequestId? RequestId,
+    bool? IsArchived,
+    JsonObject? RateLimits)
+{
+    public static CodexAppServerNotification Decode(AppServerNotification notification)
+    {
+        ArgumentNullException.ThrowIfNull(notification);
+        var parameters = notification.Params;
+        var kind = GetKind(notification.Method);
+        var threadId = ReadString(parameters, "threadId")
+            ?? ReadString(parameters, "thread.id")
+            ?? ReadString(parameters, "turn.threadId");
+        var turnId = ReadString(parameters, "turnId") ?? ReadString(parameters, "turn.id");
+        var itemId = ReadString(parameters, "itemId") ?? ReadString(parameters, "item.id");
+        var turnStatus = ReadString(parameters, "status") ?? ReadString(parameters, "turn.status");
+        var requestId = kind == CodexAppServerNotificationKind.ServerRequestResolved
+            ? ReadRequestId(parameters)
+            : null;
+        bool? isArchived = kind switch
+        {
+            CodexAppServerNotificationKind.ThreadArchived => true,
+            CodexAppServerNotificationKind.ThreadUnarchived => false,
+            _ => null
+        };
+        var rateLimits = kind == CodexAppServerNotificationKind.AccountRateLimitsUpdated
+            ? parameters["rateLimits"] as JsonObject
+            : null;
+
+        return new CodexAppServerNotification(
+            kind,
+            notification.Method,
+            parameters,
+            threadId,
+            turnId,
+            itemId,
+            turnStatus,
+            requestId,
+            isArchived,
+            rateLimits);
+    }
+
+    public string? ReadString(string path) => ReadString(Params, path);
+
+    public JsonObject? ReadObject(string path) => ReadNode(Params, path) as JsonObject;
+
+    private static CodexAppServerNotificationKind GetKind(string method) => method switch
+    {
+        CodexAppServerNotificationMethods.ThreadStarted => CodexAppServerNotificationKind.ThreadStarted,
+        CodexAppServerNotificationMethods.ThreadArchived => CodexAppServerNotificationKind.ThreadArchived,
+        CodexAppServerNotificationMethods.ThreadUnarchived => CodexAppServerNotificationKind.ThreadUnarchived,
+        CodexAppServerNotificationMethods.ThreadTokenUsageUpdated => CodexAppServerNotificationKind.ThreadTokenUsageUpdated,
+        CodexAppServerNotificationMethods.ThreadCompacted => CodexAppServerNotificationKind.ThreadCompacted,
+        CodexAppServerNotificationMethods.TurnStarted => CodexAppServerNotificationKind.TurnStarted,
+        CodexAppServerNotificationMethods.TurnCompleted => CodexAppServerNotificationKind.TurnCompleted,
+        CodexAppServerNotificationMethods.TurnPlanUpdated => CodexAppServerNotificationKind.TurnPlanUpdated,
+        CodexAppServerNotificationMethods.ItemStarted => CodexAppServerNotificationKind.ItemStarted,
+        CodexAppServerNotificationMethods.ItemCompleted => CodexAppServerNotificationKind.ItemCompleted,
+        CodexAppServerNotificationMethods.AgentMessageDelta => CodexAppServerNotificationKind.AgentMessageDelta,
+        CodexAppServerNotificationMethods.McpToolCallProgress => CodexAppServerNotificationKind.McpToolCallProgress,
+        CodexAppServerNotificationMethods.AccountRateLimitsUpdated => CodexAppServerNotificationKind.AccountRateLimitsUpdated,
+        CodexAppServerNotificationMethods.AccountUpdated => CodexAppServerNotificationKind.AccountUpdated,
+        CodexAppServerNotificationMethods.AccountLoginCompleted => CodexAppServerNotificationKind.AccountLoginCompleted,
+        CodexAppServerNotificationMethods.SkillsChanged => CodexAppServerNotificationKind.SkillsChanged,
+        CodexAppServerNotificationMethods.ServerRequestResolved => CodexAppServerNotificationKind.ServerRequestResolved,
+        _ when method.StartsWith("account/", StringComparison.Ordinal) => CodexAppServerNotificationKind.AccountNotification,
+        _ => CodexAppServerNotificationKind.Unknown
+    };
+
+    private static CodexRequestId? ReadRequestId(JsonObject parameters)
+    {
+        var node = parameters["requestId"] ?? parameters["id"];
+        if (node is not JsonValue value)
+        {
+            return null;
+        }
+
+        if (value.TryGetValue<long>(out var integerId))
+        {
+            return CodexRequestId.FromInteger(integerId);
+        }
+
+        return value.TryGetValue<string>(out var stringId) && !string.IsNullOrWhiteSpace(stringId)
+            ? CodexRequestId.FromString(stringId)
+            : null;
+    }
+
+    private static string? ReadString(JsonObject parameters, string path) =>
+        ReadNode(parameters, path) is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
+    private static JsonNode? ReadNode(JsonObject parameters, string path)
+    {
+        JsonNode? current = parameters;
+        foreach (var segment in path.Split('.'))
+        {
+            current = current is JsonObject currentObject ? currentObject[segment] : null;
+        }
+
+        return current;
+    }
+}
+
 public sealed class AppServerConnectionFailedEventArgs(Exception exception) : EventArgs
 {
     public Exception Exception { get; } = exception;

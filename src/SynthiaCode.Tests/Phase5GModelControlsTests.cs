@@ -92,13 +92,13 @@ internal static class Phase5GModelControlsTests
 
     private static Task SelectionReconcilesModelReasoningAndFastAsync()
     {
-        var viewModel = new TaskViewModel(
+        var viewModel = WorkspaceActionStubs.CreateTaskViewModel(WorkspaceActionStubs.Task(
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => false,
-            () => false);
+            () => false));
         viewModel.ModelOverride = "removed-model";
         viewModel.ReasoningEffortOverride = "xhigh";
         viewModel.ServiceTierSelection = CodexServiceTierSelection.Fast;

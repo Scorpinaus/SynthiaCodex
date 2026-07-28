@@ -291,11 +291,11 @@ public sealed class AccountViewModel : ObservableObject
         CreditsLabel = FormatCredits(result.Limits.Select(limit => limit.Credits).FirstOrDefault(credits => credits is not null));
     }
 
-    public bool TryApplyNotification(AppServerNotification notification)
+    public bool TryApplyNotification(CodexAppServerNotification notification)
     {
         ArgumentNullException.ThrowIfNull(notification);
-        if (notification.Method == "account/rateLimits/updated" &&
-            notification.Params["rateLimits"] is JsonObject rateLimits)
+        if (notification.Kind == CodexAppServerNotificationKind.AccountRateLimitsUpdated &&
+            notification.RateLimits is JsonObject rateLimits)
         {
             ApplyRateLimits(new CodexAccountRateLimitsResult(
                 [CodexAccountProtocolParser.ParseRateLimitSnapshot(rateLimits)],
@@ -305,14 +305,15 @@ public sealed class AccountViewModel : ObservableObject
             return true;
         }
 
-        if (notification.Method is "account/updated" or "account/login/completed")
+        if (notification.Kind is CodexAppServerNotificationKind.AccountUpdated or CodexAppServerNotificationKind.AccountLoginCompleted)
         {
             IsStale = true;
             _ = RefreshAsync();
             return true;
         }
 
-        return notification.Method.StartsWith("account/", StringComparison.Ordinal);
+        return notification.Kind is CodexAppServerNotificationKind.AccountNotification or
+            CodexAppServerNotificationKind.AccountRateLimitsUpdated;
     }
 
     public void MarkDisconnected()

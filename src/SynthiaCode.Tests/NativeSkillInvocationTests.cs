@@ -248,14 +248,14 @@ internal static class NativeSkillInvocationTests
 
     private static TaskViewModel CreateTaskViewModel(
         Func<CancellationToken, Task<ComposerSkillLoadResult>> loadSkills) =>
-        new(
+        WorkspaceActionStubs.CreateTaskViewModel(WorkspaceActionStubs.Task(
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => false,
             () => false,
-            loadComposerSkills: loadSkills);
+            loadComposerSkills: loadSkills));
 
     private static CodexSkillMetadata Skill(
         string name,

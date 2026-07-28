@@ -158,16 +158,17 @@ internal static class Phase5CMultiTurnTests
 
     private static Task ComposerLabelsFollowUpAsync()
     {
-        var viewModel = new TaskViewModel(
+        var viewModel = WorkspaceActionStubs.CreateTaskViewModel(WorkspaceActionStubs.Task(
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => false,
-            () => false);
+            () => false));
         Assert(viewModel.ComposerActionLabel == "Run task", "first-turn label");
-        viewModel.ThreadService.BeginTurn("Question");
-        viewModel.NotifyResponseChanged();
+        var service = new CodexThreadService();
+        service.BeginTurn("Question");
+        viewModel.ApplyConversationSnapshot(WorkspaceActionStubs.Snapshot(service));
         Assert(viewModel.ComposerActionLabel == "Send follow-up", "follow-up label");
         return Task.CompletedTask;
     }
@@ -251,15 +252,15 @@ internal static class Phase5CMultiTurnTests
     {
         var service = CreateRunningService("turn-noise");
         service.ApplyNotification(NotificationWithItem("item/started", "turn-noise", "reason-1", "reasoning"));
-        service.ApplyNotification(new AppServerNotification(
+        service.ApplyNotification(CodexAppServerNotification.Decode(new AppServerNotification(
             "item/reasoning/summaryTextDelta",
-            Params("turn-noise", "reason-1", message: "private detail")));
-        service.ApplyNotification(new AppServerNotification(
+            Params("turn-noise", "reason-1", message: "private detail"))));
+        service.ApplyNotification(CodexAppServerNotification.Decode(new AppServerNotification(
             "item/commandExecution/outputDelta",
-            Params("turn-noise", "command-1", message: "many output bytes")));
-        service.ApplyNotification(new AppServerNotification(
+            Params("turn-noise", "command-1", message: "many output bytes"))));
+        service.ApplyNotification(CodexAppServerNotification.Decode(new AppServerNotification(
             "thread/tokenUsage/updated",
-            Params("turn-noise", null, message: "tokens")));
+            Params("turn-noise", null, message: "tokens"))));
         service.ApplyNotification(Notification("turn/completed", "turn-noise", status: "completed"));
 
         Assert(service.ActiveConversationTurn!.Activity.Count == 0, "reasoning, output, token, and lifecycle notifications stay hidden");
@@ -281,9 +282,9 @@ internal static class Phase5CMultiTurnTests
                 item["command"] = "dotnet test";
                 item["status"] = "inProgress";
             }));
-        service.ApplyNotification(new AppServerNotification(
+        service.ApplyNotification(CodexAppServerNotification.Decode(new AppServerNotification(
             "item/commandExecution/outputDelta",
-            Params("turn-upsert", "command-1", message: "PASS one")));
+            Params("turn-upsert", "command-1", message: "PASS one"))));
         service.ApplyNotification(NotificationWithItem(
             "item/completed",
             "turn-upsert",
@@ -307,9 +308,9 @@ internal static class Phase5CMultiTurnTests
                 item["tool"] = "search";
                 item["status"] = "inProgress";
             }));
-        service.ApplyNotification(new AppServerNotification(
+        service.ApplyNotification(CodexAppServerNotification.Decode(new AppServerNotification(
             "item/mcpToolCall/progress",
-            Params("turn-upsert", "tool-1", message: "Reading results")));
+            Params("turn-upsert", "tool-1", message: "Reading results"))));
         service.ApplyNotification(NotificationWithItem(
             "item/completed",
             "turn-upsert",
@@ -335,9 +336,9 @@ internal static class Phase5CMultiTurnTests
         var service = CreateRunningService("turn-message");
         service.ApplyNotification(NotificationWithItem(
             "item/started", "turn-message", "message-1", "agentMessage"));
-        service.ApplyNotification(new AppServerNotification(
+        service.ApplyNotification(CodexAppServerNotification.Decode(new AppServerNotification(
             "item/agentMessage/delta",
-            Params("turn-message", "message-1", delta: "I am checking the tests.")));
+            Params("turn-message", "message-1", delta: "I am checking the tests."))));
         Assert(service.ActiveConversationTurn!.AssistantResponse == "I am checking the tests.", "unknown streaming phase uses the compatibility response until classified");
         service.ApplyNotification(NotificationWithItem(
             "item/completed",
@@ -352,9 +353,9 @@ internal static class Phase5CMultiTurnTests
 
         service.ApplyNotification(NotificationWithItem(
             "item/started", "turn-message", "message-2", "agentMessage", item => item["phase"] = "final_answer"));
-        service.ApplyNotification(new AppServerNotification(
+        service.ApplyNotification(CodexAppServerNotification.Decode(new AppServerNotification(
             "item/agentMessage/delta",
-            Params("turn-message", "message-2", delta: "All tests passed.")));
+            Params("turn-message", "message-2", delta: "All tests passed."))));
         service.ApplyNotification(NotificationWithItem(
             "item/completed",
             "turn-message",
@@ -373,9 +374,9 @@ internal static class Phase5CMultiTurnTests
         Assert(turn.AssistantResponse == "All tests passed.", "only final answer text reaches the response");
 
         var legacy = CreateRunningService("turn-legacy-message");
-        legacy.ApplyNotification(new AppServerNotification(
+        legacy.ApplyNotification(CodexAppServerNotification.Decode(new AppServerNotification(
             "item/agentMessage/delta",
-            Params("turn-legacy-message", "legacy-message", delta: "Legacy final text")));
+            Params("turn-legacy-message", "legacy-message", delta: "Legacy final text"))));
         Assert(legacy.ActiveConversationTurn!.AssistantResponse == "Legacy final text", "unknown message phase preserves streaming compatibility");
         return Task.CompletedTask;
     }
@@ -515,15 +516,15 @@ internal static class Phase5CMultiTurnTests
         const string corrupted = "I\u00E2\u20AC\u2122m ready\u00E2\u20AC\u201Dnow";
         const string expected = "I\u2019m ready\u2014now";
         var service = CreateRunningService("turn-unicode");
-        service.ApplyNotification(new AppServerNotification(
+        service.ApplyNotification(CodexAppServerNotification.Decode(new AppServerNotification(
             "item/agentMessage/delta",
-            Params("turn-unicode", "message-unicode", delta: "I\u00E2")));
-        service.ApplyNotification(new AppServerNotification(
+            Params("turn-unicode", "message-unicode", delta: "I\u00E2"))));
+        service.ApplyNotification(CodexAppServerNotification.Decode(new AppServerNotification(
             "item/agentMessage/delta",
-            Params("turn-unicode", "message-unicode", delta: "\u20AC")));
-        service.ApplyNotification(new AppServerNotification(
+            Params("turn-unicode", "message-unicode", delta: "\u20AC"))));
+        service.ApplyNotification(CodexAppServerNotification.Decode(new AppServerNotification(
             "item/agentMessage/delta",
-            Params("turn-unicode", "message-unicode", delta: "\u2122m ready\u00E2\u20AC\u201Dnow")));
+            Params("turn-unicode", "message-unicode", delta: "\u2122m ready\u00E2\u20AC\u201Dnow"))));
         Assert(service.ActiveConversationTurn!.AssistantResponse == expected, "repair handles a mojibake sequence split across deltas");
 
         var rawEvent = $"item/completed: {corrupted}";
@@ -579,7 +580,7 @@ internal static class Phase5CMultiTurnTests
         planUpdate["plan"] = new JsonArray(
             new JsonObject { ["step"] = "Implement", ["status"] = "completed" },
             new JsonObject { ["step"] = "Verify", ["status"] = "inProgress" });
-        service.ApplyNotification(new AppServerNotification("turn/plan/updated", planUpdate));
+        service.ApplyNotification(CodexAppServerNotification.Decode(new AppServerNotification("turn/plan/updated", planUpdate)));
         service.ApplyNotification(NotificationWithItem(
             "item/completed", "turn-work", "agent-1", "collabAgentToolCall", item =>
             {
@@ -646,9 +647,9 @@ internal static class Phase5CMultiTurnTests
                 item["text"] = longCommentary;
             }));
         service.AddGuidance(longGuidance);
-        service.ApplyNotification(new AppServerNotification(
+        service.ApplyNotification(CodexAppServerNotification.Decode(new AppServerNotification(
             "runtime/error",
-            Params("turn-full-activity", "error-full", message: longStandaloneError)));
+            Params("turn-full-activity", "error-full", message: longStandaloneError))));
 
         var activity = service.ActiveConversationTurn!.Activity;
         Assert(activity.Single(item => item.ItemId == "command-full").Detail == $"{longCommand} (exit 0)", "complete command text is retained");
@@ -762,7 +763,7 @@ internal static class Phase5CMultiTurnTests
         return service;
     }
 
-    private static AppServerNotification NotificationWithItem(
+    private static CodexAppServerNotification NotificationWithItem(
         string method,
         string turnId,
         string itemId,
@@ -773,7 +774,7 @@ internal static class Phase5CMultiTurnTests
         configure?.Invoke(item);
         var parameters = Params(turnId, itemId);
         parameters["item"] = item;
-        return new AppServerNotification(method, parameters);
+        return CodexAppServerNotification.Decode(new AppServerNotification(method, parameters));
     }
 
     private static JsonObject Params(
@@ -808,7 +809,7 @@ internal static class Phase5CMultiTurnTests
         string detail,
         string method) => new(kind, title, detail, method, DateTimeOffset.UtcNow);
 
-    private static AppServerNotification Notification(string method, string turnId, string? delta = null, string? status = null)
+    private static CodexAppServerNotification Notification(string method, string turnId, string? delta = null, string? status = null)
     {
         var parameters = new JsonObject
         {
@@ -825,7 +826,7 @@ internal static class Phase5CMultiTurnTests
         {
             parameters["status"] = status;
         }
-        return new AppServerNotification(method, parameters);
+        return CodexAppServerNotification.Decode(new AppServerNotification(method, parameters));
     }
 
     private static void Assert(bool condition, string message)

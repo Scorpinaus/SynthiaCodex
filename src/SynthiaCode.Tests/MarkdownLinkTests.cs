@@ -275,14 +275,14 @@ internal static class MarkdownLinkTests
                 "local image link activation is routed through the transcript command");
 
             string? revealedPath = null;
-            var taskWorkspace = new TaskViewModel(
+            var taskWorkspace = WorkspaceActionStubs.CreateTaskViewModel(WorkspaceActionStubs.Task(
                 () => Task.CompletedTask,
                 () => Task.CompletedTask,
                 () => Task.CompletedTask,
                 () => Task.CompletedTask,
                 () => false,
                 () => false,
-                showLocalImage: path => revealedPath = path);
+                showLocalImage: path => revealedPath = path));
             Assert(taskWorkspace.OpenExternalUriCommand.CanExecute(link.NavigateUri), "the transcript command accepts an existing local image");
             taskWorkspace.OpenExternalUriCommand.Execute(link.NavigateUri);
             Assert(
@@ -326,7 +326,7 @@ internal static class MarkdownLinkTests
             service.Restore("thread-image", null, null, null);
             service.BeginTurn("Generate an infographic");
             service.BindPendingTurn("turn-image");
-            service.ApplyNotification(new AppServerNotification(
+            service.ApplyNotification(CodexAppServerNotification.Decode(new AppServerNotification(
                 "item/completed",
                 new JsonObject
                 {
@@ -340,7 +340,7 @@ internal static class MarkdownLinkTests
                         ["result"] = "generated",
                         ["savedPath"] = imagePath
                     }
-                }));
+                })));
 
             var renderer = new MarkdownTextBlock
             {

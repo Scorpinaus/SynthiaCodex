@@ -1,4 +1,3 @@
-using System.Text.Json.Nodes;
 using SynthiaCode.Core.Settings;
 
 namespace SynthiaCode.Core.Codex.AppServer;
@@ -68,12 +67,11 @@ public sealed class CodexThreadWorkspace
         turnThreads[turnId] = threadId;
     }
 
-    public string? ApplyNotification(AppServerNotification notification)
+    public string? ApplyNotification(CodexAppServerNotification notification)
     {
-        var threadId = ReadString(notification.Params, "threadId")
-            ?? ReadString(notification.Params, "thread.id")
-            ?? ReadString(notification.Params, "turn.threadId");
-        var turnId = ReadString(notification.Params, "turnId") ?? ReadString(notification.Params, "turn.id");
+        ArgumentNullException.ThrowIfNull(notification);
+        var threadId = notification.ThreadId;
+        var turnId = notification.TurnId;
         if (string.IsNullOrWhiteSpace(threadId) && !string.IsNullOrWhiteSpace(turnId))
         {
             turnThreads.TryGetValue(turnId, out threadId);
@@ -93,14 +91,4 @@ public sealed class CodexThreadWorkspace
         return threadId;
     }
 
-    private static string? ReadString(JsonObject obj, string path)
-    {
-        JsonNode? current = obj;
-        foreach (var segment in path.Split('.'))
-        {
-            current = current is JsonObject currentObject ? currentObject[segment] : null;
-        }
-
-        return current is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
-    }
 }

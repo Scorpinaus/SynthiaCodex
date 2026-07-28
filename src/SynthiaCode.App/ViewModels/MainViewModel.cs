@@ -13,10 +13,7 @@ using SynthiaCode.Core.Logging;
 using SynthiaCode.Core.Projects;
 using SynthiaCode.Core.Settings;
 using SynthiaCode.Core.Terminal;
-using SynthiaCode.Core.Worktrees;
 using SynthiaCode.Core.Workspaces;
-using SynthiaCode.Infrastructure.Attachments;
-using SynthiaCode.Infrastructure.Codex.Configuration;
 
 namespace SynthiaCode.App.ViewModels;
 
@@ -25,25 +22,18 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private const int MaximumInstructionBytes = 64 * 1024;
     private readonly ISettingsStore settingsStore;
     private readonly IAppServerSessionCoordinator appServerSessionCoordinator;
-    private readonly IGitService gitService;
-    private readonly IWorktreeService worktreeService;
-    private readonly IRecentProjectService recentProjectService;
     private readonly IFolderPicker folderPicker;
     private readonly IUserInteractionService userInteractionService;
     private readonly IThemeService themeService;
-    private readonly ThreadStore threadStore;
-    private readonly CodexThreadWorkspace threadWorkspace;
-    private readonly CodexFollowUpQueueWorkspace followUpQueueWorkspace = new();
+    private readonly ConversationWorkflowController conversationWorkflow;
+    private readonly ThreadLifecycleUseCaseService threadLifecycle;
+    private readonly ThreadStatePersistenceUseCaseService threadStatePersistence;
+    private readonly TurnExecutionUseCaseService turnExecution;
+    private readonly FollowUpQueueUseCaseService followUpQueue;
+    private readonly ProjectWorkspaceOperations projectWorkspaceOperations;
     private readonly IAppLogger logger;
-    private readonly IGeneralWorkspaceService generalWorkspaceService;
-    private readonly IAttachmentStore? attachmentStore;
-    private readonly WorkspaceAttachmentResolver workspaceAttachmentResolver;
+    private readonly AttachmentDraftOrchestrationService attachmentDraftService;
     private readonly CancellationTokenSource appServerWarmUpCancellation = new();
-    private CodexThreadService threadService
-    {
-        get => TaskWorkspace.ThreadService;
-        set => TaskWorkspace.UseThreadService(value);
-    }
     private readonly SynchronizationContext? synchronizationContext;
     private readonly AsyncRelayCommand submitPromptCommand;
     private readonly AsyncRelayCommand cancelTurnCommand;
@@ -70,8 +60,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private AppSettings settings = new();
     private CodexInstallation currentCodex => DiagnosticsViewModel.Installation;
     private AuthenticationState currentAuth => DiagnosticsViewModel.Authentication;
-    private string? activeThreadId;
-    private string? activeTurnId;
     private string selectedTheme = "System";
     private string statusMessage = "Starting";
     private string developerInstructions = string.Empty;
@@ -86,7 +74,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private double viewportWidth = 1240;
     private int selectedWorkspaceTabIndex;
     private int selectedInspectorTabIndex;
-    private bool activeThreadLoaded;
     private bool executionPolicyLoaded;
     private string? executionPolicyCwd;
     private bool isShuttingDown;
@@ -95,50 +82,40 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string? generalWorkspaceError;
     private Task? shutdownTask;
     private Task? appServerWarmUpTask;
-    private readonly HashSet<string> loadedThreadIds = new(StringComparer.Ordinal);
-    private readonly HashSet<string> runningThreadIds = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, string> activeTurnIds = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, SemaphoreSlim> followUpDispatchGates = new(StringComparer.Ordinal);
 
     public MainViewModel(
         ISettingsStore settingsStore,
         ICodexDiscoveryService codexDiscoveryService,
         IAppServerSessionCoordinator appServerSessionCoordinator,
         IAuthService authService,
-        IGitService gitService,
-        IWorktreeService worktreeService,
-        IRecentProjectService recentProjectService,
         IFolderPicker folderPicker,
         IUserInteractionService userInteractionService,
         IThemeService themeService,
         ICodexCliUtilityRunner codexCliUtilityRunner,
-        ThreadStore threadStore,
-        CodexThreadWorkspace threadWorkspace,
         ITerminalService terminalService,
         IAppLogger logger,
-        IGeneralWorkspaceService generalWorkspaceService,
-        IAttachmentStore? attachmentStore = null,
-        WorkspaceAttachmentResolver? workspaceAttachmentResolver = null,
-        ISharedCodexConfigurationService? sharedCodexConfigurationService = null)
+        ConversationWorkflowController conversationWorkflow,
+        ThreadLifecycleUseCaseService threadLifecycle,
+        ThreadStatePersistenceUseCaseService threadStatePersistence,
+        TurnExecutionUseCaseService turnExecution,
+        FollowUpQueueUseCaseService followUpQueue,
+        ProjectWorkspaceOperations projectWorkspaceOperations,
+        AttachmentDraftOrchestrationService attachmentDraftService,
+        ISharedCodexConfigurationService sharedCodexConfigurationService)
     {
         this.settingsStore = settingsStore;
         this.appServerSessionCoordinator = appServerSessionCoordinator;
-        this.gitService = gitService;
-        this.worktreeService = worktreeService;
-        this.recentProjectService = recentProjectService;
         this.folderPicker = folderPicker;
         this.userInteractionService = userInteractionService;
         this.themeService = themeService;
-        this.threadStore = threadStore;
-        this.threadWorkspace = threadWorkspace;
         this.logger = logger;
-        this.generalWorkspaceService = generalWorkspaceService;
-        this.attachmentStore = attachmentStore;
-        this.workspaceAttachmentResolver = workspaceAttachmentResolver ?? new WorkspaceAttachmentResolver();
-        sharedCodexConfigurationService ??= new SharedCodexConfigurationService(
-            Path.Combine(
-                Path.GetDirectoryName(settingsStore.SettingsPath) ?? AppContext.BaseDirectory,
-                "codex-home"));
+        this.conversationWorkflow = conversationWorkflow;
+        this.threadLifecycle = threadLifecycle;
+        this.threadStatePersistence = threadStatePersistence;
+        this.turnExecution = turnExecution;
+        this.followUpQueue = followUpQueue;
+        this.projectWorkspaceOperations = projectWorkspaceOperations;
+        this.attachmentDraftService = attachmentDraftService;
         CodexConfiguration = new CodexConfigurationViewModel(
             sharedCodexConfigurationService,
             GetActiveWorkspacePathIfAvailable,
@@ -185,8 +162,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             }
         };
 
-        Git = new GitViewModel(
-            gitService,
+        Git = projectWorkspaceOperations.CreateGitViewModel(
             userInteractionService,
             logger,
             CreateGitContext,
@@ -195,20 +171,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         Git.PropertyChanged += (_, args) => RelayGitPropertyChanged(args.PropertyName);
 
         TaskWorkspace = new TaskViewModel(
-            SubmitPromptAsync,
-            CancelTurnAsync,
-            LoadModelOptionsAsync,
-            SteerTurnAsync,
-            CanCancelTurn,
-            CanSteerTurn,
-            userInteractionService.OpenExternalUri,
-            SendAlternateFollowUpAsync,
-            PersistSelectedFollowUpQueueAsync,
-            SendQueuedFollowUpNowAsync,
-            EditPromptAsync,
-            userInteractionService.ShowImagePreview,
-            ForkConversationFromTurnAsync,
-            LoadComposerSkillsAsync);
+            new TurnExecutionActionAdapter(this),
+            new FollowUpManagementActionAdapter(this),
+            new ConversationHistoryActionAdapter(this),
+            new ComposerSupportActionAdapter(this));
         TaskWorkspace.PropertyChanged += (_, args) => RelayTaskPropertyChanged(args.PropertyName);
 
         ApprovalQueue = new ApprovalQueueViewModel(appServerSessionCoordinator.RespondToServerRequestAsync);
@@ -217,29 +183,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             OnExecutionPolicyChanged);
 
         ProjectWorkspace = new ProjectThreadViewModel(
-            BrowseProjectAsync,
-            OpenRecentProjectAsync,
-            NewThreadForCurrentScopeAsync,
-            NewGeneralThreadAsync,
-            NewProjectThreadAsync,
-            ResumeSelectedThreadAsync,
-            ForkSelectedThreadAsync,
-            ArchiveSelectedThreadAsync,
-            UnarchiveSelectedThreadAsync,
-            RemoveSelectedWorktreeAsync,
-            CanCreateThreadInCurrentScope,
-            CanCreateGeneralThread,
-            CanUseSelectedThread,
-            CanArchiveSelectedThread,
-            CanUnarchiveSelectedThread,
-            CanRemoveSelectedWorktree,
-            HandleSelectedThreadChanged,
-            ToggleSelectedThreadPinAsync,
-            DeleteSelectedThreadAsync,
-            CanToggleSelectedThreadPin,
-            CanDeleteSelectedThread,
-            RenameSelectedThreadAsync,
-            CanRenameSelectedThread);
+            new ProjectNavigationActionAdapter(this),
+            new ThreadLifecycleActionAdapter(this));
         ProjectWorkspace.PropertyChanged += (_, args) => RelayProjectPropertyChanged(args.PropertyName);
 
         BrowseProjectCommand = ProjectWorkspace.BrowseProjectCommand;
@@ -303,37 +248,35 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             logger);
     }
 
+    private string? activeThreadId
+    {
+        get => conversationWorkflow.ActiveThreadId;
+        set => conversationWorkflow.Select(value);
+    }
+
+    private string? activeTurnId
+    {
+        get => conversationWorkflow.ActiveTurnId;
+        set => conversationWorkflow.SetActiveTurn(value);
+    }
+
+    private bool activeThreadLoaded
+    {
+        get => conversationWorkflow.ActiveThreadLoaded;
+        set => conversationWorkflow.SetActiveThreadLoaded(value);
+    }
+
+
     public event EventHandler? CloseRequested;
 
     public async Task AddImageFilesAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(paths);
-        if (attachmentStore is null)
+        var result = await attachmentDraftService.ImportImagesAsync(paths, cancellationToken).ConfigureAwait(true);
+        foreach (var attachment in result.Attachments)
         {
-            throw new InvalidOperationException("Attachment storage is unavailable.");
+            TaskWorkspace.AddAttachment(attachment);
         }
-
-        var imported = 0;
-        var failures = new List<string>();
-        foreach (var path in paths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            try
-            {
-                var attachment = await attachmentStore.ImportFileAsync(path, cancellationToken).ConfigureAwait(true);
-                TaskWorkspace.AddAttachment(attachment);
-                imported++;
-            }
-            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException)
-            {
-                failures.Add($"{Path.GetFileName(path)}: {ex.Message}");
-            }
-        }
-
-        StatusMessage = failures.Count == 0
-            ? $"Added {imported} image{(imported == 1 ? string.Empty : "s")}"
-            : imported == 0
-                ? failures[0]
-                : $"Added {imported} image{(imported == 1 ? string.Empty : "s")}; {failures.Count} skipped";
+        StatusMessage = result.ToStatusMessage("image");
     }
 
     public async Task AddAttachmentPathsAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default)
@@ -349,67 +292,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             StatusMessage = ex.Message;
             return;
         }
-        var added = 0;
-        var failures = new List<string>();
-        foreach (var path in paths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+        var result = await attachmentDraftService.ImportPathsAsync(paths, workspacePath, cancellationToken).ConfigureAwait(true);
+        foreach (var attachment in result.Attachments)
         {
-            try
-            {
-                AttachmentReference attachment;
-                var isWithinWorkspace = workspaceAttachmentResolver.IsWithinWorkspace(workspacePath, path);
-                if (Directory.Exists(path))
-                {
-                    if (isWithinWorkspace)
-                    {
-                        attachment = workspaceAttachmentResolver.Resolve(workspacePath, path, AttachmentKind.Folder);
-                    }
-                    else
-                    {
-                        if (attachmentStore is null)
-                        {
-                            throw new InvalidOperationException("Attachment storage is unavailable.");
-                        }
-                        attachment = await attachmentStore.ImportFolderAsync(path, cancellationToken).ConfigureAwait(true);
-                    }
-                }
-                else if (IsSupportedImagePath(path))
-                {
-                    if (attachmentStore is null)
-                    {
-                        throw new InvalidOperationException("Attachment storage is unavailable.");
-                    }
-                    attachment = await attachmentStore.ImportFileAsync(path, cancellationToken).ConfigureAwait(true);
-                }
-                else
-                {
-                    if (isWithinWorkspace)
-                    {
-                        attachment = workspaceAttachmentResolver.Resolve(workspacePath, path, AttachmentKind.File);
-                    }
-                    else
-                    {
-                        if (attachmentStore is null)
-                        {
-                            throw new InvalidOperationException("Attachment storage is unavailable.");
-                        }
-                        attachment = await attachmentStore.ImportExternalFileAsync(path, cancellationToken).ConfigureAwait(true);
-                    }
-                }
-
-                TaskWorkspace.AddAttachment(attachment);
-                added++;
-            }
-            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
-            {
-                failures.Add($"{Path.GetFileName(path)}: {ex.Message}");
-            }
+            TaskWorkspace.AddAttachment(attachment);
         }
-
-        StatusMessage = failures.Count == 0
-            ? $"Added {added} attachment{(added == 1 ? string.Empty : "s")}"
-            : added == 0
-                ? failures[0]
-                : $"Added {added} attachment{(added == 1 ? string.Empty : "s")}; {failures.Count} skipped";
+        StatusMessage = result.ToStatusMessage("attachment");
     }
 
     public Task AddWorkspaceFilesAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default) =>
@@ -424,13 +312,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(imageStream);
-        if (attachmentStore is null)
-        {
-            throw new InvalidOperationException("Attachment storage is unavailable.");
-        }
-
-        var attachment = await attachmentStore
-            .ImportStreamAsync(imageStream, displayName, cancellationToken)
+        var attachment = await attachmentDraftService
+            .ImportPastedImageAsync(imageStream, displayName, cancellationToken)
             .ConfigureAwait(true);
         TaskWorkspace.AddAttachment(attachment);
         StatusMessage = "Added pasted image";
@@ -442,9 +325,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public void OpenAttachment(AttachmentReference attachment)
     {
         ArgumentNullException.ThrowIfNull(attachment);
-        var path = attachment.SourceKind == AttachmentSourceKind.ManagedCopy
-            ? attachmentStore?.ResolvePath(attachment) ?? attachment.ManagedPath
-            : workspaceAttachmentResolver.Revalidate(GetActiveWorkspacePath(), attachment).ManagedPath;
+        var path = attachmentDraftService.ResolveOpenPath(GetActiveWorkspacePath(), attachment);
         var exists = attachment.IsFolder ? Directory.Exists(path) : File.Exists(path);
         if (string.IsNullOrWhiteSpace(path) || !exists)
         {
@@ -462,69 +343,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void CaptureAttachmentDraft(string? projectPath, string? threadId)
     {
-        if (isRestoringAttachmentDraft)
-        {
-            return;
-        }
-
-        var scope = string.IsNullOrWhiteSpace(projectPath)
-            ? ThreadScopeKey.General
-            : ThreadScopeKey.ForProject(projectPath);
-        var draft = settings.ComposerAttachmentDrafts.FirstOrDefault(item =>
-            scope.Matches(item.ScopeKind, item.ProjectPath) &&
-            string.Equals(item.ThreadId, threadId, StringComparison.Ordinal));
-        if (TaskWorkspace.Attachments.Count == 0)
-        {
-            if (draft is not null)
-            {
-                settings.ComposerAttachmentDrafts.Remove(draft);
-            }
-            return;
-        }
-
-        draft ??= new ComposerAttachmentDraftSnapshot
-        {
-            ScopeKind = scope.Kind,
-            ProjectPath = scope.ProjectPath ?? string.Empty,
-            ThreadId = threadId
-        };
-        if (!settings.ComposerAttachmentDrafts.Contains(draft))
-        {
-            settings.ComposerAttachmentDrafts.Add(draft);
-        }
-        draft.Attachments = [.. TaskWorkspace.Attachments.Select(attachment => attachment.Clone())];
-        draft.UpdatedAt = DateTimeOffset.UtcNow;
+        if (!isRestoringAttachmentDraft) attachmentDraftService.CaptureDraft(settings, projectPath, threadId, TaskWorkspace.Attachments);
     }
 
     private void RestoreAttachmentDraft(string? projectPath, string? threadId)
     {
         isRestoringAttachmentDraft = true;
-        try
-        {
-            var scope = string.IsNullOrWhiteSpace(projectPath)
-                ? ThreadScopeKey.General
-                : ThreadScopeKey.ForProject(projectPath);
-            var draft = settings.ComposerAttachmentDrafts.FirstOrDefault(item =>
-                scope.Matches(item.ScopeKind, item.ProjectPath) &&
-                string.Equals(item.ThreadId, threadId, StringComparison.Ordinal));
-            var attachments = (draft?.Attachments ?? []).Select(attachment =>
-            {
-                if (attachment.SourceKind != AttachmentSourceKind.WorkspaceReference)
-                {
-                    return attachment;
-                }
-                try
-                {
-                    return workspaceAttachmentResolver.Revalidate(GetActiveWorkspacePath(), attachment);
-                }
-                catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException)
-                {
-                    attachment.ManagedPath = null;
-                    return attachment;
-                }
-            });
-            TaskWorkspace.ReplaceAttachments(attachments);
-        }
+        try { TaskWorkspace.ReplaceAttachments(attachmentDraftService.RestoreDraft(settings, projectPath, threadId, GetActiveWorkspacePath())); }
         finally
         {
             isRestoringAttachmentDraft = false;
@@ -1005,7 +830,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         settings = await settingsStore.LoadAsync().ConfigureAwait(true);
         try
         {
-            generalWorkspacePath = generalWorkspaceService.EnsureWorkspace();
+            generalWorkspacePath = projectWorkspaceOperations.EnsureGeneralWorkspace();
             generalWorkspaceError = null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
@@ -1045,49 +870,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task RestoreAndCleanupAttachmentsAsync()
     {
-        if (attachmentStore is null)
-        {
-            return;
-        }
-
-        var references = settings.ProjectThreads
-            .SelectMany(thread =>
-                thread.ConversationTurns.SelectMany(turn => turn.UserAttachments)
-                    .Concat(thread.QueuedFollowUps.SelectMany(item => item.Attachments)))
-            .Concat(settings.ComposerAttachmentDrafts.SelectMany(draft => draft.Attachments))
-            .ToList();
-        foreach (var attachment in references.Where(item => item.SourceKind == AttachmentSourceKind.ManagedCopy))
-        {
-            try
-            {
-                attachment.ManagedPath = attachmentStore.ResolvePath(attachment);
-            }
-            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException)
-            {
-                attachment.ManagedPath = null;
-                logger.Log(
-                    AppLogLevel.Warning,
-                    "attachment_restore_unavailable",
-                    "A persisted managed attachment is unavailable.",
-                    new Dictionary<string, string?> { ["storageKey"] = attachment.StorageKey },
-                    ex);
-            }
-        }
-
-        try
-        {
-            await attachmentStore.CleanupAsync(references
-                .Where(item => item.SourceKind == AttachmentSourceKind.ManagedCopy)
-                .Select(item => item.StorageKey)).ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            logger.Log(
-                AppLogLevel.Warning,
-                "attachment_cleanup_failed",
-                "Managed attachment cleanup could not be completed.",
-                exception: ex);
-        }
+        await attachmentDraftService.RestoreAndCleanupPersistedAttachmentsAsync(settings).ConfigureAwait(true);
     }
 
     private async Task WarmUpAppServerAsync(CancellationToken cancellationToken)
@@ -1169,7 +952,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         activeThreadLoaded = false;
         RestorePersistedThreadState();
         OnPropertyChanged(nameof(FinalResponse));
-        recentProjectService.AddRecentProject(settings, SelectedProjectPath);
+        projectWorkspaceOperations.AddRecentProject(settings, SelectedProjectPath);
         RefreshRecentProjects();
         await settingsStore.SaveAsync(settings).ConfigureAwait(true);
         await Git.RefreshAsync().ConfigureAwait(true);
@@ -1234,41 +1017,24 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var workspacePath = GetWorkspacePath(scope);
             var instructionSnapshot = ResolveDefaultInstructionSnapshot();
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
-            var result = await appServerSessionCoordinator
-                .StartThreadAsync(CreateThreadStartOptions(workspacePath, instructionSnapshot))
-                .ConfigureAwait(true);
-            AssistantWorktree? worktree = null;
-            if (scope.Kind == ThreadScopeKind.Project &&
-                string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal))
-            {
-                var repository = await gitService.GetRepositoryStateAsync(scope.ProjectPath!).ConfigureAwait(true);
-                if (!repository.IsRepository || string.IsNullOrWhiteSpace(repository.RootPath))
-                {
-                    throw new InvalidOperationException("A new worktree requires a detected Git repository.");
-                }
-
-                worktree = await worktreeService.CreateAsync(new WorktreeCreateRequest(
-                    repository.RootPath,
-                    $"thread-{ProjectThreads.Count + 1}",
-                    result.ThreadId)).ConfigureAwait(true);
-            }
-
-            var state = CreateThreadState(
+            var result = await threadLifecycle.StartAsync(new ThreadStartUseCaseRequest(
+                settings,
                 scope,
-                result.ThreadId,
                 $"Thread {ProjectThreads.Count + 1}",
-                worktree?.Path ?? workspacePath,
-                worktree?.Branch,
-                isTitlePlaceholder: true,
-                instructionSnapshot: instructionSnapshot);
-            loadedThreadIds.Add(result.ThreadId);
-            RefreshProjectThreads(result.ThreadId);
+                workspacePath,
+                CreateThreadStartOptions(workspacePath, instructionSnapshot),
+                new ThreadInstructionSnapshot(instructionSnapshot.DeveloperInstructions, instructionSnapshot.BaseInstructions),
+                IsTitlePlaceholder: true,
+                CreateWorktree: scope.Kind == ThreadScopeKind.Project &&
+                    string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal),
+                WorktreeTaskId: $"thread-{ProjectThreads.Count + 1}")).ConfigureAwait(true);
+            conversationWorkflow.MarkLoaded(result.State.ThreadId);
+            RefreshProjectThreads(result.State.ThreadId);
             StatusMessage = scope.Kind == ThreadScopeKind.General
                 ? "New Codex thread created in General"
-                : worktree is null
+                : result.Worktree is null
                     ? "New Codex thread created in the current checkout"
-                : $"New Codex thread created in worktree {worktree.TaskId}";
-            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+                    : $"New Codex thread created in worktree {result.Worktree.TaskId}";
         }
         catch (Exception ex)
         {
@@ -1287,13 +1053,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
-            var workspacePath = GetActiveWorkspacePath();
-            var result = await appServerSessionCoordinator
-                .ResumeThreadAsync(CreateThreadResumeRequest(SelectedThread.ThreadId, workspacePath))
+            var result = await threadLifecycle
+                .ResumeAsync(CreateThreadResumeRequest(SelectedThread.ThreadId, GetActiveWorkspacePath()))
                 .ConfigureAwait(true);
-            threadService.ReconcileHistory(result.Turns ?? []);
-            TaskWorkspace.NotifyResponseChanged();
-            loadedThreadIds.Add(result.ThreadId);
+            conversationWorkflow.RegisterResumed(result.ThreadId, result.Turns);
+            TaskWorkspace.ApplyConversationSnapshot(conversationWorkflow.GetSnapshot(result.ThreadId));
             activeThreadLoaded = true;
             StatusMessage = "Codex thread resumed";
         }
@@ -1306,14 +1070,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private Task ForkSelectedThreadAsync() => ForkThreadAsync(null);
 
-    private Task ForkConversationFromTurnAsync(CodexConversationTurn turn) => ForkThreadAsync(turn);
+    private Task ForkConversationFromTurnAsync(string turnId) => ForkThreadAsync(turnId);
 
-    private async Task ForkThreadAsync(CodexConversationTurn? forkPoint)
+    private async Task ForkThreadAsync(string? forkPointTurnId)
     {
+        var forkPoint = string.IsNullOrWhiteSpace(forkPointTurnId) || string.IsNullOrWhiteSpace(activeThreadId)
+            ? null
+            : conversationWorkflow.GetConversationTurn(activeThreadId, forkPointTurnId);
         if (!CanUseSelectedThread() ||
             SelectedThread is null ||
-            (forkPoint is not null &&
-             (IsTurnRunning || forkPoint.IsSuperseded || !forkPoint.HasAssistantResponse)))
+            (!string.IsNullOrWhiteSpace(forkPointTurnId) &&
+             (forkPoint is null || IsTurnRunning || forkPoint.IsSuperseded || string.IsNullOrWhiteSpace(forkPoint.AssistantResponse))))
         {
             return;
         }
@@ -1323,83 +1090,21 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
             var sourceThread = SelectedThread;
             var sourceWorkspace = GetActiveWorkspacePath();
-            var sourceService = threadWorkspace.GetRequired(sourceThread.ThreadId);
-            var sourceConversation = sourceService.SnapshotConversation();
-            var forkPointIndex = forkPoint is null
-                ? sourceConversation.Count - 1
-                : sourceService.ConversationTurns.IndexOf(forkPoint);
-            if (forkPoint is not null && forkPointIndex < 0)
-            {
-                throw new InvalidOperationException("The selected assistant response is no longer part of this chat.");
-            }
-
-            var rollbackCount = 0;
-            if (forkPoint is not null)
-            {
-                var activeTurnsFromForkPoint = sourceService.GetActiveRollbackTurnCount(forkPoint);
-                if (activeTurnsFromForkPoint == 0)
-                {
-                    throw new InvalidOperationException("Only an active completed response can be forked.");
-                }
-                rollbackCount = activeTurnsFromForkPoint - 1;
-            }
-
             var instructionSnapshot = ResolveInstructionSnapshot(sourceThread.ThreadId);
-            var result = await appServerSessionCoordinator
-                .ForkThreadAsync(CreateThreadForkRequest(sourceThread.ThreadId, sourceWorkspace, instructionSnapshot))
-                .ConfigureAwait(true);
-            if (rollbackCount > 0)
-            {
-                var rollback = await appServerSessionCoordinator
-                    .RollbackThreadAsync(new CodexThreadRollbackRequest(result.ThreadId, rollbackCount))
-                    .ConfigureAwait(true);
-                if (!string.Equals(rollback.ThreadId, result.ThreadId, StringComparison.Ordinal))
-                {
-                    throw new InvalidOperationException("Codex returned a different thread while creating the conversation fork.");
-                }
-            }
-
-            AssistantWorktree? worktree = null;
-            if (sourceThread.ScopeKind == ThreadScopeKind.Project &&
-                string.Equals(sourceThread.Mode, "worktree", StringComparison.OrdinalIgnoreCase))
-            {
-                var repository = await gitService.GetRepositoryStateAsync(sourceThread.ProjectPath).ConfigureAwait(true);
-                if (!repository.IsRepository || string.IsNullOrWhiteSpace(repository.RootPath))
-                {
-                    throw new InvalidOperationException("The source project is no longer a Git repository.");
-                }
-
-                worktree = await worktreeService.CreateAsync(new WorktreeCreateRequest(
-                    repository.RootPath,
-                    $"fork-{result.ThreadId}",
-                    result.ThreadId,
-                    sourceThread.WorktreeBranch ?? "HEAD")).ConfigureAwait(true);
-            }
-
-            var state = CreateThreadState(
-                sourceThread.ScopeKey,
-                result.ThreadId,
-                $"Fork of {sourceThread.DisplayTitle}",
-                worktree?.Path ?? sourceWorkspace,
-                worktree?.Branch,
-                instructionSnapshot: instructionSnapshot);
-            state.Preview = forkPoint?.UserPrompt ?? sourceThread.Preview;
-            state.FinalResponse = forkPoint?.AssistantResponse ?? sourceService.FinalResponse;
-            state.ConversationTurns = sourceConversation
-                .Take(forkPoint is null ? sourceConversation.Count : forkPointIndex + 1)
-                .Select(CloneConversationTurn)
-                .ToList();
-            state.ContextTokensUsed = rollbackCount == 0 ? sourceService.ContextTokensUsed : 0;
-            state.ContextWindowTokens = sourceService.ContextWindowTokens;
-            state.ContextCompactionCount = rollbackCount == 0 ? sourceService.ContextCompactionCount : 0;
-            threadStore.Upsert(settings, state);
-            threadWorkspace.Restore(state);
-            loadedThreadIds.Add(result.ThreadId);
-            RefreshProjectThreads(result.ThreadId);
-            StatusMessage = forkPoint is null
+            var result = await threadLifecycle.ForkAsync(new ThreadForkRequest(
+                settings,
+                sourceThread,
+                sourceWorkspace,
+                CreateThreadForkRequest(sourceThread.ThreadId, sourceWorkspace, instructionSnapshot),
+                new ThreadInstructionSnapshot(instructionSnapshot.DeveloperInstructions, instructionSnapshot.BaseInstructions),
+                forkPointTurnId,
+                sourceThread.ScopeKind == ThreadScopeKind.Project &&
+                string.Equals(sourceThread.Mode, "worktree", StringComparison.OrdinalIgnoreCase))).ConfigureAwait(true);
+            conversationWorkflow.RegisterCreated(result.State);
+            RefreshProjectThreads(result.State.ThreadId);
+            StatusMessage = string.IsNullOrWhiteSpace(forkPointTurnId)
                 ? "Codex thread forked"
                 : "Conversation forked from the selected response";
-            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -1418,12 +1123,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
-            await appServerSessionCoordinator.ArchiveThreadAsync(SelectedThread.ThreadId).ConfigureAwait(true);
             await Terminal.StopAndRemoveAsync(SelectedThread.ThreadId).ConfigureAwait(true);
-            threadStore.SetArchived(settings, SelectedThread.ThreadId, archived: true);
+            await threadLifecycle.ArchiveAsync(settings, SelectedThread.ThreadId).ConfigureAwait(true);
             StatusMessage = "Codex thread archived";
             RefreshProjectThreads(SelectedThread.ThreadId);
-            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -1442,11 +1145,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
-            await appServerSessionCoordinator.UnarchiveThreadAsync(SelectedThread.ThreadId).ConfigureAwait(true);
-            threadStore.SetArchived(settings, SelectedThread.ThreadId, archived: false);
+            await threadLifecycle.UnarchiveAsync(settings, SelectedThread.ThreadId).ConfigureAwait(true);
             StatusMessage = "Codex thread unarchived";
             RefreshProjectThreads(SelectedThread.ThreadId);
-            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -1466,9 +1167,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             var threadId = SelectedThread.ThreadId;
             var pinned = !SelectedThread.IsPinned;
-            threadStore.SetPinned(settings, threadId, pinned);
+            await threadLifecycle.SetPinnedAsync(settings, threadId, pinned).ConfigureAwait(true);
             RefreshProjectThreads(threadId);
-            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
             StatusMessage = pinned ? "Chat pinned" : "Chat unpinned";
         }
         catch (Exception ex)
@@ -1510,12 +1210,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
-            await appServerSessionCoordinator
-                .SetThreadNameAsync(thread.ThreadId, title)
-                .ConfigureAwait(true);
-            threadStore.Rename(settings, thread.ThreadId, title);
+            await threadLifecycle.RenameAsync(settings, thread.ThreadId, title).ConfigureAwait(true);
             RefreshProjectThreads(thread.ThreadId);
-            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
             StatusMessage = "Chat renamed";
         }
         catch (Exception ex)
@@ -1547,36 +1243,22 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            if (!thread.IsArchived)
-            {
-                await EnsureAppServerSessionAsync().ConfigureAwait(true);
-                await appServerSessionCoordinator.ArchiveThreadAsync(thread.ThreadId).ConfigureAwait(true);
-            }
+            if (!thread.IsArchived) await EnsureAppServerSessionAsync().ConfigureAwait(true);
 
             await Terminal.StopAndRemoveAsync(thread.ThreadId).ConfigureAwait(true);
-            loadedThreadIds.Remove(thread.ThreadId);
-            runningThreadIds.Remove(thread.ThreadId);
-            activeTurnIds.Remove(thread.ThreadId);
-            threadWorkspace.Remove(thread.ThreadId);
-            followUpQueueWorkspace.Remove(thread.ThreadId);
-            if (followUpDispatchGates.Remove(thread.ThreadId, out var dispatchGate))
-            {
-                dispatchGate.Dispose();
-            }
+            await threadLifecycle.DeleteAsync(
+                settings, thread.ThreadId, !thread.IsArchived).ConfigureAwait(true);
+            await followUpQueue.RemoveAsync(thread.ThreadId).ConfigureAwait(true);
+            conversationWorkflow.RemoveRuntime(thread.ThreadId);
+            var nextThreadId = conversationWorkflow.GetThreads(settings, thread.ScopeKey).FirstOrDefault()?.ThreadId;
             settings.ComposerAttachmentDrafts.RemoveAll(draft =>
                 string.Equals(draft.ThreadId, thread.ThreadId, StringComparison.Ordinal));
-            if (!threadStore.Delete(settings, thread.ThreadId))
-            {
-                throw new InvalidOperationException($"Chat '{thread.ThreadId}' was not found.");
-            }
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
 
             activeThreadId = null;
             activeTurnId = null;
             activeThreadLoaded = false;
-            var nextThreadId = threadStore.GetThreads(settings, thread.ScopeKey)
-                .FirstOrDefault()?.ThreadId;
             RefreshProjectThreads(nextThreadId, preserveCurrentSelection: false);
-            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
             StatusMessage = "Chat deleted";
         }
         catch (Exception ex)
@@ -1615,14 +1297,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var guidance = SteeringText.Trim();
             var attachments = TaskWorkspace.Attachments.Select(attachment => attachment.Clone()).ToList();
             var skillInputs = TaskWorkspace.SkillSelector.ResolveSkillInputs(guidance);
-            var queue = followUpQueueWorkspace.GetOrCreate(threadId);
-            queue.Enqueue(
+            var mutation = await followUpQueue.EnqueueAsync(new FollowUpEnqueueUseCaseRequest(
+                settings,
+                threadId,
                 guidance,
                 CaptureQueuedTurnOptions(GetWorkspacePathForThread(threadId)),
                 attachments,
-                skillInputs);
-            TaskWorkspace.NotifyQueuedFollowUpsChanged();
-            await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
+                skillInputs)).ConfigureAwait(true);
+            ApplyFollowUpQueueMutation(threadId, mutation);
             TaskWorkspace.SkillSelector.ClearSelectedSkills();
             SteeringText = string.Empty;
             TaskWorkspace.ClearAttachments();
@@ -1635,28 +1317,31 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private async Task PersistSelectedFollowUpQueueAsync()
+    private async Task PersistSelectedFollowUpQueueAsync(IReadOnlyList<QueuedFollowUpSnapshot> snapshots)
     {
         if (string.IsNullOrWhiteSpace(activeThreadId))
         {
             return;
         }
 
-        await PersistFollowUpQueueAsync(activeThreadId).ConfigureAwait(true);
+        var mutation = await followUpQueue
+            .ReplaceAsync(settings, activeThreadId, snapshots)
+            .ConfigureAwait(true);
+        ApplyFollowUpQueueMutation(activeThreadId, mutation);
         RaiseThreadCommandStates();
     }
 
-    private async Task SendQueuedFollowUpNowAsync(QueuedFollowUp item)
+    private async Task SendQueuedFollowUpNowAsync(string followUpId)
     {
         if (IsShuttingDown || string.IsNullOrWhiteSpace(activeThreadId) ||
-            !followUpQueueWorkspace.ThreadIds.Contains(activeThreadId))
+            !followUpQueue.HasQueue(activeThreadId))
         {
             return;
         }
 
         var threadId = activeThreadId;
-        var queue = followUpQueueWorkspace.GetRequired(threadId);
-        if (queue.IndexOf(item.Id) < 0)
+        var item = followUpQueue.Get(threadId, followUpId);
+        if (item is null)
         {
             return;
         }
@@ -1672,21 +1357,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             try
             {
                 var turnId = activeTurnId;
-                await appServerSessionCoordinator.SteerTurnAsync(new CodexTurnSteerRequest(
+                var mutation = await followUpQueue.SteerAsync(
+                    settings,
                     threadId,
-                    turnId,
-                    BuildUserInputs(
-                        item.Text,
-                        item.Attachments,
-                        item.Options.WorkspacePath,
-                        item.Options.Model,
-                        item.SkillInputs))).ConfigureAwait(true);
-                if (!string.IsNullOrWhiteSpace(item.Text))
-                {
-                    threadWorkspace.GetRequired(threadId).AddGuidance(item.Text);
-                }
-                queue.Remove(item.Id);
-                await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
+                    item.Id,
+                    new CodexTurnSteerRequest(
+                        threadId,
+                        turnId,
+                        attachmentDraftService.BuildPromptInputs(
+                            item.Text, item.Attachments, item.Options.WorkspacePath,
+                            ResolveModel(item.Options.Model), item.SkillInputs))).ConfigureAwait(true);
+                ApplyFollowUpQueueMutation(threadId, mutation);
                 TaskWorkspace.NotifyQueuedFollowUpsChanged();
                 TaskWorkspace.NotifyResponseChanged();
                 StatusMessage = "Queued follow-up steered into the active turn";
@@ -1699,7 +1380,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        if (!ReferenceEquals(queue.Items.FirstOrDefault(), item))
+        if (!followUpQueue.IsFirst(threadId, item.Id))
         {
             StatusMessage = "Move this follow-up to the top before sending it";
             return;
@@ -1707,8 +1388,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         if (item.State == QueuedFollowUpState.NeedsAttention)
         {
-            queue.MarkPending(item.Id);
-            await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
+            var mutation = await followUpQueue
+                .MarkPendingAsync(settings, threadId, item.Id)
+                .ConfigureAwait(true);
+            ApplyFollowUpQueueMutation(threadId, mutation);
         }
         await TryDrainFollowUpQueueAsync(threadId).ConfigureAwait(true);
     }
@@ -1726,17 +1409,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             var guidance = SteeringText.Trim();
             var attachments = TaskWorkspace.Attachments.Select(attachment => attachment.Clone()).ToList();
-            await appServerSessionCoordinator.SteerTurnAsync(new CodexTurnSteerRequest(
+            await turnExecution.SteerAsync(
                 threadId,
-                turnId,
-                BuildUserInputs(guidance, attachments, GetActiveWorkspacePath()))).ConfigureAwait(true);
-            var service = threadWorkspace.ThreadIds.Contains(threadId)
-                ? threadWorkspace.GetRequired(threadId)
-                : threadService;
-            if (!string.IsNullOrWhiteSpace(guidance))
-            {
-                service.AddGuidance(guidance);
-            }
+                new CodexTurnSteerRequest(
+                    threadId,
+                    turnId,
+                    attachmentDraftService.BuildPromptInputs(
+                        guidance, attachments, GetActiveWorkspacePath(), TaskWorkspace.SelectedModel,
+                        TaskWorkspace.SkillSelector.ResolveSkillInputs(guidance))),
+                guidance).ConfigureAwait(true);
             TaskWorkspace.NotifyResponseChanged();
             TaskWorkspace.SkillSelector.ClearSelectedSkills();
             SteeringText = string.Empty;
@@ -1750,39 +1431,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private ProjectThreadState CreateThreadState(
-        ThreadScopeKey scope,
-        string threadId,
-        string title,
-        string workspacePath,
-        string? worktreeBranch = null,
-        bool isTitlePlaceholder = false,
-        CodexInstructionSnapshot instructionSnapshot = default)
-    {
-        var state = new ProjectThreadState
-        {
-            ScopeKind = scope.Kind,
-            ProjectPath = scope.ProjectPath ?? string.Empty,
-            ThreadId = threadId,
-            Title = title,
-            IsTitlePlaceholder = isTitlePlaceholder,
-            Mode = scope.Kind == ThreadScopeKind.General
-                ? "general"
-                : string.IsNullOrWhiteSpace(worktreeBranch) ? "local" : "worktree",
-            WorkspacePath = Path.GetFullPath(workspacePath),
-            WorktreeBranch = worktreeBranch,
-            AppliedDeveloperInstructions = instructionSnapshot.DeveloperInstructions,
-            AppliedBaseInstructions = instructionSnapshot.BaseInstructions,
-            IsActive = true,
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
-        threadStore.Upsert(settings, state);
-        threadStore.SetActive(settings, scope, threadId);
-        threadWorkspace.Restore(state);
-        followUpQueueWorkspace.Restore(threadId, state.QueuedFollowUps);
-        return state;
-    }
 
     private async Task RemoveSelectedWorktreeAsync()
     {
@@ -1805,17 +1453,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             await Terminal.StopAndRemoveAsync(thread.ThreadId).ConfigureAwait(true);
-            var repository = await gitService.GetRepositoryStateAsync(SelectedProjectPath).ConfigureAwait(true);
-            if (!repository.IsRepository || string.IsNullOrWhiteSpace(repository.RootPath))
-            {
-                throw new InvalidOperationException("The selected project is no longer a Git repository.");
-            }
-
-            await worktreeService.RemoveAsync(repository.RootPath, worktreePath).ConfigureAwait(true);
+            await threadLifecycle.RemoveWorktreeAsync(settings, thread, SelectedProjectPath).ConfigureAwait(true);
             thread.Mode = "worktree-removed";
             thread.TurnStatus = "Workspace removed";
             thread.UpdatedAt = DateTimeOffset.UtcNow;
-            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
             OnPropertyChanged(nameof(ActiveWorkspaceLabel));
             removeWorktreeCommand.RaiseCanExecuteChanged();
             StatusMessage = "Assistant worktree removed; its Git branch was preserved";
@@ -2153,72 +1794,87 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             TaskWorkspace.SubmittedPrompt = submittedPrompt;
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
             activeThreadId = await EnsureActiveThreadAsync().ConfigureAwait(true);
-            var automaticTitle = SelectedThread?.IsTitlePlaceholder == true &&
-                threadService.ConversationTurns.Count == 0
-                    ? CreateAutomaticThreadTitle(submittedPrompt, submittedImages)
-                    : null;
-            threadService.BeginTurn(submittedPrompt, submittedImages);
-            TaskWorkspace.NotifyResponseChanged();
-            if (SelectedThread is not null)
-            {
-                SelectedThread.Preview = string.IsNullOrWhiteSpace(submittedPrompt)
-                    ? $"{submittedImages.Count} image{(submittedImages.Count == 1 ? string.Empty : "s")}"
-                    : submittedPrompt;
-            }
-
             var persistedThread = settings.ProjectThreads.FirstOrDefault(thread =>
                 string.Equals(thread.ThreadId, activeThreadId, StringComparison.Ordinal));
-            if (persistedThread is not null)
-            {
-                persistedThread.Preview = string.IsNullOrWhiteSpace(submittedPrompt)
-                    ? $"{submittedImages.Count} image{(submittedImages.Count == 1 ? string.Empty : "s")}"
-                    : submittedPrompt;
-            }
-
+            var automaticTitle = persistedThread?.IsTitlePlaceholder == true
+                ? CreateAutomaticThreadTitle(submittedPrompt, submittedImages)
+                : null;
             var workspacePath = GetActiveWorkspacePath();
             settings.LastModelOverride = NormalizeOverride(ModelOverride);
             settings.LastReasoningEffortOverride = NormalizeOverride(ReasoningEffortOverride);
             settings.LastServiceTierOverride = ToSettingsValue(TaskWorkspace.ServiceTierSelection);
-            var turn = await appServerSessionCoordinator
-                .StartTurnAsync(CreateTurnStartRequest(activeThreadId, submittedPrompt, submittedImages, workspacePath))
-                .ConfigureAwait(true);
+            var result = await turnExecution.StartAsync(new TurnExecutionRequest(
+                settings,
+                activeThreadId,
+                submittedPrompt,
+                submittedImages,
+                CreateTurnStartRequest(activeThreadId, submittedPrompt, submittedImages, workspacePath),
+                automaticTitle,
+                snapshot => TaskWorkspace.ApplyConversationSnapshot(snapshot),
+                started =>
+                {
+                    TaskWorkspace.ApplyConversationSnapshot(started.Snapshot);
+                    if (started.Status == CodexTurnStatus.Running)
+                    {
+                        UpdateThreadActivity(started.ThreadId, isRunning: true, "Running");
+                        IsTurnRunning = true;
+                        activeTurnId = started.TurnId;
+                    }
+                    else
+                    {
+                        activeTurnId = null;
+                        IsTurnRunning = false;
+                    }
+                    cancelTurnCommand.RaiseCanExecuteChanged();
+                    TaskWorkspace.ClearAttachments();
+                    StatusMessage = started.Status == CodexTurnStatus.Running
+                        ? "Codex turn running"
+                        : $"Codex turn {started.Status.ToString().ToLowerInvariant()}";
+                })).ConfigureAwait(true);
             TaskWorkspace.SkillSelector.ClearSelectedSkills();
-
-            var boundTurn = threadService.BindPendingTurn(turn.TurnId);
-            threadWorkspace.RegisterTurn(activeThreadId, turn.TurnId);
-            if (boundTurn.Status == CodexTurnStatus.Running)
+            TaskWorkspace.ApplyConversationSnapshot(result.Snapshot);
+            if (SelectedThread is not null)
             {
-                runningThreadIds.Add(activeThreadId);
+                SelectedThread.Preview = persistedThread?.Preview ?? submittedPrompt;
+            }
+            if (result.Status == CodexTurnStatus.Running)
+            {
                 UpdateThreadActivity(activeThreadId, isRunning: true, "Running");
                 IsTurnRunning = true;
-                activeTurnId = turn.TurnId;
-                activeTurnIds[activeThreadId] = turn.TurnId;
+                activeTurnId = result.TurnId;
             }
             else
             {
                 activeTurnId = null;
-                activeTurnIds.Remove(activeThreadId);
-                runningThreadIds.Remove(activeThreadId);
                 IsTurnRunning = false;
             }
             cancelTurnCommand.RaiseCanExecuteChanged();
             TaskWorkspace.ClearAttachments();
-            StatusMessage = boundTurn.Status == CodexTurnStatus.Running
+            StatusMessage = result.Status == CodexTurnStatus.Running
                 ? "Codex turn running"
-                : $"Codex turn {boundTurn.Status.ToString().ToLowerInvariant()}";
-            if (!string.IsNullOrWhiteSpace(automaticTitle))
+                : $"Codex turn {result.Status.ToString().ToLowerInvariant()}";
+            if (result.AutomaticTitleApplied)
             {
-                await TryAutomaticallyRenameThreadAsync(activeThreadId, automaticTitle).ConfigureAwait(true);
+                RefreshProjectThreads(activeThreadId);
+            }
+            if (!string.IsNullOrWhiteSpace(result.AutomaticTitleError))
+            {
+                logger.Log(
+                    AppLogLevel.Warning,
+                    "thread_auto_rename_failed",
+                    "Could not automatically name the chat from its first message.",
+                    new Dictionary<string, string?>
+                    {
+                        ["threadId"] = activeThreadId,
+                        ["error"] = result.AutomaticTitleError
+                    });
             }
         }
         catch (Exception ex)
         {
-            threadService.FailPendingTurn(ex.Message);
-            TaskWorkspace.NotifyResponseChanged();
             if (!string.IsNullOrWhiteSpace(activeThreadId))
             {
-                runningThreadIds.Remove(activeThreadId);
-                activeTurnIds.Remove(activeThreadId);
+                TaskWorkspace.ApplyConversationSnapshot(conversationWorkflow.GetSnapshot(activeThreadId));
             }
             IsTurnRunning = false;
             StatusMessage = ex.Message;
@@ -2226,41 +1882,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private async Task TryAutomaticallyRenameThreadAsync(string threadId, string title)
-    {
-        try
-        {
-            var persistedThread = settings.ProjectThreads.FirstOrDefault(thread =>
-                string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
-            if (persistedThread?.IsTitlePlaceholder != true)
-            {
-                return;
-            }
-
-            await appServerSessionCoordinator
-                .SetThreadNameAsync(threadId, title)
-                .ConfigureAwait(true);
-            persistedThread = settings.ProjectThreads.FirstOrDefault(thread =>
-                string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
-            if (persistedThread?.IsTitlePlaceholder != true)
-            {
-                return;
-            }
-
-            threadStore.Rename(settings, threadId, title);
-            RefreshProjectThreads(threadId);
-            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            logger.Log(
-                AppLogLevel.Warning,
-                "thread_auto_rename_failed",
-                "Could not automatically name the chat from its first message.",
-                new Dictionary<string, string?> { ["threadId"] = threadId },
-                ex);
-        }
-    }
 
     private static string CreateAutomaticThreadTitle(
         string submittedPrompt,
@@ -2297,15 +1918,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return false;
         }
         var threadId = activeThreadId;
-        var editingService = threadService;
         if (string.IsNullOrWhiteSpace(threadId) ||
-            !editingService.ConversationTurns.Any(turn => ReferenceEquals(turn, sourceTurn)))
+            string.IsNullOrWhiteSpace(sourceTurn.TurnId) ||
+            !TaskWorkspace.ConversationTurns.Any(turn => string.Equals(turn.TurnId, sourceTurn.TurnId, StringComparison.Ordinal)))
         {
             StatusMessage = "The prompt is no longer part of the selected thread";
             return false;
         }
 
-        var rollbackCount = editingService.GetActiveRollbackTurnCount(sourceTurn);
+        var rollbackCount = conversationWorkflow.GetActiveRollbackTurnCount(threadId, sourceTurn.TurnId);
         if (rollbackCount < 1)
         {
             StatusMessage = "The selected prompt cannot be edited";
@@ -2315,147 +1936,111 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         var submittedPrompt = editedPrompt.Trim();
         var submittedAttachments = sourceTurn.UserAttachments.Select(attachment => attachment.Clone()).ToList();
         var workspacePath = GetActiveWorkspacePath();
-        CodexTurnStartRequest startRequest;
+        TurnEditExecutionResult result;
         try
         {
-            startRequest = CreateTurnStartRequest(threadId, submittedPrompt, submittedAttachments, workspacePath);
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = ex.Message;
-            return false;
-        }
-
-        var editCommitted = false;
-        StatusMessage = "Rewinding Codex thread for edited prompt";
-        try
-        {
+            var startRequest = CreateTurnStartRequest(
+                threadId,
+                submittedPrompt,
+                submittedAttachments,
+                workspacePath);
+            StatusMessage = "Rewinding Codex thread for edited prompt";
             await EnsureAppServerSessionAsync().ConfigureAwait(true);
-            var rollback = await appServerSessionCoordinator
-                .RollbackThreadAsync(new CodexThreadRollbackRequest(threadId, rollbackCount))
-                .ConfigureAwait(true);
-            if (!string.Equals(rollback.ThreadId, threadId, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("Codex returned a different thread after editing the prompt.");
-            }
-
-            editingService.SupersedeTurnsFrom(sourceTurn);
-            editingService.ReconcileHistory(rollback.Turns);
-            editingService.BeginTurn(submittedPrompt, submittedAttachments);
-            editCommitted = true;
-            var remainsSelected = string.Equals(activeThreadId, threadId, StringComparison.Ordinal) &&
-                ReferenceEquals(threadService, editingService);
-            if (remainsSelected)
-            {
-                TaskWorkspace.SubmittedPrompt = submittedPrompt;
-                TaskWorkspace.NotifyResponseChanged();
-            }
-
-            if (SelectedThread is not null && string.Equals(SelectedThread.ThreadId, threadId, StringComparison.Ordinal))
-            {
-                SelectedThread.Preview = submittedPrompt;
-            }
-            var persistedThread = settings.ProjectThreads.FirstOrDefault(thread =>
-                string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
-            if (persistedThread is not null)
-            {
-                persistedThread.Preview = submittedPrompt;
-            }
-
             settings.LastModelOverride = NormalizeOverride(ModelOverride);
             settings.LastReasoningEffortOverride = NormalizeOverride(ReasoningEffortOverride);
             settings.LastServiceTierOverride = ToSettingsValue(TaskWorkspace.ServiceTierSelection);
-            var startedTurn = await appServerSessionCoordinator.StartTurnAsync(startRequest).ConfigureAwait(true);
-            var boundTurn = editingService.BindPendingTurn(startedTurn.TurnId);
-            threadWorkspace.RegisterTurn(threadId, startedTurn.TurnId);
-            var isSelectedAfterStart = string.Equals(activeThreadId, threadId, StringComparison.Ordinal) &&
-                ReferenceEquals(threadService, editingService);
-            if (boundTurn.Status == CodexTurnStatus.Running)
-            {
-                runningThreadIds.Add(threadId);
-                UpdateThreadActivity(threadId, isRunning: true, "Running");
-                activeTurnIds[threadId] = startedTurn.TurnId;
-                if (isSelectedAfterStart)
-                {
-                    IsTurnRunning = true;
-                    activeTurnId = startedTurn.TurnId;
-                }
-            }
-            else
-            {
-                activeTurnIds.Remove(threadId);
-                runningThreadIds.Remove(threadId);
-                if (isSelectedAfterStart)
-                {
-                    activeTurnId = null;
-                    IsTurnRunning = false;
-                }
-            }
-            cancelTurnCommand.RaiseCanExecuteChanged();
-            StatusMessage = boundTurn.Status == CodexTurnStatus.Running
-                ? "Edited prompt running"
-                : $"Edited prompt {boundTurn.Status.ToString().ToLowerInvariant()}";
-            return true;
+            result = await turnExecution.EditAsync(new TurnEditExecutionRequest(
+                settings,
+                threadId,
+                sourceTurn.TurnId,
+                rollbackCount,
+                submittedPrompt,
+                submittedAttachments,
+                startRequest)).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
-            if (editCommitted)
+            StatusMessage = ex.Message;
+            logger.Log(
+                AppLogLevel.Error,
+                "prompt_edit_failed",
+                "Could not edit and resubmit the selected prompt.",
+                exception: ex);
+            return false;
+        }
+
+        var isSelectedAfterStart = string.Equals(activeThreadId, threadId, StringComparison.Ordinal);
+        if (isSelectedAfterStart)
+        {
+            TaskWorkspace.ApplyConversationSnapshot(result.Snapshot);
+            TaskWorkspace.SubmittedPrompt = submittedPrompt;
+            TaskWorkspace.NotifyResponseChanged();
+            if (SelectedThread is not null)
             {
-                editingService.FailPendingTurn(ex.Message);
-                await SaveThreadStateAsync(threadId, editingService).ConfigureAwait(true);
+                SelectedThread.Preview = submittedPrompt;
             }
-            runningThreadIds.Remove(threadId);
-            activeTurnIds.Remove(threadId);
-            if (string.Equals(activeThreadId, threadId, StringComparison.Ordinal) && ReferenceEquals(threadService, editingService))
+        }
+
+        if (result.Error is not null)
+        {
+            if (isSelectedAfterStart)
             {
                 IsTurnRunning = false;
-                TaskWorkspace.NotifyResponseChanged();
             }
-            StatusMessage = ex.Message;
-            logger.Log(AppLogLevel.Error, "prompt_edit_failed", "Could not edit and resubmit the selected prompt.", exception: ex);
-            return editCommitted;
+            StatusMessage = result.Error.Message;
+            logger.Log(
+                AppLogLevel.Error,
+                "prompt_edit_failed",
+                "Could not edit and resubmit the selected prompt.",
+                exception: result.Error);
+            return result.StateCommitted;
         }
+
+        var turnStatus = result.Status
+            ?? throw new InvalidOperationException("The edited turn did not return a status.");
+        if (turnStatus == CodexTurnStatus.Running)
+        {
+            UpdateThreadActivity(threadId, isRunning: true, "Running");
+            if (isSelectedAfterStart)
+            {
+                IsTurnRunning = true;
+                activeTurnId = result.TurnId;
+            }
+        }
+        else if (isSelectedAfterStart)
+        {
+            activeTurnId = null;
+            IsTurnRunning = false;
+        }
+        cancelTurnCommand.RaiseCanExecuteChanged();
+        StatusMessage = turnStatus == CodexTurnStatus.Running
+            ? "Edited prompt running"
+            : $"Edited prompt {turnStatus.ToString().ToLowerInvariant()}";
+        return true;
     }
 
     private async Task<string> EnsureActiveThreadAsync()
     {
         var scope = GetCurrentScope();
         var workspacePath = GetWorkspacePath(scope);
-
         if (string.IsNullOrWhiteSpace(activeThreadId))
         {
             var instructionSnapshot = ResolveDefaultInstructionSnapshot();
-            var thread = await appServerSessionCoordinator
-                .StartThreadAsync(CreateThreadStartOptions(workspacePath, instructionSnapshot))
-                .ConfigureAwait(true);
-            AssistantWorktree? worktree = null;
-            if (scope.Kind == ThreadScopeKind.Project &&
-                string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal))
-            {
-                var repository = await gitService.GetRepositoryStateAsync(scope.ProjectPath!).ConfigureAwait(true);
-                if (!repository.IsRepository || string.IsNullOrWhiteSpace(repository.RootPath))
-                {
-                    throw new InvalidOperationException("A new worktree requires a detected Git repository.");
-                }
-
-                worktree = await worktreeService.CreateAsync(new WorktreeCreateRequest(
-                    repository.RootPath,
-                    $"thread-{ProjectThreads.Count + 1}",
-                    thread.ThreadId)).ConfigureAwait(true);
-            }
-
-            CreateThreadState(
+            var started = await threadLifecycle.StartAsync(new ThreadStartUseCaseRequest(
+                settings,
                 scope,
-                thread.ThreadId,
                 $"Thread {ProjectThreads.Count + 1}",
-                worktree?.Path ?? workspacePath,
-                worktree?.Branch,
-                isTitlePlaceholder: true,
-                instructionSnapshot: instructionSnapshot);
-            RefreshProjectThreads(thread.ThreadId);
-            loadedThreadIds.Add(thread.ThreadId);
+                workspacePath,
+                CreateThreadStartOptions(workspacePath, instructionSnapshot),
+                new ThreadInstructionSnapshot(instructionSnapshot.DeveloperInstructions, instructionSnapshot.BaseInstructions),
+                IsTitlePlaceholder: true,
+                CreateWorktree: scope.Kind == ThreadScopeKind.Project &&
+                    string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal),
+                WorktreeTaskId: $"thread-{ProjectThreads.Count + 1}")).ConfigureAwait(true);
+            RefreshProjectThreads(started.State.ThreadId);
+            conversationWorkflow.MarkLoaded(started.State.ThreadId);
             activeThreadLoaded = true;
-            return thread.ThreadId;
+            return started.State.ThreadId;
         }
 
         if (activeThreadLoaded)
@@ -2463,44 +2048,40 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return activeThreadId;
         }
 
-        var existingInstructionSnapshot = ResolveInstructionSnapshot(activeThreadId);
-        try
-        {
-            var resumed = await appServerSessionCoordinator
-                .ResumeThreadAsync(CreateThreadResumeRequest(activeThreadId, GetActiveWorkspacePath()))
-                .ConfigureAwait(true);
-            threadService.ReconcileHistory(resumed.Turns ?? []);
-            TaskWorkspace.NotifyResponseChanged();
-            activeThreadLoaded = true;
-            loadedThreadIds.Add(resumed.ThreadId);
-            StatusMessage = "Codex thread resumed";
-            return resumed.ThreadId;
-        }
-        catch (Exception ex)
+        var previousThreadId = activeThreadId;
+        var existingInstructionSnapshot = ResolveInstructionSnapshot(previousThreadId);
+        var activated = await threadLifecycle.ResumeOrReplaceAsync(new ThreadActivationUseCaseRequest(
+            settings,
+            scope,
+            workspacePath,
+            CreateThreadResumeRequest(previousThreadId, GetActiveWorkspacePath()),
+            CreateThreadStartOptions(workspacePath, existingInstructionSnapshot),
+            new ThreadInstructionSnapshot(
+                existingInstructionSnapshot.DeveloperInstructions,
+                existingInstructionSnapshot.BaseInstructions),
+            $"Thread {ProjectThreads.Count + 1}")).ConfigureAwait(true);
+
+        if (activated.ReplacedThread)
         {
             logger.Log(
                 AppLogLevel.Warning,
                 "codex_thread_resume_failed",
-                "Could not resume persisted Codex thread; starting a new thread.",
-                new Dictionary<string, string?> { ["threadId"] = activeThreadId },
-                ex);
-
-            var thread = await appServerSessionCoordinator
-                .StartThreadAsync(CreateThreadStartOptions(workspacePath, existingInstructionSnapshot))
-                .ConfigureAwait(true);
-            CreateThreadState(
-                scope,
-                thread.ThreadId,
-                $"Thread {ProjectThreads.Count + 1}",
-                workspacePath,
-                isTitlePlaceholder: true,
-                instructionSnapshot: existingInstructionSnapshot);
-            RefreshProjectThreads(thread.ThreadId);
-            loadedThreadIds.Add(thread.ThreadId);
-            activeThreadLoaded = true;
+                "Could not resume persisted Codex thread; started a new thread.",
+                new Dictionary<string, string?> { ["threadId"] = previousThreadId },
+                activated.ResumeError);
+            RefreshProjectThreads(activated.ThreadId);
             StatusMessage = "Previous thread could not be resumed; started a new Codex thread";
-            return thread.ThreadId;
         }
+        else
+        {
+            conversationWorkflow.RegisterResumed(activated.ThreadId, activated.Turns);
+            TaskWorkspace.ApplyConversationSnapshot(conversationWorkflow.GetSnapshot(activated.ThreadId));
+            StatusMessage = "Codex thread resumed";
+        }
+
+        conversationWorkflow.MarkLoaded(activated.ThreadId);
+        activeThreadLoaded = true;
+        return activated.ThreadId;
     }
 
     private async Task CancelTurnAsync()
@@ -2519,7 +2100,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await appServerSessionCoordinator.CancelTurnAsync(activeThreadId, activeTurnId).ConfigureAwait(true);
+            await turnExecution.CancelAsync(activeThreadId, activeTurnId).ConfigureAwait(true);
             UpdateThreadActivity(activeThreadId, isRunning: true, "Cancelling");
             StatusMessage = "Cancellation requested";
         }
@@ -2550,8 +2131,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
 
         var shutdownTimer = System.Diagnostics.Stopwatch.StartNew();
-        var activeTurnsAtStart = activeTurnIds.Count > 0
-            ? activeTurnIds.Count
+        var activeTurnsAtStart = conversationWorkflow.ActiveTurnCount > 0
+            ? conversationWorkflow.ActiveTurnCount
             : IsTurnRunning ? 1 : 0;
         var terminalSessionsAtStart = Terminal.SessionCount;
         IsShuttingDown = true;
@@ -2575,13 +2156,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         appServerSessionCoordinator.ServerRequestReceived -= OnServerRequestReceived;
         appServerSessionCoordinator.FlushNotifications();
         await Skills.DisposeAsync().ConfigureAwait(true);
+        await followUpQueue.DisposeAsync().ConfigureAwait(true);
         await appServerSessionCoordinator.DisposeAsync().ConfigureAwait(true);
         await SaveActiveThreadStateAsync().ConfigureAwait(true);
 
         IsTurnRunning = false;
         activeTurnId = null;
-        activeTurnIds.Clear();
-        runningThreadIds.Clear();
+        conversationWorkflow.ClearRuntimeState();
         StatusMessage = "Application closed";
         var notificationMetrics = appServerSessionCoordinator.NotificationMetrics;
         logger.Log(
@@ -2605,8 +2186,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        var turns = activeTurnIds.Count > 0
-            ? activeTurnIds.ToArray()
+        var turns = conversationWorkflow.ActiveTurnCount > 0
+            ? conversationWorkflow.SnapshotActiveTurns()
             : !string.IsNullOrWhiteSpace(activeThreadId) && !string.IsNullOrWhiteSpace(activeTurnId)
                 ? [new KeyValuePair<string, string>(activeThreadId, activeTurnId)]
                 : [];
@@ -2617,8 +2198,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(TimeSpan.FromSeconds(2));
-                await appServerSessionCoordinator.CancelTurnAsync(turn.Key, turn.Value, timeout.Token).ConfigureAwait(true);
-                runningThreadIds.Remove(turn.Key);
+                await turnExecution.CancelAsync(turn.Key, turn.Value, timeout.Token).ConfigureAwait(true);
+                conversationWorkflow.RegisterTurnFinished(turn.Key);
                 StatusMessage = "Cancellation requested";
             }
             catch (OperationCanceledException ex)
@@ -2689,24 +2270,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private static string? NormalizeOverride(string? value)
-    {
-        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-    }
+    private static string? NormalizeOverride(string? value) => CodexTurnRequestFactory.NormalizeOverride(value);
 
-    private static CodexReasoningEffort? ParseReasoningEffort(string? value)
-    {
-        return NormalizeOverride(value)?.ToLowerInvariant() switch
-        {
-            "none" => CodexReasoningEffort.None,
-            "minimal" => CodexReasoningEffort.Minimal,
-            "low" => CodexReasoningEffort.Low,
-            "medium" => CodexReasoningEffort.Medium,
-            "high" => CodexReasoningEffort.High,
-            "xhigh" => CodexReasoningEffort.XHigh,
-            _ => null
-        };
-    }
+    private CodexModelOption? ResolveModel(string? model) => string.IsNullOrWhiteSpace(model)
+        ? TaskWorkspace.SelectedModel
+        : TaskWorkspace.ModelCatalog.FirstOrDefault(option =>
+            string.Equals(option.Model, model, StringComparison.OrdinalIgnoreCase));
 
     private bool CanCancelTurn()
     {
@@ -2767,8 +2336,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return false;
         }
 
-        return followUpQueueWorkspace.ThreadIds.Contains(threadId)
-            ? followUpQueueWorkspace.GetRequired(threadId).Items.Count > 0
+        return followUpQueue.HasQueue(threadId)
+            ? followUpQueue.GetCount(threadId) > 0
             : SelectedThread?.QueuedFollowUps.Count > 0;
     }
 
@@ -2841,53 +2410,22 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private CodexThreadStartOptions CreateThreadStartOptions(
         string cwd,
-        CodexInstructionSnapshot instructionSnapshot)
-    {
-        var permissions = ResolvePermissionPolicy();
-        return new CodexThreadStartOptions(
-            NormalizeOverride(ModelOverride),
-            permissions.Sandbox,
-            permissions.ApprovalPolicy,
-            permissions.ApprovalsReviewer,
-            permissions.PermissionProfileId,
-            cwd,
-            instructionSnapshot.DeveloperInstructions,
-            instructionSnapshot.BaseInstructions);
-    }
+        CodexInstructionSnapshot instructionSnapshot) =>
+        attachmentDraftService.CreateThreadStart(
+            ResolvePermissionPolicy(), ModelOverride, cwd,
+            instructionSnapshot.DeveloperInstructions, instructionSnapshot.BaseInstructions);
 
-    private CodexThreadResumeRequest CreateThreadResumeRequest(string threadId, string cwd)
-    {
-        var permissions = ResolvePermissionPolicy();
-        var instructionSnapshot = ResolveInstructionSnapshot(threadId);
-        return new CodexThreadResumeRequest(
-            threadId,
-            cwd,
-            permissions.Sandbox,
-            NormalizeOverride(ModelOverride),
-            permissions.ApprovalPolicy,
-            permissions.ApprovalsReviewer,
-            permissions.PermissionProfileId,
-            instructionSnapshot.DeveloperInstructions,
-            instructionSnapshot.BaseInstructions);
-    }
+    private CodexThreadResumeRequest CreateThreadResumeRequest(string threadId, string cwd) =>
+        attachmentDraftService.CreateThreadResume(
+            ResolvePermissionPolicy(), ModelOverride, threadId, cwd,
+            ResolveInstructionSnapshot(threadId).DeveloperInstructions,
+            ResolveInstructionSnapshot(threadId).BaseInstructions);
 
     private CodexThreadForkRequest CreateThreadForkRequest(
-        string threadId,
-        string cwd,
-        CodexInstructionSnapshot instructionSnapshot)
-    {
-        var permissions = ResolvePermissionPolicy();
-        return new CodexThreadForkRequest(
-            threadId,
-            cwd,
-            permissions.Sandbox,
-            NormalizeOverride(ModelOverride),
-            permissions.ApprovalPolicy,
-            permissions.ApprovalsReviewer,
-            permissions.PermissionProfileId,
-            instructionSnapshot.DeveloperInstructions,
-            instructionSnapshot.BaseInstructions);
-    }
+        string threadId, string cwd, CodexInstructionSnapshot instructionSnapshot) =>
+        attachmentDraftService.CreateThreadFork(
+            ResolvePermissionPolicy(), ModelOverride, threadId, cwd,
+            instructionSnapshot.DeveloperInstructions, instructionSnapshot.BaseInstructions);
 
     private CodexInstructionSnapshot ResolveDefaultInstructionSnapshot() => new(
         settings.CustomDeveloperInstructionsEnabled
@@ -2911,65 +2449,19 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private static string? NormalizeInstructionOverride(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value;
 
-    private IReadOnlyList<CodexUserInput> BuildUserInputs(
-        string text,
-        IReadOnlyList<AttachmentReference> attachments,
-        string workspacePath,
-        string? model = null,
-        IReadOnlyList<CodexSkillInput>? preservedSkillInputs = null)
-    {
-        var selectedModel = string.IsNullOrWhiteSpace(model)
-            ? TaskWorkspace.SelectedModel
-            : TaskWorkspace.ModelCatalog.FirstOrDefault(item =>
-                string.Equals(item.Model, model, StringComparison.OrdinalIgnoreCase));
-        if (attachments.Any(attachment => attachment.IsImage) && selectedModel?.SupportsImageInput == false)
-        {
-            throw new InvalidOperationException(
-                $"{selectedModel.DisplayName} does not accept image input. Remove the images or choose an image-capable model.");
-        }
-
-        var result = new AttachmentPromptInputBuilder(attachmentStore, workspaceAttachmentResolver)
-            .Build(text, attachments, workspacePath)
-            .ToList();
-        result.AddRange(TaskWorkspace.SkillSelector.ResolveSkillInputs(text, preservedSkillInputs));
-        return result;
-    }
-
     private CodexTurnStartRequest CreateTurnStartRequest(
         string threadId,
         string prompt,
         IReadOnlyList<AttachmentReference> attachments,
         string cwd)
-    {
-        var permissions = ResolvePermissionPolicy();
-        return new CodexTurnStartRequest(
-            threadId,
-            BuildUserInputs(prompt, attachments, cwd),
-            cwd,
-            permissions.Sandbox,
-            NormalizeOverride(ModelOverride),
-            ParseReasoningEffort(ReasoningEffortOverride),
-            TaskWorkspace.ServiceTierSelection,
-            permissions.ApprovalPolicy,
-            permissions.ApprovalsReviewer,
-            permissions.PermissionProfileId);
-    }
+    => attachmentDraftService.CreateTurnStart(new TurnRequestComposition(
+        threadId, prompt, attachments, cwd, ResolvePermissionPolicy(), ModelOverride, ReasoningEffortOverride,
+        TaskWorkspace.ServiceTierSelection, TaskWorkspace.SelectedModel,
+        TaskWorkspace.SkillSelector.ResolveSkillInputs(prompt)));
 
-    private QueuedTurnOptionsSnapshot CaptureQueuedTurnOptions(string workspacePath)
-    {
-        var permissions = ResolvePermissionPolicy();
-        return new QueuedTurnOptionsSnapshot
-        {
-            WorkspacePath = workspacePath,
-            Model = NormalizeOverride(ModelOverride),
-            ReasoningEffort = ParseReasoningEffort(ReasoningEffortOverride),
-            ServiceTier = TaskWorkspace.ServiceTierSelection,
-            Sandbox = permissions.Sandbox,
-            ApprovalPolicy = permissions.ApprovalPolicy,
-            ApprovalsReviewer = permissions.ApprovalsReviewer,
-            PermissionProfileId = permissions.PermissionProfileId
-        };
-    }
+    private QueuedTurnOptionsSnapshot CaptureQueuedTurnOptions(string workspacePath) =>
+        attachmentDraftService.CaptureQueuedOptions(
+            ResolvePermissionPolicy(), workspacePath, ModelOverride, ReasoningEffortOverride, TaskWorkspace.ServiceTierSelection);
 
     private string GetWorkspacePathForThread(string threadId)
     {
@@ -2985,88 +2477,36 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         return path;
     }
 
-    private SemaphoreSlim GetFollowUpDispatchGate(string threadId)
-    {
-        if (!followUpDispatchGates.TryGetValue(threadId, out var gate))
-        {
-            gate = new SemaphoreSlim(1, 1);
-            followUpDispatchGates.Add(threadId, gate);
-        }
-
-        return gate;
-    }
-
     private async Task TryDrainFollowUpQueueAsync(string threadId)
     {
         if (IsShuttingDown ||
-            runningThreadIds.Contains(threadId) ||
-            !followUpQueueWorkspace.ThreadIds.Contains(threadId))
+            conversationWorkflow.IsRunning(threadId) ||
+            !followUpQueue.HasQueue(threadId))
         {
             return;
         }
 
-        var queue = followUpQueueWorkspace.GetRequired(threadId);
-        if (queue.Items.FirstOrDefault() is not { State: QueuedFollowUpState.Pending } item)
+        if (followUpQueue.GetFirstPending(threadId) is null)
         {
             return;
         }
-
-        var gate = GetFollowUpDispatchGate(threadId);
-        await gate.WaitAsync().ConfigureAwait(true);
-        try
-        {
-            if (IsShuttingDown || runningThreadIds.Contains(threadId) ||
-                queue.Items.FirstOrDefault() is not { State: QueuedFollowUpState.Pending } head ||
-                !string.Equals(head.Id, item.Id, StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            await StartQueuedFollowUpAsync(threadId, queue, head).ConfigureAwait(true);
-        }
-        finally
-        {
-            gate.Release();
-        }
+        await StartQueuedFollowUpAsync(threadId).ConfigureAwait(true);
     }
 
-    private async Task StartQueuedFollowUpAsync(
-        string threadId,
-        CodexFollowUpQueue queue,
-        QueuedFollowUp item)
+    private async Task StartQueuedFollowUpAsync(string threadId)
     {
-        var service = threadWorkspace.GetRequired(threadId);
-        queue.MarkStarting(item.Id);
-        TaskWorkspace.NotifyQueuedFollowUpsChanged();
-        await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
-
-        try
+        CodexTurnStartRequest CreateStartRequest(QueuedFollowUpSnapshot queued)
         {
-            var options = item.Options;
+            var options = queued.Options;
             var workspacePath = Path.GetFullPath(options.WorkspacePath);
-            if (!Directory.Exists(workspacePath))
-            {
-                throw new InvalidOperationException($"The queued follow-up workspace is unavailable: {workspacePath}");
-            }
-
-            await EnsureAppServerSessionAsync().ConfigureAwait(true);
-            service.BeginTurn(item.Text, item.Attachments);
-            if (string.Equals(threadId, activeThreadId, StringComparison.Ordinal))
-            {
-                TaskWorkspace.NotifyResponseChanged();
-            }
-
-            var persisted = settings.ProjectThreads.First(thread =>
-                string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
-            persisted.Preview = item.Text;
-            var turn = await appServerSessionCoordinator.StartTurnAsync(new CodexTurnStartRequest(
+            return new CodexTurnStartRequest(
                 threadId,
-                BuildUserInputs(
-                    item.Text,
-                    item.Attachments,
+                attachmentDraftService.BuildPromptInputs(
+                    queued.Text,
+                    queued.Attachments,
                     workspacePath,
-                    options.Model,
-                    item.SkillInputs),
+                    ResolveModel(options.Model),
+                    queued.SkillInputs),
                 workspacePath,
                 options.Sandbox,
                 options.Model,
@@ -3074,89 +2514,91 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 options.ServiceTier,
                 options.ApprovalPolicy,
                 options.ApprovalsReviewer,
-                options.PermissionProfileId)).ConfigureAwait(true);
-
-            var boundTurn = service.BindPendingTurn(turn.TurnId);
-            threadWorkspace.RegisterTurn(threadId, turn.TurnId);
-            queue.Remove(item.Id);
-            await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
-            if (boundTurn.Status == CodexTurnStatus.Running)
-            {
-                runningThreadIds.Add(threadId);
-                activeTurnIds[threadId] = turn.TurnId;
-                UpdateThreadActivity(threadId, isRunning: true, "Running");
-                if (string.Equals(threadId, activeThreadId, StringComparison.Ordinal))
-                {
-                    activeTurnId = turn.TurnId;
-                    IsTurnRunning = true;
-                    StatusMessage = "Queued follow-up running";
-                }
-            }
-            else
-            {
-                runningThreadIds.Remove(threadId);
-                activeTurnIds.Remove(threadId);
-                if (string.Equals(threadId, activeThreadId, StringComparison.Ordinal))
-                {
-                    activeTurnId = null;
-                    IsTurnRunning = false;
-                }
-                _ = TryDrainFollowUpQueueAsync(threadId);
-            }
-
-            TaskWorkspace.NotifyQueuedFollowUpsChanged();
-            RaiseThreadCommandStates();
+                options.PermissionProfileId);
         }
-        catch (Exception ex)
+
+        var result = await followUpQueue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
+            settings,
+            threadId,
+            CreateStartRequest,
+            EnsureAppServerSessionAsync)).ConfigureAwait(true);
+        var dispatch = result.Dispatch;
+        if (!dispatch.Attempted) return;
+        ApplyFollowUpQueueSnapshot(threadId, result.Snapshot);
+        TaskWorkspace.NotifyQueuedFollowUpsChanged();
+        if (!string.IsNullOrWhiteSpace(dispatch.ErrorMessage))
         {
-            service.FailPendingTurn(ex.Message);
-            queue.MarkNeedsAttention(item.Id, ex.Message);
-            await PersistFollowUpQueueAsync(threadId).ConfigureAwait(true);
-            TaskWorkspace.NotifyQueuedFollowUpsChanged();
-            StatusMessage = ex.Message;
+            StatusMessage = dispatch.ErrorMessage;
             logger.Log(
                 AppLogLevel.Error,
                 "queued_follow_up_start_failed",
                 "A queued follow-up could not be started and requires attention.",
-                new Dictionary<string, string?> { ["threadId"] = threadId, ["itemId"] = item.Id },
-                ex);
+                properties: new Dictionary<string, string?> { ["error"] = dispatch.ErrorMessage });
+            return;
         }
+        if (string.IsNullOrWhiteSpace(dispatch.TurnId) || dispatch.TurnStatus is null) return;
+        var turnStatus = dispatch.TurnStatus.Value;
+        UpdateThreadActivity(
+            threadId,
+            turnStatus == CodexTurnStatus.Running,
+            turnStatus == CodexTurnStatus.Running ? "Running" : turnStatus.ToString());
+        if (string.Equals(threadId, activeThreadId, StringComparison.Ordinal))
+        {
+            activeTurnId = turnStatus == CodexTurnStatus.Running ? dispatch.TurnId : null;
+            IsTurnRunning = turnStatus == CodexTurnStatus.Running;
+            StatusMessage = IsTurnRunning
+                ? "Queued follow-up running"
+                : $"Codex turn {turnStatus.ToString().ToLowerInvariant()}";
+        }
+        if (!conversationWorkflow.IsRunning(threadId))
+        {
+            _ = TryDrainFollowUpQueueAsync(threadId);
+        }
+        RaiseThreadCommandStates();
     }
 
     private async Task PersistFollowUpQueueAsync(string threadId)
     {
-        if (!followUpQueueWorkspace.ThreadIds.Contains(threadId))
-        {
-            return;
-        }
+        var mutation = await followUpQueue.PersistAsync(settings, threadId).ConfigureAwait(true);
+        ApplyFollowUpQueueMutation(threadId, mutation);
+    }
 
-        var snapshots = followUpQueueWorkspace.GetRequired(threadId).Snapshot().Select(item => item.Clone()).ToList();
-        var persisted = settings.ProjectThreads.FirstOrDefault(thread =>
-            string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
-        if (persisted is null)
-        {
-            return;
-        }
+    private void ApplyFollowUpQueueMutation(string threadId, FollowUpQueueMutationResult mutation)
+    {
+        if (!mutation.Found) return;
+        ApplyFollowUpQueueSnapshot(threadId, mutation.Snapshot, mutation.UpdatedAt);
+    }
 
-        persisted.QueuedFollowUps = snapshots;
-        persisted.UpdatedAt = DateTimeOffset.UtcNow;
+    private void ApplyFollowUpQueueSnapshot(
+        string threadId,
+        ConversationWorkspaceSnapshot snapshot,
+        DateTimeOffset? updatedAt = null)
+    {
+        if (conversationWorkflow.IsRunning(threadId))
+        {
+            UpdateThreadActivity(threadId, isRunning: true, "Running");
+        }
         var presentation = ProjectThreads.FirstOrDefault(thread =>
             string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
         if (presentation is not null)
         {
-            presentation.QueuedFollowUps = snapshots.Select(item => item.Clone()).ToList();
-            presentation.UpdatedAt = persisted.UpdatedAt;
+            presentation.QueuedFollowUps = snapshot.QueuedFollowUps.Select(item => item.Clone()).ToList();
+            presentation.UpdatedAt = updatedAt
+                ?? settings.ProjectThreads.FirstOrDefault(thread =>
+                    string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal))?.UpdatedAt
+                ?? presentation.UpdatedAt;
         }
-
-        await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        if (string.Equals(threadId, activeThreadId, StringComparison.Ordinal))
+        {
+            TaskWorkspace.ApplyConversationSnapshot(snapshot);
+        }
     }
 
     private async Task SaveThreadStateAndMaybeDrainAsync(
         string threadId,
-        CodexThreadService service,
         bool shouldDrain)
     {
-        await SaveThreadStateAsync(threadId, service).ConfigureAwait(true);
+        await SaveThreadStateAsync(threadId).ConfigureAwait(true);
         if (shouldDrain)
         {
             await TryDrainFollowUpQueueAsync(threadId).ConfigureAwait(true);
@@ -3239,15 +2681,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         void ApplyFailure()
         {
-            foreach (var threadId in runningThreadIds.ToArray())
+            foreach (var threadId in conversationWorkflow.SnapshotRunningThreadIds())
             {
                 UpdateThreadActivity(threadId, isRunning: false, "Recovery needed");
             }
 
-            runningThreadIds.Clear();
-            activeTurnIds.Clear();
-            loadedThreadIds.Clear();
-            activeThreadLoaded = false;
+            conversationWorkflow.ClearRuntimeState();
             executionPolicyLoaded = false;
             activeTurnId = null;
             IsTurnRunning = false;
@@ -3267,7 +2706,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private void OnAppServerNotificationReceived(object? sender, AppServerNotification notification)
+    private void OnAppServerNotificationReceived(object? sender, CodexAppServerNotification notification)
     {
         DispatchAppServerNotification(notification);
     }
@@ -3329,7 +2768,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private void DispatchAppServerNotification(AppServerNotification notification)
+    private void DispatchAppServerNotification(CodexAppServerNotification notification)
     {
         if (synchronizationContext is null || ReferenceEquals(SynchronizationContext.Current, synchronizationContext))
         {
@@ -3340,14 +2779,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         synchronizationContext.Post(_ => ApplyNotification(notification), null);
     }
 
-    private void ApplyNotification(AppServerNotification notification)
+    private void ApplyNotification(CodexAppServerNotification notification)
     {
-        if (notification.Method == "skills/changed")
+        if (notification.Kind == CodexAppServerNotificationKind.SkillsChanged)
         {
             return;
         }
 
-        if (notification.Method == "serverRequest/resolved" && TryReadRequestId(notification.Params, out var requestId))
+        if (notification.Kind == CodexAppServerNotificationKind.ServerRequestResolved && notification.RequestId is { } requestId)
         {
             if (ApprovalQueue.Resolve(requestId))
             {
@@ -3360,45 +2799,31 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         if (Account.TryApplyNotification(notification))
         {
-            if (notification.Method is "account/updated" or "account/login/completed")
+            if (notification.Kind is CodexAppServerNotificationKind.AccountUpdated or CodexAppServerNotificationKind.AccountLoginCompleted)
             {
                 TaskWorkspace.InvalidateModelCatalog();
             }
             return;
         }
 
-        var routedThreadId = threadWorkspace.ApplyNotification(notification);
-        if (string.IsNullOrWhiteSpace(routedThreadId))
-        {
-            threadService.ApplyNotification(notification);
-            routedThreadId = activeThreadId;
-        }
-
-        var routedService = !string.IsNullOrWhiteSpace(routedThreadId) && threadWorkspace.ThreadIds.Contains(routedThreadId)
-            ? threadWorkspace.GetRequired(routedThreadId)
-            : threadService;
-        if (!string.IsNullOrWhiteSpace(routedThreadId) && !string.IsNullOrWhiteSpace(routedService.ActiveTurnId))
-        {
-            activeTurnIds[routedThreadId] = routedService.ActiveTurnId;
-            threadWorkspace.RegisterTurn(routedThreadId, routedService.ActiveTurnId);
-        }
+        var routed = conversationWorkflow.ApplyThreadNotification(notification);
+        var routedThreadId = routed.ThreadId;
+        var routedSnapshot = routed.Snapshot;
 
         if (string.Equals(routedThreadId, activeThreadId, StringComparison.Ordinal))
         {
-            threadService = routedService;
-            activeTurnId = routedService.ActiveTurnId ?? activeTurnId;
+            TaskWorkspace.ApplyConversationSnapshot(routedSnapshot);
+            activeTurnId = routedSnapshot.ActiveTurnId ?? activeTurnId;
         }
 
-        if (notification.Method == "turn/completed")
+        if (routed.IsTurnCompleted)
         {
             if (!string.IsNullOrWhiteSpace(routedThreadId))
             {
-                runningThreadIds.Remove(routedThreadId);
-                activeTurnIds.Remove(routedThreadId);
                 UpdateThreadActivity(
                     routedThreadId,
                     isRunning: false,
-                    routedService.ActiveTurnStatus.ToString());
+                    routedSnapshot.ActiveTurnStatus.ToString());
             }
 
             if (string.Equals(routedThreadId, activeThreadId, StringComparison.Ordinal))
@@ -3407,7 +2832,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 activeTurnId = null;
             }
 
-            if (routedService.ActiveTurnStatus == CodexTurnStatus.Completed)
+            if (routedSnapshot.ActiveTurnStatus == CodexTurnStatus.Completed)
             {
                 if (string.Equals(routedThreadId, activeThreadId, StringComparison.Ordinal))
                 {
@@ -3415,60 +2840,37 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                     StatusMessage = "Codex turn completed";
                 }
             }
-            else if (routedService.RequiresAuthentication)
+            else if (routedSnapshot.RequiresAuthentication)
             {
                 StatusMessage = "Codex authentication failed. Sign in and retry.";
             }
             else
             {
-                StatusMessage = $"Codex turn {routedService.ActiveTurnStatus.ToString().ToLowerInvariant()}";
+                StatusMessage = $"Codex turn {routedSnapshot.ActiveTurnStatus.ToString().ToLowerInvariant()}";
             }
 
             if (!string.IsNullOrWhiteSpace(routedThreadId))
             {
                 _ = SaveThreadStateAndMaybeDrainAsync(
                     routedThreadId,
-                    routedService,
-                    routedService.ActiveTurnStatus == CodexTurnStatus.Completed);
+                    routedSnapshot.ActiveTurnStatus == CodexTurnStatus.Completed);
             }
             _ = Git.RefreshAsync();
         }
 
         if (!string.IsNullOrWhiteSpace(routedThreadId) &&
-            notification.Method is "thread/archived" or "thread/unarchived" &&
+            notification.IsArchived is not null &&
             settings.ProjectThreads.Any(thread => string.Equals(thread.ThreadId, routedThreadId, StringComparison.Ordinal)))
         {
-            threadStore.SetArchived(
+            conversationWorkflow.SetThreadArchived(
                 settings,
                 routedThreadId,
-                archived: notification.Method == "thread/archived");
+                archived: notification.IsArchived.Value);
         }
 
         TaskWorkspace.NotifyResponseChanged();
         OnPropertyChanged(nameof(FinalResponse));
         RaiseThreadCommandStates();
-    }
-
-    private static bool TryReadRequestId(System.Text.Json.Nodes.JsonObject parameters, out CodexRequestId requestId)
-    {
-        var node = parameters["requestId"] ?? parameters["id"];
-        if (node is System.Text.Json.Nodes.JsonValue value)
-        {
-            if (value.TryGetValue<long>(out var integerId))
-            {
-                requestId = CodexRequestId.FromInteger(integerId);
-                return true;
-            }
-
-            if (value.TryGetValue<string>(out var stringId) && !string.IsNullOrEmpty(stringId))
-            {
-                requestId = CodexRequestId.FromString(stringId);
-                return true;
-            }
-        }
-
-        requestId = default;
-        return false;
     }
 
     private void UpdateThreadActivity(string threadId, bool isRunning, string status)
@@ -3494,39 +2896,24 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private async Task SaveThreadStateAsync(string threadId, CodexThreadService service)
+    private async Task SaveThreadStateAsync(string threadId)
     {
-        var persisted = settings.ProjectThreads.FirstOrDefault(thread =>
-            string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
-        if (persisted is null)
-        {
-            return;
-        }
-
-        persisted.FinalResponse = service.FinalResponse;
-        persisted.TimelineItems = [.. service.TimelineItems.TakeLast(100)];
-        persisted.RawEvents = [.. service.RawEvents.TakeLast(100)];
-        persisted.ConversationTurns = service.SnapshotConversation().Select(CloneConversationTurn).ToList();
-        persisted.ContextTokensUsed = service.ContextTokensUsed;
-        persisted.ContextWindowTokens = service.ContextWindowTokens;
-        persisted.ContextCompactionCount = service.ContextCompactionCount;
-        persisted.UpdatedAt = DateTimeOffset.UtcNow;
-        var presentation = ProjectThreads.FirstOrDefault(thread =>
-            string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
-        if (presentation is not null)
-        {
-            presentation.FinalResponse = persisted.FinalResponse;
-            presentation.TimelineItems = [.. persisted.TimelineItems];
-            presentation.RawEvents = [.. persisted.RawEvents];
-            presentation.ConversationTurns = persisted.ConversationTurns.Select(CloneConversationTurn).ToList();
-            presentation.ContextTokensUsed = persisted.ContextTokensUsed;
-            presentation.ContextWindowTokens = persisted.ContextWindowTokens;
-            presentation.ContextCompactionCount = persisted.ContextCompactionCount;
-            presentation.UpdatedAt = persisted.UpdatedAt;
-        }
         try
         {
-            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+            var result = await threadStatePersistence.SaveAsync(settings, threadId).ConfigureAwait(true);
+            var presentation = ProjectThreads.FirstOrDefault(thread =>
+                string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
+            if (result is not null && presentation is not null && !ReferenceEquals(presentation, result.State))
+            {
+                presentation.FinalResponse = result.State.FinalResponse;
+                presentation.TimelineItems = [.. result.State.TimelineItems];
+                presentation.RawEvents = [.. result.State.RawEvents];
+                presentation.ConversationTurns = result.State.ConversationTurns.Select(CloneConversationTurn).ToList();
+                presentation.ContextTokensUsed = result.State.ContextTokensUsed;
+                presentation.ContextWindowTokens = result.State.ContextWindowTokens;
+                presentation.ContextCompactionCount = result.State.ContextCompactionCount;
+                presentation.UpdatedAt = result.UpdatedAt;
+            }
         }
         catch (Exception ex)
         {
@@ -3540,18 +2927,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         var scope = string.IsNullOrWhiteSpace(SelectedProjectPath)
             ? ThreadScopeKey.General
             : ThreadScopeKey.ForProject(SelectedProjectPath);
-        foreach (var persisted in threadStore.GetThreads(settings, scope))
+        foreach (var persisted in conversationWorkflow.GetThreads(settings, scope))
         {
             ProjectThreads.Add(persisted);
-            threadWorkspace.Restore(persisted);
-            followUpQueueWorkspace.Restore(persisted.ThreadId, persisted.QueuedFollowUps);
+            conversationWorkflow.RestoreThread(persisted);
         }
 
-        SelectedThread = threadStore.GetActive(settings, scope);
+        SelectedThread = conversationWorkflow.GetActiveThread(settings, scope);
         if (SelectedThread is null)
         {
-            threadService = new CodexThreadService();
-            threadService.Reset();
+            TaskWorkspace.ApplyConversationSnapshot(conversationWorkflow.ResetActiveConversation());
             OnPropertyChanged(nameof(TimelineItems));
             OnPropertyChanged(nameof(RawEvents));
             OnPropertyChanged(nameof(FinalResponse));
@@ -3562,7 +2947,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private ProjectThreadState? FindProjectThreadState()
     {
-        return SelectedThread ?? threadStore.GetActive(settings, GetCurrentScope());
+        return SelectedThread ?? conversationWorkflow.GetActiveThread(settings, GetCurrentScope());
     }
 
     private void RefreshProjectThreads(
@@ -3575,7 +2960,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             selectedThreadId ??= SelectedThread?.ThreadId;
         }
         ProjectThreads.Clear();
-        foreach (var thread in threadStore.GetThreads(settings, scope))
+        foreach (var thread in conversationWorkflow.GetThreads(settings, scope))
         {
             ProjectThreads.Add(thread);
         }
@@ -3631,28 +3016,25 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             SteeringText = string.Empty;
         }
 
-        activeThreadLoaded = state is not null && loadedThreadIds.Contains(state.ThreadId);
-        activeTurnId = state is not null && activeTurnIds.TryGetValue(state.ThreadId, out var turnId) ? turnId : null;
+        activeThreadLoaded = state is not null && conversationWorkflow.IsLoaded(state.ThreadId);
+        activeTurnId = state is not null && conversationWorkflow.TryGetActiveTurn(state.ThreadId, out var turnId) ? turnId : null;
         TaskWorkspace.SubmittedPrompt = state?.Preview ?? string.Empty;
-        IsTurnRunning = state is not null && runningThreadIds.Contains(state.ThreadId);
+        IsTurnRunning = state is not null && conversationWorkflow.IsRunning(state.ThreadId);
 
         if (state is null)
         {
-            threadService = new CodexThreadService();
-            threadService.Reset();
-            TaskWorkspace.UseFollowUpQueue(new CodexFollowUpQueue());
+            TaskWorkspace.ApplyConversationSnapshot(conversationWorkflow.ResetActiveConversation());
         }
         else
         {
-            threadService = threadWorkspace.ThreadIds.Contains(state.ThreadId)
-                ? threadWorkspace.GetRequired(state.ThreadId)
-                : threadWorkspace.Restore(state);
-            TaskWorkspace.UseFollowUpQueue(followUpQueueWorkspace.ThreadIds.Contains(state.ThreadId)
-                ? followUpQueueWorkspace.GetRequired(state.ThreadId)
-                : followUpQueueWorkspace.Restore(state.ThreadId, state.QueuedFollowUps));
+            if (!conversationWorkflow.HasThread(state.ThreadId))
+            {
+                conversationWorkflow.RestoreThread(state);
+            }
+            TaskWorkspace.ApplyConversationSnapshot(conversationWorkflow.GetSnapshot(state.ThreadId));
             if (!state.IsArchived)
             {
-                threadStore.SetActive(settings, state.ScopeKey, state.ThreadId);
+                conversationWorkflow.SetActiveThread(settings, state.ScopeKey, state.ThreadId);
             }
         }
 
@@ -3686,35 +3068,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            var persisted = FindProjectThreadState();
-            if (persisted is null)
-            {
-                var scope = GetCurrentScope();
-                persisted = new ProjectThreadState
-                {
-                    ScopeKind = scope.Kind,
-                    ProjectPath = scope.ProjectPath ?? string.Empty,
-                    ThreadId = activeThreadId,
-                    Title = $"Thread {ProjectThreads.Count + 1}",
-                    IsTitlePlaceholder = true,
-                    Mode = scope.Kind == ThreadScopeKind.General ? "general" : "local",
-                    WorkspacePath = GetActiveWorkspacePath()
-                };
-                threadStore.Upsert(settings, persisted);
-            }
-
-            persisted.ThreadId = activeThreadId;
-            persisted.FinalResponse = threadService.FinalResponse;
-            persisted.TimelineItems = [.. threadService.TimelineItems.TakeLast(100)];
-            persisted.RawEvents = [.. threadService.RawEvents.TakeLast(100)];
-            persisted.ConversationTurns = threadService.SnapshotConversation().Select(CloneConversationTurn).ToList();
-            persisted.ContextTokensUsed = threadService.ContextTokensUsed;
-            persisted.ContextWindowTokens = threadService.ContextWindowTokens;
-            persisted.ContextCompactionCount = threadService.ContextCompactionCount;
-            persisted.UpdatedAt = DateTimeOffset.UtcNow;
-            threadStore.Upsert(settings, persisted);
-
-            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+            await threadStatePersistence.SaveActiveAsync(
+                settings,
+                FindProjectThreadState(),
+                GetCurrentScope(),
+                activeThreadId,
+                GetActiveWorkspacePath(),
+                $"Thread {ProjectThreads.Count + 1}",
+                cancellationToken: default).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -3733,7 +3094,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         var threads = new List<ProjectThreadState>();
         threads.AddRange(string.IsNullOrWhiteSpace(SelectedProjectPath)
             ? ProjectThreads
-            : threadStore.GetThreads(settings, ThreadScopeKey.General));
+            : conversationWorkflow.GetThreads(settings, ThreadScopeKey.General));
         foreach (var project in settings.RecentProjects)
         {
             if (ProjectNavigationItemViewModel.PathsEqual(project.Path, SelectedProjectPath))
@@ -3742,7 +3103,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             }
             else
             {
-                threads.AddRange(threadStore.GetProjectThreads(settings, project.Path));
+                threads.AddRange(conversationWorkflow.GetProjectThreads(settings, project.Path));
             }
         }
 
@@ -3976,6 +3337,70 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         CodexServiceTierSelection.Fast => "fast",
         _ => throw new ArgumentOutOfRangeException(nameof(selection), selection, "Unknown service tier selection.")
     };
+
+    // These capability adapters keep the shell from becoming the presentation
+    // workspace's service locator.  Each exposes only the commands its workspace
+    // needs; UI projection remains in MainViewModel.
+    private sealed class TurnExecutionActionAdapter(MainViewModel owner) : ITurnExecutionActions
+    {
+        public Task SubmitAsync() => owner.SubmitPromptAsync();
+        public Task CancelAsync() => owner.CancelTurnAsync();
+        public Task SteerAsync() => owner.SteerTurnAsync();
+        public bool CanCancelTurn() => owner.CanCancelTurn();
+        public bool CanSteerTurn() => owner.CanSteerTurn();
+    }
+
+    private sealed class FollowUpManagementActionAdapter(MainViewModel owner) : IFollowUpManagementActions
+    {
+        public void OpenExternalUri(Uri uri) => owner.userInteractionService.OpenExternalUri(uri);
+        public Task SendAlternateFollowUpAsync() => owner.SendAlternateFollowUpAsync();
+        public Task PersistFollowUpQueueAsync(IReadOnlyList<QueuedFollowUpSnapshot> snapshots) => owner.PersistSelectedFollowUpQueueAsync(snapshots);
+        public Task SendQueuedFollowUpAsync(string followUpId) => owner.SendQueuedFollowUpNowAsync(followUpId);
+    }
+
+    private sealed class ConversationHistoryActionAdapter(MainViewModel owner) : IConversationHistoryActions
+    {
+        public Task<bool> EditPromptAsync(CodexConversationTurn turn, string editedPrompt) => owner.EditPromptAsync(turn, editedPrompt);
+        public Task ForkConversationAsync(string turnId) => owner.ForkConversationFromTurnAsync(turnId);
+    }
+
+    private sealed class ComposerSupportActionAdapter(MainViewModel owner) : IComposerSupportActions
+    {
+        public Task LoadModelsAsync() => owner.LoadModelOptionsAsync();
+        public void ShowImagePreview(string path) => owner.userInteractionService.ShowImagePreview(path);
+        public Task<ComposerSkillLoadResult> LoadComposerSkillsAsync(CancellationToken cancellationToken) => owner.LoadComposerSkillsAsync(cancellationToken);
+    }
+
+    private sealed class ProjectNavigationActionAdapter(MainViewModel owner) : IProjectNavigationActions
+    {
+        public Task BrowseProjectAsync() => owner.BrowseProjectAsync();
+        public Task OpenRecentProjectAsync(object? parameter) => owner.OpenRecentProjectAsync(parameter);
+        public Task CreateThreadAsync() => owner.NewThreadForCurrentScopeAsync();
+        public Task CreateGeneralThreadAsync() => owner.NewGeneralThreadAsync();
+        public Task CreateProjectThreadAsync() => owner.NewProjectThreadAsync();
+        public bool CanCreateThread() => owner.CanCreateThreadInCurrentScope();
+        public bool CanCreateGeneralThread() => owner.CanCreateGeneralThread();
+        public void SelectedThreadChanged(ProjectThreadState? state) => owner.HandleSelectedThreadChanged(state);
+    }
+
+    private sealed class ThreadLifecycleActionAdapter(MainViewModel owner) : IThreadLifecycleActions
+    {
+        public Task ResumeThreadAsync() => owner.ResumeSelectedThreadAsync();
+        public Task ForkThreadAsync() => owner.ForkSelectedThreadAsync();
+        public Task ArchiveThreadAsync() => owner.ArchiveSelectedThreadAsync();
+        public Task UnarchiveThreadAsync() => owner.UnarchiveSelectedThreadAsync();
+        public Task RemoveWorktreeAsync() => owner.RemoveSelectedWorktreeAsync();
+        public bool CanUseSelectedThread() => owner.CanUseSelectedThread();
+        public bool CanArchiveSelectedThread() => owner.CanArchiveSelectedThread();
+        public bool CanUnarchiveSelectedThread() => owner.CanUnarchiveSelectedThread();
+        public bool CanRemoveSelectedWorktree() => owner.CanRemoveSelectedWorktree();
+        public Task TogglePinThreadAsync() => owner.ToggleSelectedThreadPinAsync();
+        public Task DeleteThreadAsync() => owner.DeleteSelectedThreadAsync();
+        public bool CanTogglePinThread() => owner.CanToggleSelectedThreadPin();
+        public bool CanDeleteThread() => owner.CanDeleteSelectedThread();
+        public Task RenameThreadAsync() => owner.RenameSelectedThreadAsync();
+        public bool CanRenameThread() => owner.CanRenameSelectedThread();
+    }
 
     private readonly record struct CodexInstructionSnapshot(
         string? DeveloperInstructions,

@@ -1,0 +1,18 @@
+timestamp: 2026-07-27 23:11:14
+event: subtask
+title: Inspected current extraction
+
+decision:
+Continue from the existing lifecycle, persistence, workflow, project, attachment, and action-contract extraction without reverting unrelated changes.
+
+rationale:
+The solution builds cleanly and MainViewModel is already 925 lines smaller, but it still directly orchestrates thread start/resume, turns, queues, and saves.
+
+lesson:
+Treat the large uncommitted tree as user work; only touch the use-case boundary and matching tests.
+
+working_pattern:
+Keep WPF projection in MainViewModel; move state transitions and remote/durable sequencing into application services.
+
+next_plan:
+Map remaining methods and split tests by use-case boundary.

@@ -219,7 +219,7 @@ internal static class ProjectlessThreadTests
             new FakeCodexProcessService(transport),
             logger,
             new CodexAppServerClientMetadata("projectless_tests", "Projectless Tests", "1.0.0"));
-        return new MainViewModel(
+        return WorkspaceActionStubs.CreateMainViewModel(
             settingsStore,
             new FakeCodexDiscoveryService(installation),
             coordinator,

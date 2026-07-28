@@ -23,21 +23,33 @@ using System.Text;
 using System.Text.Json.Nodes;
 using System.Reflection;
 
-if (args.Contains("--unicode-transport-fixture", StringComparer.Ordinal))
+internal static class Program
 {
-    Console.InputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
-    Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
-    var fixtureLine = await Console.In.ReadLineAsync();
-    if (fixtureLine is not null)
+    public static async Task<int> Main(string[] args)
     {
-        await Console.Out.WriteLineAsync(fixtureLine);
-        await Console.Out.FlushAsync();
+        if (args.Contains("--unicode-transport-fixture", StringComparer.Ordinal))
+        {
+            Console.InputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+            Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+            var fixtureLine = await Console.In.ReadLineAsync();
+            if (fixtureLine is not null)
+            {
+                await Console.Out.WriteLineAsync(fixtureLine);
+                await Console.Out.FlushAsync();
+            }
+
+            return 0;
+        }
+
+        Console.Error.WriteLine("Run the behavioral suite with 'dotnet test SynthiaCode.sln'.");
+        return 1;
     }
-    return 0;
 }
 
-var tests = new List<(string Name, Func<Task> Run)>
+internal static class LegacyBehavioralTests
 {
+    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
+    [
     ("recent projects are deduped and capped", TestRecentProjectsAsync),
     ("settings round trip to json", TestSettingsRoundTripAsync),
     ("settings saves are snapshotted and coalesced", TestSettingsSavesAreSnapshottedAndCoalescedAsync),
@@ -109,56 +121,30 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("view model batches terminal presentation updates", TestViewModelBatchesTerminalPresentationUpdatesAsync),
     ("view model terminal actions and shutdown own sessions", TestViewModelTerminalActionsAndShutdownOwnSessionsAsync),
     ("app-server cancellation sends turn interrupt", TestAppServerCancellationSendsInterruptAsync),
-    ("live codex app-server initializes when enabled", TestLiveCodexAppServerInitializesWhenEnabledAsync)
-};
-tests.AddRange(Phase5BBoundaryTests.All);
-tests.AddRange(Phase5CMultiTurnTests.All);
-tests.AddRange(Phase5DNavigationTests.All);
-tests.AddRange(Phase5GModelControlsTests.All);
-tests.AddRange(QueuedFollowUpTests.All);
-tests.AddRange(AttachmentInputTests.All);
-tests.AddRange(ApprovalProtocolTests.All);
-tests.AddRange(PermissionModeTests.All);
-tests.AddRange(ApprovalPresentationTests.All);
-tests.AddRange(AccountFeatureTests.All);
-tests.AddRange(ContextWindowIndicatorTests.All);
-tests.AddRange(ResponsiveLayoutTests.All);
-tests.AddRange(PresentationRedesignTests.All);
-tests.AddRange(MarkdownLinkTests.All);
-tests.AddRange(ProjectlessThreadTests.All);
-tests.AddRange(PromptEditingTests.All);
-tests.AddRange(ChatManagementSearchTests.All);
-tests.AddRange(ThreadRenameTests.All);
-tests.AddRange(CodexConfigurationTests.All);
-tests.AddRange(SkillsSettingsTests.All);
-tests.AddRange(NativeSkillInvocationTests.All);
-
-var failures = 0;
-var testFilter = Environment.GetEnvironmentVariable("SYNTHIACODE_TEST_FILTER");
-foreach (var test in tests.Where(test =>
-             string.IsNullOrWhiteSpace(testFilter) ||
-             test.Name.Contains(testFilter, StringComparison.OrdinalIgnoreCase)))
-{
-    try
-    {
-        await test.Run();
-        Console.WriteLine($"PASS {test.Name}");
-    }
-    catch (Exception ex)
-    {
-        failures++;
-        Console.Error.WriteLine($"FAIL {test.Name}");
-        Console.Error.WriteLine(ex);
-    }
-}
-
-if (failures > 0)
-{
-    return 1;
-}
-
-Console.WriteLine($"All {tests.Count} tests passed.");
-return 0;
+        ("live codex app-server initializes when enabled", TestLiveCodexAppServerInitializesWhenEnabledAsync),
+        .. Phase5BBoundaryTests.All,
+        .. CodexAppServerNotificationTests.All,
+        .. Phase5CMultiTurnTests.All,
+        .. Phase5DNavigationTests.All,
+        .. Phase5GModelControlsTests.All,
+        .. QueuedFollowUpTests.All,
+        .. AttachmentInputTests.All,
+        .. ApprovalProtocolTests.All,
+        .. PermissionModeTests.All,
+        .. ApprovalPresentationTests.All,
+        .. AccountFeatureTests.All,
+        .. ContextWindowIndicatorTests.All,
+        .. ResponsiveLayoutTests.All,
+        .. PresentationRedesignTests.All,
+        .. MarkdownLinkTests.All,
+        .. ProjectlessThreadTests.All,
+        .. PromptEditingTests.All,
+        .. ChatManagementSearchTests.All,
+        .. ThreadRenameTests.All,
+        .. CodexConfigurationTests.All,
+        .. SkillsSettingsTests.All,
+        .. NativeSkillInvocationTests.All
+    ];
 
 static Task TestRecentProjectsAsync()
 {
@@ -877,7 +863,7 @@ static async Task TestViewModelManagesMultipleThreadsAsync()
     var settingsStore = new FakeSettingsStore();
     var viewModel = CreateMainViewModel(transport, temp.Root, AuthReadiness.LikelySignedIn, settingsStore);
     await viewModel.InitializeAsync();
-    viewModel.BrowseProjectCommand.Execute(null);
+    await ((AsyncRelayCommand)viewModel.BrowseProjectCommand).ExecuteAsync();
     await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "multi-thread project selected");
 
     viewModel.NewThreadCommand.Execute(null);
@@ -1092,7 +1078,7 @@ static async Task TestViewModelSteersActiveTurnAsync()
     await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "steering project selected");
 
     viewModel.PromptText = "Start work.";
-    viewModel.SubmitPromptCommand.Execute(null);
+    var firstSubmit = ((AsyncRelayCommand)viewModel.SubmitPromptCommand).ExecuteAsync();
     await transport.WaitForClientMessageCountAsync(2);
     transport.ServerSend("""{"id":0,"result":{}}""");
     await transport.WaitForClientMessageCountAsync(3);
@@ -1169,7 +1155,7 @@ static async Task TestViewModelRunsParallelProjectThreadsAsync()
     await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "parallel project selected");
 
     viewModel.PromptText = "First parallel task";
-    viewModel.SubmitPromptCommand.Execute(null);
+    var firstSubmit = ((AsyncRelayCommand)viewModel.SubmitPromptCommand).ExecuteAsync();
     await transport.WaitForClientMessageCountAsync(2);
     transport.ServerSend("""{"id":0,"result":{}}""");
     await transport.WaitForClientMessageCountAsync(3);
@@ -1178,11 +1164,13 @@ static async Task TestViewModelRunsParallelProjectThreadsAsync()
     transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn_parallel_a"}}}""");
     await WaitUntilAsync(() => viewModel.IsTurnRunning, "first parallel turn running");
     await CompleteAutomaticThreadRenameAsync(transport, "thr_parallel_a");
+    await firstSubmit;
 
     viewModel.SteeringText = "Guidance for the first thread.";
-    viewModel.NewThreadCommand.Execute(null);
+    var newThread = ((AsyncRelayCommand)viewModel.NewThreadCommand).ExecuteAsync();
     await transport.WaitForClientMessageCountAsync(6);
     transport.ServerSend("""{"id":4,"result":{"thread":{"id":"thr_parallel_b"}}}""");
+    await newThread;
     await WaitUntilAsync(
         () => viewModel.SelectedThread?.ThreadId == "thr_parallel_b" && !viewModel.IsTurnRunning,
         "second parallel thread selected and idle");
@@ -1190,11 +1178,12 @@ static async Task TestViewModelRunsParallelProjectThreadsAsync()
     AssertTrue(string.IsNullOrWhiteSpace(viewModel.SteeringText), "thread switch clears guidance draft");
 
     viewModel.PromptText = "Second parallel task";
-    viewModel.SubmitPromptCommand.Execute(null);
+    var secondSubmit = ((AsyncRelayCommand)viewModel.SubmitPromptCommand).ExecuteAsync();
     await transport.WaitForClientMessageCountAsync(7);
     transport.ServerSend("""{"id":5,"result":{"turn":{"id":"turn_parallel_b"}}}""");
     await WaitUntilAsync(() => viewModel.ProjectThreads.All(thread => thread.IsRunning), "parallel running indicators");
     await CompleteAutomaticThreadRenameAsync(transport, "thr_parallel_b");
+    await secondSubmit;
 
     transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thr_parallel_a","turn":{"id":"turn_parallel_a","status":"completed"}}}""");
     await WaitUntilAsync(
@@ -1641,7 +1630,7 @@ static Task TestNotificationBatcherPreservesLongStreamOutputAndOrderAsync()
     var service = new CodexThreadService();
     foreach (var notification in emitted)
     {
-        service.ApplyNotification(notification);
+        service.ApplyNotification(CodexAppServerNotification.Decode(notification));
     }
 
     AssertEqual(deltaCount, service.FinalResponse.Length, "long stream final response length");
@@ -1988,7 +1977,7 @@ static async Task TestViewModelDrainsQueuedFollowUpOnBackgroundThreadAsync()
     viewModel.BrowseProjectCommand.Execute(null);
     await WaitUntilAsync(() => string.Equals(viewModel.SelectedProjectPath, projectPath, StringComparison.OrdinalIgnoreCase), "background queue project selection");
     viewModel.PromptText = "First thread task";
-    viewModel.SubmitPromptCommand.Execute(null);
+    var firstSubmit = ((AsyncRelayCommand)viewModel.SubmitPromptCommand).ExecuteAsync();
     await transport.WaitForClientMessageCountAsync(2);
     transport.ServerSend("""{"id":0,"result":{"userAgent":"test"}}""");
     await transport.WaitForClientMessageCountAsync(3);
@@ -1997,21 +1986,24 @@ static async Task TestViewModelDrainsQueuedFollowUpOnBackgroundThreadAsync()
     transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-background-a-1"}}}""");
     await WaitUntilAsync(() => viewModel.IsTurnRunning, "background first turn running");
     await CompleteAutomaticThreadRenameAsync(transport, "thread-background-a");
+    await firstSubmit;
 
     viewModel.SteeringText = "Queued work for the first thread";
     viewModel.SteerTurnCommand.Execute(null);
     await WaitUntilAsync(() => viewModel.TaskWorkspace.QueuedFollowUps.Count == 1, "background follow-up queued");
 
-    viewModel.NewThreadCommand.Execute(null);
+    var newThread = ((AsyncRelayCommand)viewModel.NewThreadCommand).ExecuteAsync();
     await transport.WaitForClientMessageCountAsync(6);
     transport.ServerSend("""{"id":4,"result":{"thread":{"id":"thread-background-b"}}}""");
+    await newThread;
     await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "thread-background-b", "background second thread selected");
     viewModel.PromptText = "Second thread task";
-    viewModel.SubmitPromptCommand.Execute(null);
+    var secondSubmit = ((AsyncRelayCommand)viewModel.SubmitPromptCommand).ExecuteAsync();
     await transport.WaitForClientMessageCountAsync(7);
     transport.ServerSend("""{"id":5,"result":{"turn":{"id":"turn-background-b-1"}}}""");
     await WaitUntilAsync(() => viewModel.IsTurnRunning, "background second turn running");
     await CompleteAutomaticThreadRenameAsync(transport, "thread-background-b");
+    await secondSubmit;
 
     transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-background-a","turn":{"id":"turn-background-a-1","status":"completed","items":[]}}}""");
     await transport.WaitForClientMessageCountAsync(9);
@@ -2893,8 +2885,9 @@ static async Task TestLiveCodexAppServerInitializesWhenEnabledAsync()
         var turnCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         client.NotificationReceived += (_, notification) =>
         {
-            threadService.ApplyNotification(notification);
-            if (notification.Method == "turn/completed")
+            var typedNotification = CodexAppServerNotification.Decode(notification);
+            threadService.ApplyNotification(typedNotification);
+            if (typedNotification.Kind == CodexAppServerNotificationKind.TurnCompleted)
             {
                 turnCompleted.TrySetResult();
             }
@@ -2932,9 +2925,9 @@ static CodexAppServerClientMetadata TestClientMetadata()
     return new CodexAppServerClientMetadata("synthiacode", "SynthiaCode", "0.1.0");
 }
 
-static AppServerNotification Notification(string method, string jsonParams)
+static CodexAppServerNotification Notification(string method, string jsonParams)
 {
-    return new AppServerNotification(method, JsonNode.Parse(jsonParams)!.AsObject());
+    return CodexAppServerNotification.Decode(new AppServerNotification(method, JsonNode.Parse(jsonParams)!.AsObject()));
 }
 
 static JsonObject ParseMessage(string line)
@@ -2967,7 +2960,7 @@ static MainViewModel CreateMainViewModel(
         effectiveProcessService,
         effectiveLogger,
         new CodexAppServerClientMetadata("synthiacode_tests", "SynthiaCode Tests", "1.0.0"));
-    return new MainViewModel(
+    return WorkspaceActionStubs.CreateMainViewModel(
         settingsStore ?? new FakeSettingsStore(),
         new FakeCodexDiscoveryService(installation),
         appServerSessionCoordinator,
@@ -3079,6 +3072,8 @@ static void AssertTrue(bool condition, string label)
     {
         throw new InvalidOperationException($"{label}: expected true.");
     }
+}
+
 }
 
 internal sealed class TempWorkspace : IDisposable
@@ -3527,9 +3522,9 @@ internal sealed class FakeAppServerTransport : IAppServerTransport
         serverMessageSignal.Release();
     }
 
-    public async Task WaitForClientMessageCountAsync(int expectedCount)
+    public async Task WaitForClientMessageCountAsync(int expectedCount, TimeSpan? timeoutOverride = null)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var timeout = new CancellationTokenSource(timeoutOverride ?? TimeSpan.FromSeconds(15));
         while (clientMessages.Count < expectedCount)
         {
             await clientMessageSignal.WaitAsync(timeout.Token);

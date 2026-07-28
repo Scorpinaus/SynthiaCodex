@@ -605,7 +605,7 @@ internal static class ResponsiveLayoutTests
         Assert(operation.Status == DispatcherOperationStatus.Completed && invoked, "deferred window close runs on the dispatcher");
     }
 
-    private static ProjectThreadViewModel CreateProjectViewModel() => new(
+    private static ProjectThreadViewModel CreateProjectViewModel() => WorkspaceActionStubs.CreateProjectThreadViewModel(WorkspaceActionStubs.Project(
         () => Task.CompletedTask,
         _ => Task.CompletedTask,
         () => Task.CompletedTask,
@@ -622,7 +622,7 @@ internal static class ResponsiveLayoutTests
         () => true,
         () => true,
         () => true,
-        _ => { });
+        _ => { }));
 
     private static void PumpLayout(FrameworkElement element)
     {

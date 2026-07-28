@@ -534,9 +534,9 @@ public sealed class SkillsViewModel : ObservableObject, IAsyncDisposable
             : activeContextLabel();
     }
 
-    private void OnNotificationReceived(object? sender, AppServerNotification notification)
+    private void OnNotificationReceived(object? sender, CodexAppServerNotification notification)
     {
-        if (!notification.Method.Equals("skills/changed", StringComparison.Ordinal))
+        if (notification.Kind != CodexAppServerNotificationKind.SkillsChanged)
         {
             return;
         }

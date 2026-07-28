@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows.Input;
+using SynthiaCode.App.Services;
 using SynthiaCode.Core.Projects;
 using SynthiaCode.Core.Settings;
 
@@ -8,9 +9,9 @@ namespace SynthiaCode.App.ViewModels;
 
 public sealed class ProjectThreadViewModel : ObservableObject
 {
-    private readonly Action<ProjectThreadState?> selectionChanged;
+    private readonly IProjectNavigationActions navigationActions;
+    private readonly IThreadLifecycleActions lifecycleActions;
     private readonly IReadOnlyList<AsyncRelayCommand> statefulCommands;
-    private readonly Func<object?, Task> openRecentProject;
     private readonly List<ProjectThreadState> navigationThreads = [];
     private string? selectedProjectPath;
     private string? generalWorkspacePath;
@@ -21,32 +22,11 @@ public sealed class ProjectThreadViewModel : ObservableObject
     private ProjectThreadState? selectedThread;
 
     public ProjectThreadViewModel(
-        Func<Task> browseProject,
-        Func<object?, Task> openRecentProject,
-        Func<Task> createThread,
-        Func<Task> createGeneralThread,
-        Func<Task> createProjectThread,
-        Func<Task> resumeThread,
-        Func<Task> forkThread,
-        Func<Task> archiveThread,
-        Func<Task> unarchiveThread,
-        Func<Task> removeWorktree,
-        Func<bool> canCreateThread,
-        Func<bool> canCreateGeneralThread,
-        Func<bool> canUseSelectedThread,
-        Func<bool> canArchiveSelectedThread,
-        Func<bool> canUnarchiveSelectedThread,
-        Func<bool> canRemoveWorktree,
-        Action<ProjectThreadState?> selectionChanged,
-        Func<Task>? togglePinThread = null,
-        Func<Task>? deleteThread = null,
-        Func<bool>? canTogglePinThread = null,
-        Func<bool>? canDeleteThread = null,
-        Func<Task>? renameThread = null,
-        Func<bool>? canRenameThread = null)
+        IProjectNavigationActions navigationActions,
+        IThreadLifecycleActions lifecycleActions)
     {
-        this.selectionChanged = selectionChanged;
-        this.openRecentProject = openRecentProject;
+        this.navigationActions = navigationActions;
+        this.lifecycleActions = lifecycleActions;
         ToggleChatsCommand = new RelayCommand(() => IsChatsExpanded = !IsChatsExpanded);
         ToggleProjectsCommand = new RelayCommand(() => IsProjectsExpanded = !IsProjectsExpanded);
         ToggleProjectExpansionCommand = new RelayCommand(parameter =>
@@ -64,7 +44,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
         });
         ClearChatSearchCommand = new RelayCommand(() => ChatSearchText = string.Empty);
         OpenChatSearchResultCommand = new AsyncRelayCommand(OpenChatSearchResultAsync);
-        BrowseProjectCommand = new AsyncRelayCommand(browseProject);
+        BrowseProjectCommand = new AsyncRelayCommand(navigationActions.BrowseProjectAsync);
         OpenRecentProjectCommand = new AsyncRelayCommand(async parameter =>
         {
             if (parameter is not string path || string.IsNullOrWhiteSpace(path))
@@ -82,29 +62,29 @@ public sealed class ProjectThreadViewModel : ObservableObject
                 return;
             }
 
-            await openRecentProject(parameter).ConfigureAwait(true);
+            await navigationActions.OpenRecentProjectAsync(parameter).ConfigureAwait(true);
             SynchronizeProjectSelection(expandSelected: true);
         });
-        NewThreadCommand = new AsyncRelayCommand(createThread, canCreateThread);
-        NewGeneralThreadCommand = new AsyncRelayCommand(createGeneralThread, canCreateGeneralThread);
+        NewThreadCommand = new AsyncRelayCommand(navigationActions.CreateThreadAsync, navigationActions.CanCreateThread);
+        NewGeneralThreadCommand = new AsyncRelayCommand(navigationActions.CreateGeneralThreadAsync, navigationActions.CanCreateGeneralThread);
         NewThreadForProjectCommand = new AsyncRelayCommand(parameter =>
-            CreateThreadForProjectAsync(parameter, "Current checkout", openRecentProject, createProjectThread));
+            CreateThreadForProjectAsync(parameter, "Current checkout", navigationActions));
         NewWorktreeThreadForProjectCommand = new AsyncRelayCommand(parameter =>
-            CreateThreadForProjectAsync(parameter, "New worktree", openRecentProject, createProjectThread));
-        ResumeThreadCommand = new AsyncRelayCommand(resumeThread, canUseSelectedThread);
-        ForkThreadCommand = new AsyncRelayCommand(forkThread, canUseSelectedThread);
-        ArchiveThreadCommand = new AsyncRelayCommand(archiveThread, canArchiveSelectedThread);
-        UnarchiveThreadCommand = new AsyncRelayCommand(unarchiveThread, canUnarchiveSelectedThread);
-        RemoveWorktreeCommand = new AsyncRelayCommand(removeWorktree, canRemoveWorktree);
+            CreateThreadForProjectAsync(parameter, "New worktree", navigationActions));
+        ResumeThreadCommand = new AsyncRelayCommand(lifecycleActions.ResumeThreadAsync, lifecycleActions.CanUseSelectedThread);
+        ForkThreadCommand = new AsyncRelayCommand(lifecycleActions.ForkThreadAsync, lifecycleActions.CanUseSelectedThread);
+        ArchiveThreadCommand = new AsyncRelayCommand(lifecycleActions.ArchiveThreadAsync, lifecycleActions.CanArchiveSelectedThread);
+        UnarchiveThreadCommand = new AsyncRelayCommand(lifecycleActions.UnarchiveThreadAsync, lifecycleActions.CanUnarchiveSelectedThread);
+        RemoveWorktreeCommand = new AsyncRelayCommand(lifecycleActions.RemoveWorktreeAsync, lifecycleActions.CanRemoveSelectedWorktree);
         TogglePinThreadCommand = new AsyncRelayCommand(
-            togglePinThread ?? (() => Task.CompletedTask),
-            canTogglePinThread ?? (() => false));
+            lifecycleActions.TogglePinThreadAsync,
+            lifecycleActions.CanTogglePinThread);
         DeleteThreadCommand = new AsyncRelayCommand(
-            deleteThread ?? (() => Task.CompletedTask),
-            canDeleteThread ?? (() => false));
+            lifecycleActions.DeleteThreadAsync,
+            lifecycleActions.CanDeleteThread);
         RenameThreadCommand = new AsyncRelayCommand(
-            renameThread ?? (() => Task.CompletedTask),
-            canRenameThread ?? (() => false));
+            lifecycleActions.RenameThreadAsync,
+            lifecycleActions.CanRenameThread);
         statefulCommands =
         [
             (AsyncRelayCommand)NewThreadCommand,
@@ -252,7 +232,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
                 OnPropertyChanged(nameof(SelectedGeneralThread));
                 OnPropertyChanged(nameof(PinActionLabel));
                 RaiseCommandStates();
-                selectionChanged(value);
+                navigationActions.SelectedThreadChanged(value);
             }
         }
     }
@@ -383,8 +363,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
     private async Task CreateThreadForProjectAsync(
         object? parameter,
         string workspaceMode,
-        Func<object?, Task> openRecentProject,
-        Func<Task> createThread)
+        IProjectNavigationActions navigationActions)
     {
         if (parameter is not string path || string.IsNullOrWhiteSpace(path))
         {
@@ -393,7 +372,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
 
         if (!ProjectNavigationItemViewModel.PathsEqual(SelectedProjectPath, path))
         {
-            await openRecentProject(path).ConfigureAwait(true);
+            await navigationActions.OpenRecentProjectAsync(path).ConfigureAwait(true);
         }
 
         if (!ProjectNavigationItemViewModel.PathsEqual(SelectedProjectPath, path))
@@ -402,7 +381,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
         }
 
         NewThreadWorkspaceMode = workspaceMode;
-        await createThread().ConfigureAwait(true);
+        await navigationActions.CreateProjectThreadAsync().ConfigureAwait(true);
     }
 
     private void RefreshChatSearch()
@@ -447,7 +426,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
         {
             if (!ProjectNavigationItemViewModel.PathsEqual(SelectedProjectPath, thread.ProjectPath))
             {
-                await openRecentProject(thread.ProjectPath).ConfigureAwait(true);
+                await navigationActions.OpenRecentProjectAsync(thread.ProjectPath).ConfigureAwait(true);
             }
 
             SelectedThread = Threads.FirstOrDefault(candidate =>

@@ -1,0 +1,24 @@
+name: Windows CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore SynthiaCode.sln
+
+      - name: Test
+        run: dotnet test SynthiaCode.sln --configuration Release --no-restore --settings SynthiaCode.runsettings --logger "console;verbosity=normal"

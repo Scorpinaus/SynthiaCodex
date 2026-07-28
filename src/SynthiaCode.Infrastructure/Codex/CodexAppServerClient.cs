@@ -1066,7 +1066,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
 
         var parameters = message["params"] as JsonObject ?? new JsonObject();
-        if (method == "serverRequest/resolved" &&
+        if (method == CodexAppServerNotificationMethods.ServerRequestResolved &&
             TryReadRequestId(parameters["requestId"] ?? parameters["id"], out var resolvedRequestId))
         {
             lock (gate)

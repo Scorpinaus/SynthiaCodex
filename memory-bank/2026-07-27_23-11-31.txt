@@ -1,0 +1,18 @@
+timestamp: 2026-07-27 23:11:31
+event: subtask
+title: Mapped remaining use cases
+
+decision:
+Add explicit turn-execution and follow-up-queue services, extend lifecycle start/resume boundaries, and inject persistence directly rather than growing MainViewModel or its action adapters.
+
+rationale:
+MainViewModel still owns remote and durable sequencing in SubmitPromptAsync, EditPromptAsync, EnsureActiveThreadAsync, queue drain, and save methods; ConversationWorkflowController tests currently mix four boundaries.
+
+lesson:
+The current baseline builds but 12 of 238 tests fail because first-turn automatic rename is no longer emitted, so preserving behavior must be proven while extracting.
+
+working_pattern:
+Use immutable request/result records; services mutate runtime and durable state, MainViewModel only validates UI inputs and projects results.
+
+next_plan:
+Implement lifecycle and turn service boundaries first, then queue/persistence and split direct service tests.

@@ -165,7 +165,7 @@ internal static class ChatManagementSearchTests
             new FakeCodexProcessService(transport),
             logger,
             new CodexAppServerClientMetadata("chat_management_tests", "Chat Management Tests", "1.0.0"));
-        var viewModel = new MainViewModel(
+        var viewModel = WorkspaceActionStubs.CreateMainViewModel(
             settingsStore,
             new FakeCodexDiscoveryService(new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation")),
             coordinator,
@@ -214,14 +214,14 @@ internal static class ChatManagementSearchTests
                 Snapshot("turn-one", "Needle in the prompt.", "A needle in the answer."),
                 Snapshot("turn-two", "No match here.", "Second needle.")
             ]);
-        var viewModel = new TaskViewModel(
+        var viewModel = WorkspaceActionStubs.CreateTaskViewModel(WorkspaceActionStubs.Task(
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => false,
-            () => false);
-        viewModel.UseThreadService(service);
+            () => false));
+        viewModel.ApplyConversationSnapshot(WorkspaceActionStubs.Snapshot(service));
 
         viewModel.OpenFindInChatCommand.Execute(null);
         viewModel.FindInChatText = "needle";
@@ -230,8 +230,8 @@ internal static class ChatManagementSearchTests
         Assert(viewModel.FindInChatMatchCount == 3, "find counts every user and assistant match");
         Assert(viewModel.CurrentFindInChatMatchNumber == 1, "find selects the first match");
         Assert(viewModel.CurrentFindInChatTurn?.TurnId == "turn-one", "first match points to the first turn");
-        Assert(service.ConversationTurns[0].IsCurrentFindMatch, "current turn is marked for transcript highlighting");
-        Assert(service.ConversationTurns[1].IsFindMatch, "other matching turns are marked");
+        Assert(viewModel.ConversationTurns[0].IsCurrentFindMatch, "current turn is marked for transcript highlighting");
+        Assert(viewModel.ConversationTurns[1].IsFindMatch, "other matching turns are marked");
 
         viewModel.FindNextCommand.Execute(null);
         Assert(viewModel.CurrentFindInChatMatchNumber == 2, "next advances one occurrence");
@@ -253,7 +253,7 @@ internal static class ChatManagementSearchTests
     private static ProjectThreadViewModel CreateNavigationViewModel(
         Func<object?, Task>? openProject = null,
         Func<Task>? togglePinThread = null,
-        Func<Task>? deleteThread = null) => new(
+        Func<Task>? deleteThread = null) => WorkspaceActionStubs.CreateProjectThreadViewModel(WorkspaceActionStubs.Project(
         () => Task.CompletedTask,
         openProject ?? (_ => Task.CompletedTask),
         () => Task.CompletedTask,
@@ -274,7 +274,7 @@ internal static class ChatManagementSearchTests
         togglePinThread,
         deleteThread,
         () => true,
-        () => true);
+        () => true));
 
     private static PersistedProjectThread PersistedThread(string id, string title, DateTimeOffset updatedAt) => new()
     {

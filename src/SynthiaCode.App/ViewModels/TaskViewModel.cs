@@ -39,8 +39,11 @@ public sealed class TaskViewModel : ObservableObject
     private readonly RelayCommand findNextCommand;
     private readonly RelayCommand findPreviousCommand;
     private readonly List<CodexConversationTurn> findMatches = [];
-    private CodexThreadService threadService = new();
+    private ConversationWorkspaceSnapshot conversation = ConversationWorkspaceSnapshot.Empty;
     private CodexFollowUpQueue followUpQueue = new();
+    private readonly ObservableCollection<CodexTimelineItem> timelineItems = [];
+    private readonly ObservableCollection<CodexConversationTurn> conversationTurns = [];
+    private readonly ObservableCollection<string> rawEvents = [];
     private string prompt = string.Empty;
     private string submittedPrompt = string.Empty;
     private string modelOverride = string.Empty;
@@ -63,23 +66,13 @@ public sealed class TaskViewModel : ObservableObject
     private int currentFindMatchIndex = -1;
 
     public TaskViewModel(
-        Func<Task> submit,
-        Func<Task> cancel,
-        Func<Task> loadModels,
-        Func<Task> steer,
-        Func<bool> canCancel,
-        Func<bool> canSteer,
-        Action<Uri>? openExternalUri = null,
-        Func<Task>? alternateFollowUp = null,
-        Func<Task>? persistFollowUpQueue = null,
-        Func<QueuedFollowUp, Task>? sendQueuedFollowUp = null,
-        Func<CodexConversationTurn, string, Task<bool>>? editPrompt = null,
-        Action<string>? showLocalImage = null,
-        Func<CodexConversationTurn, Task>? forkConversation = null,
-        Func<CancellationToken, Task<ComposerSkillLoadResult>>? loadComposerSkills = null)
+        ITurnExecutionActions turnActions,
+        IFollowUpManagementActions followUpActions,
+        IConversationHistoryActions historyActions,
+        IComposerSupportActions composerActions)
     {
         SkillSelector = new ComposerSkillSelectorViewModel(
-            loadComposerSkills,
+            composerActions.LoadComposerSkillsAsync,
             () => IsTurnRunning ? SteeringText : Prompt,
             value =>
             {
@@ -92,15 +85,15 @@ public sealed class TaskViewModel : ObservableObject
                     Prompt = value;
                 }
             });
-        SubmitCommand = submitCommand = new AsyncRelayCommand(submit);
+        SubmitCommand = submitCommand = new AsyncRelayCommand(turnActions.SubmitAsync);
         ComposerSendCommand = composerSendCommand = new AsyncRelayCommand(
-            () => IsTurnRunning ? steer() : submit());
-        CancelCommand = cancelCommand = new AsyncRelayCommand(cancel, canCancel);
-        LoadModelsCommand = loadModelsCommand = new AsyncRelayCommand(loadModels);
-        SteerCommand = steerCommand = new AsyncRelayCommand(steer, canSteer);
+            () => IsTurnRunning ? turnActions.SteerAsync() : turnActions.SubmitAsync());
+        CancelCommand = cancelCommand = new AsyncRelayCommand(turnActions.CancelAsync, turnActions.CanCancelTurn);
+        LoadModelsCommand = loadModelsCommand = new AsyncRelayCommand(composerActions.LoadModelsAsync);
+        SteerCommand = steerCommand = new AsyncRelayCommand(turnActions.SteerAsync, turnActions.CanSteerTurn);
         AlternateFollowUpCommand = alternateFollowUpCommand = new AsyncRelayCommand(
-            alternateFollowUp ?? (() => Task.CompletedTask),
-            canSteer);
+            followUpActions.SendAlternateFollowUpAsync,
+            turnActions.CanSteerTurn);
         beginPromptEditCommand = new RelayCommand(
             parameter =>
             {
@@ -133,12 +126,12 @@ public sealed class TaskViewModel : ObservableObject
         submitPromptEditCommand = new AsyncRelayCommand(
             async parameter =>
             {
-                if (parameter is not CodexConversationTurn turn || editPrompt is null || !turn.CanSubmitPromptEdit)
+                if (parameter is not CodexConversationTurn turn || !turn.CanSubmitPromptEdit)
                 {
                     return;
                 }
 
-                var submitted = await editPrompt(turn, turn.EditedPrompt.Trim()).ConfigureAwait(true);
+                var submitted = await historyActions.EditPromptAsync(turn, turn.EditedPrompt.Trim()).ConfigureAwait(true);
                 if (submitted)
                 {
                     turn.CancelPromptEdit();
@@ -146,15 +139,13 @@ public sealed class TaskViewModel : ObservableObject
                 RaisePromptEditCommandStates();
             },
             parameter => parameter is CodexConversationTurn turn &&
-                editPrompt is not null &&
                 !IsTurnRunning &&
                 turn.IsPromptEditing);
         ForkConversationCommand = forkConversationCommand = new AsyncRelayCommand(
-            parameter => parameter is CodexConversationTurn turn && forkConversation is not null
-                ? forkConversation(turn)
+            parameter => parameter is CodexConversationTurn turn
+                ? historyActions.ForkConversationAsync(turn.TurnId)
                 : Task.CompletedTask,
             parameter => parameter is CodexConversationTurn turn &&
-                forkConversation is not null &&
                 !IsTurnRunning &&
                 turn.HasAssistantResponse &&
                 turn.CanEditPrompt);
@@ -187,30 +178,30 @@ public sealed class TaskViewModel : ObservableObject
             parameter => PersistQueuedMutationAsync(
                 parameter,
                 item => followUpQueue.CommitEdit(item.Id),
-                persistFollowUpQueue),
+                () => followUpActions.PersistFollowUpQueueAsync(followUpQueue.Snapshot())),
             parameter => parameter is QueuedFollowUp { IsEditing: true, IsStarting: false });
         moveQueuedFollowUpUpCommand = new AsyncRelayCommand(
             parameter => PersistQueuedMutationAsync(
                 parameter,
                 item => followUpQueue.MoveUp(item.Id),
-                persistFollowUpQueue),
+                () => followUpActions.PersistFollowUpQueueAsync(followUpQueue.Snapshot())),
             parameter => parameter is QueuedFollowUp item && item.IsPending && followUpQueue.IndexOf(item.Id) > 0);
         moveQueuedFollowUpDownCommand = new AsyncRelayCommand(
             parameter => PersistQueuedMutationAsync(
                 parameter,
                 item => followUpQueue.MoveDown(item.Id),
-                persistFollowUpQueue),
+                () => followUpActions.PersistFollowUpQueueAsync(followUpQueue.Snapshot())),
             parameter => parameter is QueuedFollowUp item && item.IsPending &&
                 followUpQueue.IndexOf(item.Id) >= 0 && followUpQueue.IndexOf(item.Id) < followUpQueue.Items.Count - 1);
         deleteQueuedFollowUpCommand = new AsyncRelayCommand(
             parameter => PersistQueuedMutationAsync(
                 parameter,
                 item => followUpQueue.Remove(item.Id),
-                persistFollowUpQueue),
+                () => followUpActions.PersistFollowUpQueueAsync(followUpQueue.Snapshot())),
             parameter => parameter is QueuedFollowUp { IsStarting: false });
         sendQueuedFollowUpCommand = new AsyncRelayCommand(
-            parameter => parameter is QueuedFollowUp item && sendQueuedFollowUp is not null
-                ? sendQueuedFollowUp(item)
+            parameter => parameter is QueuedFollowUp item
+                ? followUpActions.SendQueuedFollowUpAsync(item.Id)
                 : Task.CompletedTask,
             parameter => parameter is QueuedFollowUp { IsStarting: false });
         OpenExternalUriCommand = openExternalUriCommand = new RelayCommand(
@@ -218,18 +209,17 @@ public sealed class TaskViewModel : ObservableObject
             {
                 if (parameter is Uri uri && ExternalUriPolicy.IsSupported(uri))
                 {
-                    (openExternalUri ?? (_ => { }))(uri);
+                    followUpActions.OpenExternalUri(uri);
                 }
                 else if (parameter is Uri localUri &&
-                         showLocalImage is not null &&
                          LocalImageResourcePolicy.IsSupported(localUri, out var imagePath))
                 {
-                    showLocalImage(imagePath);
+                    composerActions.ShowImagePreview(imagePath);
                 }
             },
             parameter => parameter is Uri uri &&
                 (ExternalUriPolicy.IsSupported(uri) ||
-                 (showLocalImage is not null && LocalImageResourcePolicy.IsSupported(uri, out _))));
+                 LocalImageResourcePolicy.IsSupported(uri, out _)));
         OpenOptionsCommand = openOptionsCommand = new RelayCommand(
             () =>
             {
@@ -260,11 +250,11 @@ public sealed class TaskViewModel : ObservableObject
             () => findMatches.Count > 0);
     }
 
-    public ObservableCollection<CodexTimelineItem> TimelineItems => threadService.TimelineItems;
+    public ObservableCollection<CodexTimelineItem> TimelineItems => timelineItems;
 
-    public ObservableCollection<CodexConversationTurn> ConversationTurns => threadService.ConversationTurns;
+    public ObservableCollection<CodexConversationTurn> ConversationTurns => conversationTurns;
 
-    public ObservableCollection<string> RawEvents => threadService.RawEvents;
+    public ObservableCollection<string> RawEvents => rawEvents;
 
     public ObservableCollection<QueuedFollowUp> QueuedFollowUps => followUpQueue.Items;
 
@@ -312,8 +302,6 @@ public sealed class TaskViewModel : ObservableObject
     public ICommand CloseFindInChatCommand { get; }
     public ICommand FindNextCommand { get; }
     public ICommand FindPreviousCommand { get; }
-
-    public CodexThreadService ThreadService => threadService;
 
     public bool HasAttachments => Attachments.Count > 0;
 
@@ -621,26 +609,29 @@ public sealed class TaskViewModel : ObservableObject
     }
 
     public string FinalResponse =>
-        string.IsNullOrWhiteSpace(threadService.FinalResponse)
+        string.IsNullOrWhiteSpace(conversation.FinalResponse)
             ? "No final response yet"
-            : threadService.FinalResponse;
+            : conversation.FinalResponse;
 
-    public string ContextWindowIndicator => threadService.HasContextWindowUsage
-        ? $"{threadService.ContextUsedPercent}%"
+    private int ContextUsedPercent => conversation.ContextWindowTokens <= 0 ? 0 : Math.Clamp(
+        (int)Math.Round(conversation.ContextTokensUsed * 100d / conversation.ContextWindowTokens, MidpointRounding.AwayFromZero), 0, 100);
+
+    public string ContextWindowIndicator => conversation.ContextWindowTokens > 0
+        ? $"{ContextUsedPercent}%"
         : "—%";
 
-    public string ContextWindowToolTip => threadService.HasContextWindowUsage
+    public string ContextWindowToolTip => conversation.ContextWindowTokens > 0
         ? string.Join(
             Environment.NewLine,
             "Context window",
-            $"{threadService.ContextUsedPercent}% used, {threadService.ContextRemainingPercent}% remaining",
-            $"{FormatCompactTokenCount(threadService.ContextTokensUsed)}/{FormatCompactTokenCount(threadService.ContextWindowTokens)} tokens used",
-            $"Compactions: {threadService.ContextCompactionCount}")
+            $"{ContextUsedPercent}% used, {100 - ContextUsedPercent}% remaining",
+            $"{FormatCompactTokenCount(conversation.ContextTokensUsed)}/{FormatCompactTokenCount(conversation.ContextWindowTokens)} tokens used",
+            $"Compactions: {conversation.ContextCompactionCount}")
         : string.Join(
             Environment.NewLine,
             "Context window",
             "Usage unavailable",
-            $"Compactions: {threadService.ContextCompactionCount}");
+            $"Compactions: {conversation.ContextCompactionCount}");
 
     public string ComposerActionLabel => IsTurnRunning
         ? FollowUpBehavior == FollowUpBehavior.Queue ? "Queue follow-up" : "Steer task"
@@ -721,10 +712,28 @@ public sealed class TaskViewModel : ObservableObject
         }
     }
 
-    public void UseThreadService(CodexThreadService service)
+    public void ApplyConversationSnapshot(ConversationWorkspaceSnapshot snapshot)
     {
+        ArgumentNullException.ThrowIfNull(snapshot);
         ClearFindMatchFlags();
-        threadService = service;
+        conversation = snapshot;
+        timelineItems.Clear();
+        foreach (var item in snapshot.TimelineItems)
+        {
+            timelineItems.Add(item with { });
+        }
+        rawEvents.Clear();
+        foreach (var item in snapshot.RawEvents)
+        {
+            rawEvents.Add(item);
+        }
+        conversationTurns.Clear();
+        foreach (var item in snapshot.ConversationTurns)
+        {
+            conversationTurns.Add(CodexConversationTurn.FromSnapshot(item));
+        }
+        followUpQueue = new CodexFollowUpQueue();
+        followUpQueue.Restore(snapshot.QueuedFollowUps);
         OnPropertyChanged(nameof(TimelineItems));
         OnPropertyChanged(nameof(ConversationTurns));
         OnPropertyChanged(nameof(RawEvents));
@@ -733,14 +742,9 @@ public sealed class TaskViewModel : ObservableObject
         OnPropertyChanged(nameof(HasConversation));
         OnPropertyChanged(nameof(ContextWindowIndicator));
         OnPropertyChanged(nameof(ContextWindowToolTip));
-        RefreshFindInChatMatches();
-    }
-
-    public void UseFollowUpQueue(CodexFollowUpQueue queue)
-    {
-        followUpQueue = queue ?? throw new ArgumentNullException(nameof(queue));
         OnPropertyChanged(nameof(QueuedFollowUps));
         OnPropertyChanged(nameof(HasQueuedFollowUps));
+        RefreshFindInChatMatches();
     }
 
     public bool HasQueuedFollowUps => QueuedFollowUps.Count > 0;
@@ -914,7 +918,7 @@ public sealed class TaskViewModel : ObservableObject
 
     private void ClearFindMatchFlags()
     {
-        foreach (var turn in threadService.ConversationTurns)
+        foreach (var turn in ConversationTurns)
         {
             turn.IsFindMatch = false;
             turn.IsCurrentFindMatch = false;

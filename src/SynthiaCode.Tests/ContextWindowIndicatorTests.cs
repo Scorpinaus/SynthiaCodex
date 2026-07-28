@@ -188,7 +188,7 @@ internal static class ContextWindowIndicatorTests
             """{"threadId":"thread-a","turnId":"turn-a","item":{"id":"compact-1","type":"contextCompaction"}}"""));
 
         var viewModel = CreateTaskViewModel();
-        viewModel.UseThreadService(service);
+        viewModel.ApplyConversationSnapshot(WorkspaceActionStubs.Snapshot(service));
         var view = new TaskView { DataContext = new TaskContext(viewModel) };
         view.ApplyTemplate();
         view.Measure(new Size(900, 700));
@@ -223,16 +223,16 @@ internal static class ContextWindowIndicatorTests
                 : throw new InvalidOperationException("composer send button was not adjacent to the context indicator");
     }
 
-    private static TaskViewModel CreateTaskViewModel() => new(
+    private static TaskViewModel CreateTaskViewModel() => WorkspaceActionStubs.CreateTaskViewModel(WorkspaceActionStubs.Task(
         () => Task.CompletedTask,
         () => Task.CompletedTask,
         () => Task.CompletedTask,
         () => Task.CompletedTask,
         () => false,
-        () => false);
+        () => false));
 
-    private static AppServerNotification Notification(string method, string json) =>
-        new(method, JsonNode.Parse(json)!.AsObject());
+    private static CodexAppServerNotification Notification(string method, string json) =>
+        CodexAppServerNotification.Decode(new AppServerNotification(method, JsonNode.Parse(json)!.AsObject()));
 
     private static void ConfigureTestResources(ResourceDictionary resources)
     {

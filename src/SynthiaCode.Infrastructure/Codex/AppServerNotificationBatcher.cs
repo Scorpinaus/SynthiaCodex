@@ -6,8 +6,6 @@ namespace SynthiaCode.Infrastructure.Codex;
 
 public sealed class AppServerNotificationBatcher : IDisposable
 {
-    private const string AgentDeltaMethod = "item/agentMessage/delta";
-
     private readonly object syncRoot = new();
     private readonly Action<AppServerNotification> emit;
     private readonly TimeSpan interval;
@@ -51,7 +49,7 @@ public sealed class AppServerNotificationBatcher : IDisposable
             receivedCount++;
 
             var delta = ReadString(notification.Params, "delta") ?? ReadString(notification.Params, "text");
-            if (notification.Method == AgentDeltaMethod && !string.IsNullOrEmpty(delta))
+            if (notification.Method == CodexAppServerNotificationMethods.AgentMessageDelta && !string.IsNullOrEmpty(delta))
             {
                 receivedDeltaCount++;
                 var key = CreateGroupKey(notification.Params);
@@ -110,7 +108,7 @@ public sealed class AppServerNotificationBatcher : IDisposable
 
         var parameters = (JsonObject)pending.Notification.Params.DeepClone();
         parameters["delta"] = pending.Text.ToString();
-        EmitLocked(new AppServerNotification(AgentDeltaMethod, parameters));
+        EmitLocked(new AppServerNotification(CodexAppServerNotificationMethods.AgentMessageDelta, parameters));
         pending = null;
     }
 

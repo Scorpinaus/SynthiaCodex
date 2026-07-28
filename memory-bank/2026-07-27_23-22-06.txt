@@ -1,0 +1,18 @@
+timestamp: 2026-07-27 23:22:06
+event: subtask
+title: Completed lifecycle and turn extraction
+
+decision:
+MainViewModel now delegates thread start/resume/fallback and all turn start/edit/steer/cancel sequencing to explicit application services.
+
+rationale:
+Remote calls and runtime state transitions no longer live in presentation code; automatic first-message rename now keys off durable placeholder state.
+
+lesson:
+A detached SelectedThread projection is not authoritative for transactional decisions; use AppSettings storage state inside the use case.
+
+working_pattern:
+Protocol request composition remains at the presentation edge while service request records own execution and return detached snapshots.
+
+next_plan:
+Finish queue/persistence cutover, then move mixed controller tests to service-specific suites.

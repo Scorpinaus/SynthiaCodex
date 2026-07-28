@@ -1,5 +1,3 @@
-using SynthiaCode.Core.Codex.AppServer;
-
 namespace SynthiaCode.Core.Settings;
 
 public sealed class ThreadStore
@@ -21,7 +19,7 @@ public sealed class ThreadStore
             .Where(thread => includeArchived || !thread.IsArchived)
             .OrderByDescending(thread => thread.IsPinned)
             .ThenByDescending(thread => thread.UpdatedAt)
-            .Select(ToPresentation)
+            .Select(SettingsStorageMapper.ToPresentation)
             .ToList();
     }
 
@@ -37,13 +35,15 @@ public sealed class ThreadStore
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(state);
         NormalizeAndValidate(state);
-        var existing = settings.ProjectThreads.FirstOrDefault(thread =>
+        var existingIndex = settings.ProjectThreads.FindIndex(thread =>
             string.Equals(thread.ThreadId, state.ThreadId, StringComparison.Ordinal));
-        if (existing is null)
+        if (existingIndex < 0)
         {
-            settings.ProjectThreads.Add(ToPersisted(state));
+            settings.ProjectThreads.Add(SettingsStorageMapper.ToPersisted(state));
             return state;
         }
+
+        var existing = settings.ProjectThreads[existingIndex];
 
         if (existing.ScopeKind != state.ScopeKind ||
             (state.ScopeKind == ThreadScopeKind.Project && !PathsEqual(existing.ProjectPath, state.ProjectPath)))
@@ -51,29 +51,8 @@ public sealed class ThreadStore
             throw new InvalidOperationException($"Thread '{state.ThreadId}' cannot be moved to a different scope.");
         }
 
-        existing.ScopeKind = state.ScopeKind;
-        existing.ProjectPath = state.ProjectPath;
-        existing.Title = state.Title;
-        existing.IsTitlePlaceholder = state.IsTitlePlaceholder;
-        existing.Preview = state.Preview;
-        existing.IsArchived = state.IsArchived;
-        existing.IsPinned = state.IsPinned;
-        existing.IsRunning = state.IsRunning;
-        existing.TurnStatus = state.TurnStatus;
-        existing.Mode = state.Mode;
-        existing.WorkspacePath = state.WorkspacePath;
-        existing.WorktreeBranch = state.WorktreeBranch;
-        existing.FinalResponse = state.FinalResponse;
-        existing.TimelineItems = state.TimelineItems;
-        existing.RawEvents = state.RawEvents;
-        existing.ConversationTurns = CloneTurns(state.ConversationTurns);
-        existing.QueuedFollowUps = CloneQueuedFollowUps(state.QueuedFollowUps);
-        existing.ContextTokensUsed = state.ContextTokensUsed;
-        existing.ContextWindowTokens = state.ContextWindowTokens;
-        existing.ContextCompactionCount = state.ContextCompactionCount;
-        existing.CreatedAt = state.CreatedAt;
-        existing.UpdatedAt = state.UpdatedAt;
-        return ToPresentation(existing);
+        SettingsStorageMapper.CopyToPersisted(state, existing);
+        return SettingsStorageMapper.ToPresentation(existing);
     }
 
     public void SetActive(AppSettings settings, string projectPath, string threadId)
@@ -183,83 +162,4 @@ public sealed class ThreadStore
         return string.Equals(NormalizePath(left), NormalizePath(right), StringComparison.OrdinalIgnoreCase);
     }
 
-    private static ProjectThreadState ToPresentation(PersistedProjectThread source) => new()
-    {
-        ScopeKind = source.ScopeKind,
-        ProjectPath = source.ProjectPath,
-        ThreadId = source.ThreadId,
-        Title = source.Title,
-        IsTitlePlaceholder = source.IsTitlePlaceholder,
-        Preview = source.Preview,
-        IsArchived = source.IsArchived,
-        IsPinned = source.IsPinned,
-        IsActive = source.IsActive,
-        IsRunning = source.IsRunning,
-        TurnStatus = source.TurnStatus,
-        Mode = source.Mode,
-        WorkspacePath = source.WorkspacePath,
-        WorktreeBranch = source.WorktreeBranch,
-        AppliedDeveloperInstructions = source.AppliedDeveloperInstructions,
-        AppliedBaseInstructions = source.AppliedBaseInstructions,
-        CreatedAt = source.CreatedAt,
-        FinalResponse = source.FinalResponse,
-        TimelineItems = [.. source.TimelineItems],
-        RawEvents = [.. source.RawEvents],
-        ConversationTurns = CloneTurns(source.ConversationTurns),
-        QueuedFollowUps = CloneQueuedFollowUps(source.QueuedFollowUps),
-        ContextTokensUsed = source.ContextTokensUsed,
-        ContextWindowTokens = source.ContextWindowTokens,
-        ContextCompactionCount = source.ContextCompactionCount,
-        UpdatedAt = source.UpdatedAt
-    };
-
-    private static PersistedProjectThread ToPersisted(ProjectThreadState source) => new()
-    {
-        ScopeKind = source.ScopeKind,
-        ProjectPath = source.ProjectPath,
-        ThreadId = source.ThreadId,
-        Title = source.Title,
-        IsTitlePlaceholder = source.IsTitlePlaceholder,
-        Preview = source.Preview,
-        IsArchived = source.IsArchived,
-        IsPinned = source.IsPinned,
-        IsActive = source.IsActive,
-        IsRunning = source.IsRunning,
-        TurnStatus = source.TurnStatus,
-        Mode = source.Mode,
-        WorkspacePath = source.WorkspacePath,
-        WorktreeBranch = source.WorktreeBranch,
-        AppliedDeveloperInstructions = source.AppliedDeveloperInstructions,
-        AppliedBaseInstructions = source.AppliedBaseInstructions,
-        CreatedAt = source.CreatedAt,
-        FinalResponse = source.FinalResponse,
-        TimelineItems = [.. source.TimelineItems],
-        RawEvents = [.. source.RawEvents],
-        ConversationTurns = CloneTurns(source.ConversationTurns),
-        QueuedFollowUps = CloneQueuedFollowUps(source.QueuedFollowUps),
-        ContextTokensUsed = source.ContextTokensUsed,
-        ContextWindowTokens = source.ContextWindowTokens,
-        ContextCompactionCount = source.ContextCompactionCount,
-        UpdatedAt = source.UpdatedAt
-    };
-
-    private static List<CodexConversationTurnSnapshot> CloneTurns(
-        IEnumerable<CodexConversationTurnSnapshot> turns) =>
-        turns.Select(turn => new CodexConversationTurnSnapshot
-        {
-            TurnId = turn.TurnId,
-            UserPrompt = turn.UserPrompt,
-            AssistantResponse = turn.AssistantResponse,
-            Status = turn.Status,
-            StartedAt = turn.StartedAt,
-            CompletedAt = turn.CompletedAt,
-            IsSuperseded = turn.IsSuperseded,
-            Activity = [.. turn.Activity],
-            UserAttachments = [.. turn.UserAttachments.Select(attachment => attachment.Clone())],
-            GeneratedImagePaths = [.. turn.GeneratedImagePaths]
-        }).ToList();
-
-    private static List<QueuedFollowUpSnapshot> CloneQueuedFollowUps(
-        IEnumerable<QueuedFollowUpSnapshot> queuedFollowUps) =>
-        queuedFollowUps.Select(item => item.Clone()).ToList();
 }

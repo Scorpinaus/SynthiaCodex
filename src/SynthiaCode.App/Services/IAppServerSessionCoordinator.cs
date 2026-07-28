@@ -26,7 +26,7 @@ public sealed class AppServerSessionStateChangedEventArgs(
 
 public interface IAppServerSessionCoordinator : IAsyncDisposable
 {
-    event EventHandler<AppServerNotification>? NotificationReceived;
+    event EventHandler<CodexAppServerNotification>? NotificationReceived;
 
     event EventHandler<CodexServerRequest>? ServerRequestReceived;
 

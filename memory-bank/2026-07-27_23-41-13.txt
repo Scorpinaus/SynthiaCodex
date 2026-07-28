@@ -1,0 +1,18 @@
+timestamp: 2026-07-27 23:41:13
+event: subtask
+title: Verified extracted use cases
+
+decision:
+Accept the refactor behavior after the complete solution test run passed.
+
+rationale:
+All 239 tests passed, including 224 end-to-end behavioral cases and the new direct use-case tests.
+
+lesson:
+The first-turn regression was caused by restoring a placeholder Preview through the legacy transcript fallback, not by automatic rename itself.
+
+working_pattern:
+Verify direct service invariants and the existing MainViewModel behavioral suite together after an orchestration cutover.
+
+next_plan:
+Remove obsolete controller wording, imports, and unused composition parameters; rebuild and rerun focused tests if cleanup changes code.

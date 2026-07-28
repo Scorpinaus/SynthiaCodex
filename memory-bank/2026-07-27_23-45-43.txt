@@ -1,0 +1,18 @@
+timestamp: 2026-07-27 23:45:43
+event: task
+title: Completed MainViewModel use case extraction
+
+decision:
+Thread lifecycle, turn execution, queue dispatch, and thread-state persistence now have explicit application-service boundaries with direct tests.
+
+rationale:
+The full 239-test suite passes and MainViewModel no longer issues those remote or durable workflow operations directly.
+
+lesson:
+Durable placeholder state is authoritative for automatic naming, while empty new-thread preview prevents legacy transcript synthesis.
+
+working_pattern:
+MainViewModel validates and projects; use-case services sequence remote, runtime, and durable transitions.
+
+next_plan:
+Future extractions can target unrelated attachment, settings, and shell coordination independently.

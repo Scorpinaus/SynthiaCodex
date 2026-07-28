@@ -1,0 +1,18 @@
+timestamp: 2026-07-27 23:29:21
+event: subtask
+title: Completed queue and persistence extraction
+
+decision:
+Queued follow-up mutation, steering, serialized dispatch, and durable snapshots now run through FollowUpQueueUseCaseService; MainViewModel calls ThreadStatePersistenceUseCaseService directly.
+
+rationale:
+MainViewModel now only validates command context and projects returned snapshots; the 224-case behavioral suite passes after the cutover.
+
+lesson:
+A new thread must restore with an empty Preview; the legacy preview fallback otherwise fabricates a completed conversation turn before the first real turn.
+
+working_pattern:
+Persist queue transitions inside the serialized dispatch operation and return detached snapshots for UI projection.
+
+next_plan:
+Split mixed workflow tests into lifecycle, turn, queue, and persistence suites and remove obsolete controller facades.

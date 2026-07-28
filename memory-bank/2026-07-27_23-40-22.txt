@@ -1,0 +1,18 @@
+timestamp: 2026-07-27 23:40:22
+event: subtask
+title: Refactored use case tests
+
+decision:
+Replaced mixed ConversationWorkflowController tests with direct lifecycle, turn, queue, persistence, and runtime-controller suites.
+
+rationale:
+Each extracted service now has tests at its own boundary, including transaction rollback, detached snapshots, pre-rename running publication, exact cancellation identity, and queue persistence failure.
+
+lesson:
+Use Any rather than Single in asynchronous collection waits because refresh intentionally clears and repopulates the UI-owned collection.
+
+working_pattern:
+Behavioral tests retain end-to-end coverage; direct tests isolate service invariants and failure transitions.
+
+next_plan:
+Run the complete suite and build, then remove obsolete imports, comments, and composition parameters.

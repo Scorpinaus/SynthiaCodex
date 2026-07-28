@@ -76,14 +76,13 @@ src\
 
 Install a .NET 10 SDK with Windows Desktop support. The repository's `global.json` accepts current .NET 10 feature bands and servicing updates.
 
-Restore, build, and run the current solution tests with:
+Restore, build, and run the test suite with:
 
 ```powershell
 dotnet test SynthiaCode.sln
-dotnet run --project src\SynthiaCode.Tests\SynthiaCode.Tests.csproj
 ```
 
-The test project currently uses a small console-based assertion runner, so running the test project directly verifies the actual assertions.
+`dotnet test` is the authoritative local and CI command. It discovers and reports each behavioral case individually. The test executable is retained only as an internal UTF-8 transport fixture (`--unicode-transport-fixture`).
 
 Standard solution builds produce the runnable application at:
 

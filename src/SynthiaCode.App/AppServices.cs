@@ -42,14 +42,19 @@ public sealed class AppServices
         IUserInteractionService userInteractionService,
         IThemeService themeService,
         ICodexCliUtilityRunner codexCliUtilityRunner,
-        ThreadStore threadStore,
-        CodexThreadWorkspace threadWorkspace,
         ITerminalService terminalService,
         IAppLogger logger,
         IGeneralWorkspaceService generalWorkspaceService,
         IAttachmentStore attachmentStore,
         WorkspaceAttachmentResolver workspaceAttachmentResolver,
-        ISharedCodexConfigurationService sharedCodexConfigurationService)
+        ISharedCodexConfigurationService sharedCodexConfigurationService,
+        ConversationWorkflowController conversationWorkflow,
+        ThreadLifecycleUseCaseService threadLifecycleService,
+        ThreadStatePersistenceUseCaseService threadStatePersistenceService,
+        TurnExecutionUseCaseService turnExecutionService,
+        FollowUpQueueUseCaseService followUpQueueService,
+        ProjectWorkspaceOperations projectWorkspaceOperations,
+        AttachmentDraftOrchestrationService attachmentDraftService)
     {
         SettingsStore = settingsStore;
         CodexDiscoveryService = codexDiscoveryService;
@@ -62,14 +67,19 @@ public sealed class AppServices
         UserInteractionService = userInteractionService;
         ThemeService = themeService;
         CodexCliUtilityRunner = codexCliUtilityRunner;
-        ThreadStore = threadStore;
-        ThreadWorkspace = threadWorkspace;
         TerminalService = terminalService;
         Logger = logger;
         GeneralWorkspaceService = generalWorkspaceService;
         AttachmentStore = attachmentStore;
         WorkspaceAttachmentResolver = workspaceAttachmentResolver;
         SharedCodexConfigurationService = sharedCodexConfigurationService;
+        ConversationWorkflow = conversationWorkflow;
+        ThreadLifecycleService = threadLifecycleService;
+        ThreadStatePersistenceService = threadStatePersistenceService;
+        TurnExecutionService = turnExecutionService;
+        FollowUpQueueService = followUpQueueService;
+        ProjectWorkspaceOperations = projectWorkspaceOperations;
+        AttachmentDraftService = attachmentDraftService;
     }
 
     public ISettingsStore SettingsStore { get; }
@@ -94,10 +104,6 @@ public sealed class AppServices
 
     public ICodexCliUtilityRunner CodexCliUtilityRunner { get; }
 
-    public ThreadStore ThreadStore { get; }
-
-    public CodexThreadWorkspace ThreadWorkspace { get; }
-
     public ITerminalService TerminalService { get; }
 
     public IAppLogger Logger { get; }
@@ -109,6 +115,18 @@ public sealed class AppServices
     public WorkspaceAttachmentResolver WorkspaceAttachmentResolver { get; }
 
     public ISharedCodexConfigurationService SharedCodexConfigurationService { get; }
+
+    public ConversationWorkflowController ConversationWorkflow { get; }
+    public ThreadLifecycleUseCaseService ThreadLifecycleService { get; }
+
+    public ThreadStatePersistenceUseCaseService ThreadStatePersistenceService { get; }
+
+    public TurnExecutionUseCaseService TurnExecutionService { get; }
+    public FollowUpQueueUseCaseService FollowUpQueueService { get; }
+
+    public ProjectWorkspaceOperations ProjectWorkspaceOperations { get; }
+
+    public AttachmentDraftOrchestrationService AttachmentDraftService { get; }
 
     public static AppServices Create()
     {
@@ -144,6 +162,33 @@ public sealed class AppServices
         var workspaceAttachmentResolver = new WorkspaceAttachmentResolver();
         var sharedCodexConfigurationService =
             new SharedCodexConfigurationService(codexRuntimeEnvironment.HomePath);
+        var threadLifecycleService = new ThreadLifecycleUseCaseService(
+            appServerSessionCoordinator, gitService, worktreeService, threadStore, threadWorkspace, settingsStore);
+        var threadStatePersistenceService = new ThreadStatePersistenceUseCaseService(
+            settingsStore, threadStore, threadWorkspace);
+        var followUpQueues = new CodexFollowUpQueueWorkspace();
+        var conversationWorkflow = new ConversationWorkflowController(
+            threadStore,
+            threadWorkspace,
+            followUpQueues);
+        var turnExecutionService = new TurnExecutionUseCaseService(
+            appServerSessionCoordinator,
+            conversationWorkflow,
+            threadLifecycleService,
+            threadStatePersistenceService);
+        var followUpQueueService = new FollowUpQueueUseCaseService(
+            appServerSessionCoordinator,
+            conversationWorkflow,
+            settingsStore,
+            threadWorkspace,
+            followUpQueues);
+        var projectWorkspaceOperations = new ProjectWorkspaceOperations(
+            gitService, worktreeService, recentProjectService, generalWorkspaceService);
+        var attachmentDraftService = new AttachmentDraftOrchestrationService(
+            attachmentStore,
+            workspaceAttachmentResolver,
+            new CodexTurnRequestFactory(attachmentStore, workspaceAttachmentResolver),
+            logger);
 
         logger.Log(AppLogLevel.Information, "app_services_created", "Application services were created.");
 
@@ -159,13 +204,18 @@ public sealed class AppServices
             userInteractionService,
             themeService,
             codexCliUtilityRunner,
-            threadStore,
-            threadWorkspace,
             terminalService,
             logger,
             generalWorkspaceService,
             attachmentStore,
             workspaceAttachmentResolver,
-            sharedCodexConfigurationService);
+            sharedCodexConfigurationService,
+            conversationWorkflow,
+            threadLifecycleService,
+            threadStatePersistenceService,
+            turnExecutionService,
+            followUpQueueService,
+            projectWorkspaceOperations,
+            attachmentDraftService);
     }
 }

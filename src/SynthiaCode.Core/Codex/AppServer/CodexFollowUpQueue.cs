@@ -376,6 +376,19 @@ public sealed class CodexFollowUpQueue
         Items.Remove(item);
     }
 
+    /// <summary>
+    /// Restores a removed item after a durable dispatch transition fails.  This is
+    /// intentionally queue-owned so callers never have to retain a live item while
+    /// coordinating persistence.
+    /// </summary>
+    public void RestoreAt(int index, QueuedFollowUpSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var copies = Snapshot().ToList();
+        copies.Insert(Math.Clamp(index, 0, copies.Count), snapshot.Clone());
+        Restore(copies);
+    }
+
     public int IndexOf(string id)
     {
         for (var index = 0; index < Items.Count; index++)

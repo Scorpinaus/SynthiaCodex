@@ -86,7 +86,7 @@ internal static class PromptEditingTests
     {
         CodexConversationTurn? submittedTurn = null;
         string? submittedText = null;
-        var viewModel = new TaskViewModel(
+        var viewModel = WorkspaceActionStubs.CreateTaskViewModel(WorkspaceActionStubs.Task(
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => Task.CompletedTask,
@@ -98,7 +98,7 @@ internal static class PromptEditingTests
                 submittedTurn = turn;
                 submittedText = text;
                 return Task.FromResult(true);
-            });
+            }));
         var service = new CodexThreadService();
         service.Restore(
             "thread-edit",
@@ -106,7 +106,7 @@ internal static class PromptEditingTests
             null,
             null,
             conversationTurns: [CompletedTurn("turn-1", "Original prompt", "Original answer")]);
-        viewModel.UseThreadService(service);
+        viewModel.ApplyConversationSnapshot(WorkspaceActionStubs.Snapshot(service));
         var turn = service.ConversationTurns.Single();
 
         viewModel.BeginPromptEditCommand.Execute(turn);
@@ -285,7 +285,7 @@ internal static class PromptEditingTests
             new FakeCodexProcessService(transport),
             logger,
             new CodexAppServerClientMetadata("prompt_edit_tests", "Prompt Edit Tests", "1.0.0"));
-        return new MainViewModel(
+        return WorkspaceActionStubs.CreateMainViewModel(
             new FakeSettingsStore(),
             new FakeCodexDiscoveryService(new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation")),
             coordinator,

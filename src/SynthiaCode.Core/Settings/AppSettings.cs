@@ -91,9 +91,41 @@ public sealed class ComposerAttachmentDraftSnapshot
     };
 }
 
+// Shared persistence contract. Keeping the common thread shape explicit lets the
+// storage mapper copy it once while the presentation type retains its UI behavior.
+internal interface IThreadStorageState
+{
+    ThreadScopeKind ScopeKind { get; set; }
+    string ProjectPath { get; set; }
+    string ThreadId { get; set; }
+    string Title { get; set; }
+    bool IsTitlePlaceholder { get; set; }
+    string Preview { get; set; }
+    bool IsArchived { get; set; }
+    bool IsPinned { get; set; }
+    bool IsActive { get; set; }
+    bool IsRunning { get; set; }
+    string TurnStatus { get; set; }
+    string Mode { get; set; }
+    string? WorkspacePath { get; set; }
+    string? WorktreeBranch { get; set; }
+    string? AppliedDeveloperInstructions { get; set; }
+    string? AppliedBaseInstructions { get; set; }
+    DateTimeOffset CreatedAt { get; set; }
+    string FinalResponse { get; set; }
+    List<CodexTimelineItem> TimelineItems { get; set; }
+    List<string> RawEvents { get; set; }
+    List<CodexConversationTurnSnapshot> ConversationTurns { get; set; }
+    List<QueuedFollowUpSnapshot> QueuedFollowUps { get; set; }
+    long ContextTokensUsed { get; set; }
+    long ContextWindowTokens { get; set; }
+    int ContextCompactionCount { get; set; }
+    DateTimeOffset UpdatedAt { get; set; }
+}
+
 // Storage-only DTO. Keep property names stable so Phase 3-5A settings.json files
 // deserialize without a migration or schema rewrite.
-public sealed class PersistedProjectThread
+public sealed class PersistedProjectThread : IThreadStorageState
 {
     public ThreadScopeKind ScopeKind { get; set; } = ThreadScopeKind.Project;
     public string ProjectPath { get; set; } = string.Empty;
@@ -123,7 +155,7 @@ public sealed class PersistedProjectThread
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
-public sealed class ProjectThreadState : INotifyPropertyChanged
+public sealed class ProjectThreadState : INotifyPropertyChanged, IThreadStorageState
 {
     private bool isArchived;
     private bool isPinned;

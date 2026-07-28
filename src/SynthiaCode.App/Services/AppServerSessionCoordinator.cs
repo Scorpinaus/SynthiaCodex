@@ -30,10 +30,10 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
         this.logger = logger;
         this.metadata = metadata;
         notificationBatcher = new AppServerNotificationBatcher(notification =>
-            NotificationReceived?.Invoke(this, notification));
+            NotificationReceived?.Invoke(this, CodexAppServerNotification.Decode(notification)));
     }
 
-    public event EventHandler<AppServerNotification>? NotificationReceived;
+    public event EventHandler<CodexAppServerNotification>? NotificationReceived;
 
     public event EventHandler<CodexServerRequest>? ServerRequestReceived;
 

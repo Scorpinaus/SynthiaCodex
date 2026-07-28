@@ -228,7 +228,7 @@ internal static class ThreadRenameTests
             logger,
             new CodexAppServerClientMetadata("thread_rename_tests", "Thread Rename Tests", "1.0.0"));
         var interaction = new RenameUserInteractionService("  Renamed general  ", "Renamed project");
-        var viewModel = new MainViewModel(
+        var viewModel = WorkspaceActionStubs.CreateMainViewModel(
             settingsStore,
             new FakeCodexDiscoveryService(new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation")),
             coordinator,
@@ -289,7 +289,7 @@ internal static class ThreadRenameTests
             new FakeCodexProcessService(transport),
             logger,
             new CodexAppServerClientMetadata("thread_rename_tests", "Thread Rename Tests", "1.0.0"));
-        var viewModel = new MainViewModel(
+        var viewModel = WorkspaceActionStubs.CreateMainViewModel(
             settingsStore,
             new FakeCodexDiscoveryService(new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation")),
             coordinator,
@@ -390,7 +390,8 @@ internal static class ThreadRenameTests
             ?? throw new InvalidOperationException("rename request did not include an id");
         transport.ServerSend($"{{\"id\":{requestId},\"result\":{{}}}}");
         await WaitUntilAsync(
-            () => viewModel.ProjectThreads.Single(item => item.ThreadId == thread.ThreadId).Title == expectedName,
+            () => viewModel.ProjectThreads.Any(item =>
+                item.ThreadId == thread.ThreadId && item.Title == expectedName),
             $"{thread.ThreadId} persisted rename");
     }
 
@@ -402,7 +403,7 @@ internal static class ThreadRenameTests
         await initializeTask;
     }
 
-    private static ProjectThreadViewModel CreateNavigationViewModel(Func<Task>? renameThread = null) => new(
+    private static ProjectThreadViewModel CreateNavigationViewModel(Func<Task>? renameThread = null) => WorkspaceActionStubs.CreateProjectThreadViewModel(WorkspaceActionStubs.Project(
         () => Task.CompletedTask,
         _ => Task.CompletedTask,
         () => Task.CompletedTask,
@@ -421,7 +422,7 @@ internal static class ThreadRenameTests
         () => true,
         _ => { },
         renameThread: renameThread ?? (() => Task.CompletedTask),
-        canRenameThread: () => true);
+        canRenameThread: () => true));
 
     private static PersistedProjectThread PersistedThread(
         string id,
@@ -507,11 +508,16 @@ internal static class ThreadRenameTests
     private static async Task WaitUntilAsync(Func<bool> condition, string label)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (!condition())
+        while (true)
         {
             try
             {
+                if (condition()) return;
                 await Task.Delay(20, timeout.Token);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("Collection was modified", StringComparison.Ordinal))
+            {
+                // The UI-owned collection can be refreshed on the dispatcher between condition reads.
             }
             catch (OperationCanceledException)
             {

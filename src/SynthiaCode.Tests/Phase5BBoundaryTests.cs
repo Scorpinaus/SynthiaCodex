@@ -29,7 +29,7 @@ internal static class Phase5BBoundaryTests
             new TestLogger(),
             new CodexAppServerClientMetadata("phase_5b_tests", "Phase 5B Tests", "1.0.0"));
         var installation = new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation");
-        var received = new List<AppServerNotification>();
+        var received = new List<CodexAppServerNotification>();
         coordinator.NotificationReceived += (_, notification) => received.Add(notification);
 
         var connect = coordinator.EnsureConnectedAsync(installation);
@@ -39,9 +39,20 @@ internal static class Phase5BBoundaryTests
         Assert(coordinator.State == AppServerSessionState.Connected, "coordinator reaches connected state");
 
         transport.ServerSend("""{"method":"item/agentMessage/delta","params":{"threadId":"t","turnId":"u","itemId":"i","delta":"hello"}}""");
+        transport.ServerSend("""{"method":"item/agentMessage/delta","params":{"threadId":"t","turnId":"u","itemId":"i","delta":" world"}}""");
         transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"t","turn":{"id":"u","status":"completed","items":[]}}}""");
         await WaitUntilAsync(() => received.Count == 2, "batched notifications forwarded");
-        Assert(received[0].Method == "item/agentMessage/delta" && received[1].Method == "turn/completed", "notification order is preserved");
+        Assert(
+            received[0].Kind == CodexAppServerNotificationKind.AgentMessageDelta &&
+            received[1].Kind == CodexAppServerNotificationKind.TurnCompleted,
+            "notification order is preserved");
+        Assert(
+            received[0].ThreadId == "t" &&
+            received[0].TurnId == "u" &&
+            received[0].ItemId == "i" &&
+            received[0].Params["delta"]?.GetValue<string>() == "hello world",
+            "the coordinator decodes the post-batch delta with routing fields intact");
+        Assert(received[1].TurnStatus == "completed", "the coordinator decodes lifecycle status after batching");
 
         await coordinator.DisposeAsync();
         Assert(coordinator.State == AppServerSessionState.Disposed, "coordinator reaches disposed state");
@@ -119,7 +130,7 @@ internal static class Phase5BBoundaryTests
     private static Task ProjectThreadViewModelOwnsSelectionAsync()
     {
         ProjectThreadState? selected = null;
-        var viewModel = new ProjectThreadViewModel(
+        var viewModel = WorkspaceActionStubs.CreateProjectThreadViewModel(WorkspaceActionStubs.Project(
             () => Task.CompletedTask,
             _ => Task.CompletedTask,
             () => Task.CompletedTask,
@@ -136,7 +147,7 @@ internal static class Phase5BBoundaryTests
             () => true,
             () => true,
             () => true,
-            state => selected = state);
+            state => selected = state));
         viewModel.SetSelectedProjectPath(@"C:\Repo");
         viewModel.ReplaceThreads(
             [new ProjectThreadState { ProjectPath = @"C:\Repo", ThreadId = "thread-one", Title = "One" }],
@@ -151,16 +162,16 @@ internal static class Phase5BBoundaryTests
 
     private static Task TaskViewModelOwnsStateAsync()
     {
-        var viewModel = new TaskViewModel(
+        var viewModel = WorkspaceActionStubs.CreateTaskViewModel(WorkspaceActionStubs.Task(
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => true,
-            () => true);
+            () => true));
         var service = new CodexThreadService();
         service.Restore("thread-one", "Persisted response", [], []);
-        viewModel.UseThreadService(service);
+        viewModel.ApplyConversationSnapshot(WorkspaceActionStubs.Snapshot(service));
         viewModel.Prompt = "Run this";
         viewModel.SubmittedPrompt = viewModel.Prompt;
         viewModel.IsTurnRunning = true;

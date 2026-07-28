@@ -353,7 +353,7 @@ public sealed class CodexThreadService
             return snapshot;
         }).ToList();
 
-    public void ApplyNotification(AppServerNotification notification)
+    public void ApplyNotification(CodexAppServerNotification notification)
     {
         lock (stateGate)
         {
@@ -363,15 +363,15 @@ public sealed class CodexThreadService
                 MaximumRawEvents);
             CaptureErrorState(notification.Params);
 
-            switch (notification.Method)
+            switch (notification.Kind)
             {
-            case "thread/started":
-                ActiveThreadId = ReadString(notification.Params, "thread.id");
+            case CodexAppServerNotificationKind.ThreadStarted:
+                ActiveThreadId = notification.ThreadId;
                 AddTimeline(CodexTimelineItemKind.ThreadStarted, "Thread started", ActiveThreadId, notification);
                 break;
 
-            case "turn/started":
-                ActiveTurnId = ReadString(notification.Params, "turn.id");
+            case CodexAppServerNotificationKind.TurnStarted:
+                ActiveTurnId = notification.TurnId;
                 ActiveTurnStatus = CodexTurnStatus.Running;
                 if (!string.IsNullOrWhiteSpace(ActiveTurnId))
                 {
@@ -380,13 +380,13 @@ public sealed class CodexThreadService
                 AddTimeline(CodexTimelineItemKind.TurnStarted, "Turn started", ActiveTurnId, notification);
                 break;
 
-            case "item/agentMessage/delta":
+            case CodexAppServerNotificationKind.AgentMessageDelta:
                 ApplyAgentMessageDelta(notification);
                 break;
 
-            case "turn/completed":
-                ActiveTurnId ??= ReadString(notification.Params, "turn.id");
-                ActiveTurnStatus = ReadTurnStatus(ReadString(notification.Params, "status") ?? ReadString(notification.Params, "turn.status"));
+            case CodexAppServerNotificationKind.TurnCompleted:
+                ActiveTurnId ??= notification.TurnId;
+                ActiveTurnStatus = ReadTurnStatus(notification.TurnStatus);
                 var completedTurn = GetNotificationTurn(notification);
                 if (completedTurn is not null)
                 {
@@ -405,22 +405,22 @@ public sealed class CodexThreadService
                 }
                 break;
 
-            case "item/started":
+            case CodexAppServerNotificationKind.ItemStarted:
                 RememberAgentMessagePhase(notification);
                 AddTimeline(ReadItemStartedKind(notification.Params), "Item started", ReadItemDetail(notification.Params), notification);
                 ProjectItemActivity(notification, completed: false);
                 break;
 
-            case "item/completed":
+            case CodexAppServerNotificationKind.ItemCompleted:
                 ApplyCompletedItem(notification);
                 break;
 
-            case "thread/tokenUsage/updated":
+            case CodexAppServerNotificationKind.ThreadTokenUsageUpdated:
                 ApplyContextTokenUsage(notification.Params);
                 AddTimeline(CodexTimelineItemKind.Raw, notification.Method, ReadItemDetail(notification.Params), notification);
                 break;
 
-            case "thread/compacted":
+            case CodexAppServerNotificationKind.ThreadCompacted:
                 RecordContextCompaction(notification.Params, "legacy");
                 AddTimeline(
                     CodexTimelineItemKind.ContextCompaction,
@@ -443,7 +443,7 @@ public sealed class CodexThreadService
         }
     }
 
-    private void ApplyCompletedItem(AppServerNotification notification)
+    private void ApplyCompletedItem(CodexAppServerNotification notification)
     {
         var itemType = ReadString(notification.Params, "item.type");
         if (itemType == "contextCompaction")
@@ -466,7 +466,7 @@ public sealed class CodexThreadService
         ProjectItemActivity(notification, completed: true);
     }
 
-    private void ApplyCompletedImageGeneration(AppServerNotification notification)
+    private void ApplyCompletedImageGeneration(CodexAppServerNotification notification)
     {
         if (IsFailureStatus(ReadString(notification.Params, "item.status")) ||
             GetNotificationTurn(notification) is not { } turn ||
@@ -487,8 +487,8 @@ public sealed class CodexThreadService
         foreach (var rawEvent in rawEvents)
         {
             if (!rawEvent.Contains("\"imageGeneration\"", StringComparison.Ordinal) ||
-                !TryParseStoredNotification(rawEvent, out var notification) ||
-                !string.Equals(notification.Method, "item/completed", StringComparison.Ordinal) ||
+                !TryParseStoredNotification(rawEvent, out var rawNotification) ||
+                CodexAppServerNotification.Decode(rawNotification) is not { Kind: CodexAppServerNotificationKind.ItemCompleted } notification ||
                 !string.Equals(
                     ReadString(notification.Params, "item.type"),
                     "imageGeneration",
@@ -581,7 +581,7 @@ public sealed class CodexThreadService
         };
     }
 
-    private static CodexTimelineItemKind ReadFallbackKind(AppServerNotification notification)
+    private static CodexTimelineItemKind ReadFallbackKind(CodexAppServerNotification notification)
     {
         if (notification.Method.Contains("error", StringComparison.OrdinalIgnoreCase) ||
             notification.Params["error"] is not null)
@@ -638,7 +638,7 @@ public sealed class CodexThreadService
         return status;
     }
 
-    private void ApplyAgentMessageDelta(AppServerNotification notification)
+    private void ApplyAgentMessageDelta(CodexAppServerNotification notification)
     {
         var delta = ReadString(notification.Params, "delta") ?? ReadString(notification.Params, "text") ?? string.Empty;
         AddTimeline(CodexTimelineItemKind.AgentMessageDelta, "Agent message", delta, notification);
@@ -652,7 +652,7 @@ public sealed class CodexThreadService
         UpdateAgentMessagePresentation(state);
     }
 
-    private void RememberAgentMessagePhase(AppServerNotification notification)
+    private void RememberAgentMessagePhase(CodexAppServerNotification notification)
     {
         var itemType = ReadString(notification.Params, "item.type");
         if (itemType is not ("agentMessage" or "agent_message" or "message"))
@@ -666,7 +666,7 @@ public sealed class CodexThreadService
         }
     }
 
-    private void ApplyCompletedAgentMessage(AppServerNotification notification)
+    private void ApplyCompletedAgentMessage(CodexAppServerNotification notification)
     {
         if (GetOrCreateAgentMessage(notification) is not { } state)
         {
@@ -685,7 +685,7 @@ public sealed class CodexThreadService
         UpdateAgentMessagePresentation(state);
     }
 
-    private AgentMessageState? GetOrCreateAgentMessage(AppServerNotification notification)
+    private AgentMessageState? GetOrCreateAgentMessage(CodexAppServerNotification notification)
     {
         var turn = GetNotificationTurn(notification);
         if (turn is null)
@@ -696,7 +696,7 @@ public sealed class CodexThreadService
         var turnKey = !string.IsNullOrWhiteSpace(turn.TurnId)
             ? turn.TurnId
             : ReadString(notification.Params, "turnId") ?? "pending";
-        var itemId = ReadItemId(notification.Params) ?? "legacy-agent-message";
+        var itemId = notification.ItemId ?? "legacy-agent-message";
         var key = $"{turnKey}\u001f{itemId}";
         if (agentMessages.TryGetValue(key, out var existing))
         {
@@ -774,7 +774,7 @@ public sealed class CodexThreadService
         return phase is "commentary" or "final_answer" ? phase : null;
     }
 
-    private void ProjectItemActivity(AppServerNotification notification, bool completed)
+    private void ProjectItemActivity(CodexAppServerNotification notification, bool completed)
     {
         var type = ReadString(notification.Params, "item.type");
         if (type is null || GetNotificationTurn(notification) is not { } turn)
@@ -782,7 +782,7 @@ public sealed class CodexThreadService
             return;
         }
 
-        var itemId = ReadItemId(notification.Params) ?? $"legacy:{type}:{ReadItemDetail(notification.Params)}";
+        var itemId = notification.ItemId ?? $"legacy:{type}:{ReadItemDetail(notification.Params)}";
         CodexTimelineItem? activity = type switch
         {
             "command" or "command_execution" or "commandExecution" or "exec" =>
@@ -804,14 +804,14 @@ public sealed class CodexThreadService
         }
     }
 
-    private void ProjectLegacyContextCompactionActivity(AppServerNotification notification)
+    private void ProjectLegacyContextCompactionActivity(CodexAppServerNotification notification)
     {
         if (GetNotificationTurn(notification) is not { } turn)
         {
             return;
         }
 
-        var itemId = ReadString(notification.Params, "turnId") ?? $"legacy:{Guid.NewGuid():N}";
+        var itemId = notification.TurnId ?? $"legacy:{Guid.NewGuid():N}";
         UpsertActivity(turn, CreateContextCompactionActivity(itemId, completed: true, notification.Method));
     }
 
@@ -946,17 +946,17 @@ public sealed class CodexThreadService
             "plan:turn");
     }
 
-    private void ProjectSupportedProgress(AppServerNotification notification)
+    private void ProjectSupportedProgress(CodexAppServerNotification notification)
     {
-        if (string.Equals(notification.Method, "turn/plan/updated", StringComparison.Ordinal))
+        if (notification.Kind == CodexAppServerNotificationKind.TurnPlanUpdated)
         {
             ProjectTurnPlanUpdate(notification);
             return;
         }
 
-        if (!string.Equals(notification.Method, "item/mcpToolCall/progress", StringComparison.Ordinal) ||
+        if (notification.Kind != CodexAppServerNotificationKind.McpToolCallProgress ||
             GetNotificationTurn(notification) is not { } turn ||
-            ReadItemId(notification.Params) is not { } itemId)
+            notification.ItemId is not { } itemId)
         {
             return;
         }
@@ -973,7 +973,7 @@ public sealed class CodexThreadService
         turn.Activity[index] = existing with { Detail = NormalizeActivityDetail($"{baseDetail} — {progress}") };
     }
 
-    private void ProjectTurnPlanUpdate(AppServerNotification notification)
+    private void ProjectTurnPlanUpdate(CodexAppServerNotification notification)
     {
         if (GetNotificationTurn(notification) is not { } turn)
         {
@@ -1002,14 +1002,14 @@ public sealed class CodexThreadService
                 "plan:turn"));
     }
 
-    private void ProjectStandaloneError(AppServerNotification notification, string? detail)
+    private void ProjectStandaloneError(CodexAppServerNotification notification, string? detail)
     {
         if (string.IsNullOrWhiteSpace(detail) || GetNotificationTurn(notification) is not { } turn)
         {
             return;
         }
 
-        var itemId = ReadItemId(notification.Params) ?? notification.Method;
+        var itemId = notification.ItemId ?? notification.Method;
         UpsertActivity(
             turn,
             CreateActivity(
@@ -1093,7 +1093,7 @@ public sealed class CodexThreadService
         }
     }
 
-    private static string SerializeRawEvent(AppServerNotification notification)
+    private static string SerializeRawEvent(CodexAppServerNotification notification)
     {
         if (!string.Equals(
                 ReadString(notification.Params, "item.type"),
@@ -1124,7 +1124,7 @@ public sealed class CodexThreadService
     private static string SanitizeStoredRawEvent(string rawEvent) =>
         rawEvent.Contains("\"imageGeneration\"", StringComparison.Ordinal) &&
         TryParseStoredNotification(rawEvent, out var notification)
-            ? SerializeRawEvent(notification)
+            ? SerializeRawEvent(CodexAppServerNotification.Decode(notification))
             : rawEvent;
 
     private static bool TryParseStoredNotification(
@@ -1233,7 +1233,7 @@ public sealed class CodexThreadService
         };
     }
 
-    private void AddTimeline(CodexTimelineItemKind kind, string title, string? detail, AppServerNotification notification)
+    private void AddTimeline(CodexTimelineItemKind kind, string title, string? detail, CodexAppServerNotification notification)
     {
         var item = new CodexTimelineItem(
             kind,
@@ -1242,7 +1242,7 @@ public sealed class CodexThreadService
             notification.Method,
             DateTimeOffset.Now)
         {
-            ItemId = ReadItemId(notification.Params) ?? string.Empty
+            ItemId = notification.ItemId ?? string.Empty
         };
         AddBounded(TimelineItems, item, MaximumTimelineItems);
     }
@@ -1358,9 +1358,9 @@ public sealed class CodexThreadService
         return created;
     }
 
-    private CodexConversationTurn? GetNotificationTurn(AppServerNotification notification)
+    private CodexConversationTurn? GetNotificationTurn(CodexAppServerNotification notification)
     {
-        var turnId = ReadString(notification.Params, "turnId") ?? ReadString(notification.Params, "turn.id");
+        var turnId = notification.TurnId;
         if (!string.IsNullOrWhiteSpace(turnId))
         {
             return GetOrCreateTurn(turnId);

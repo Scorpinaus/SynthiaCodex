@@ -104,12 +104,12 @@ internal static class AccountFeatureTests
             new CodexAccountInfo("chatgpt", "jane@example.com", "plus", null),
             RequiresOpenAiAuth: true));
 
-        var handled = viewModel.TryApplyNotification(new AppServerNotification(
+        var handled = viewModel.TryApplyNotification(CodexAppServerNotification.Decode(new AppServerNotification(
             "account/rateLimits/updated",
             JsonNode.Parse(
                 """
                 {"rateLimits":{"limitId":"codex","primary":{"usedPercent":58,"windowDurationMins":300,"resetsAt":1784383200}}}
-                """)!.AsObject()));
+                """)!.AsObject())));
 
         Assert(handled, "account notification handled");
         AssertEqual(1, viewModel.UsageBuckets.Count, "notification usage count");
@@ -196,7 +196,7 @@ internal static class AccountFeatureTests
         new RelayCommand(() => { }),
         new TestLogger());
 
-    private static ProjectThreadViewModel CreateProjectViewModel() => new(
+    private static ProjectThreadViewModel CreateProjectViewModel() => WorkspaceActionStubs.CreateProjectThreadViewModel(WorkspaceActionStubs.Project(
         () => Task.CompletedTask,
         _ => Task.CompletedTask,
         () => Task.CompletedTask,
@@ -213,7 +213,7 @@ internal static class AccountFeatureTests
         () => true,
         () => true,
         () => true,
-        _ => { });
+        _ => { }));
 
     private static async Task CompleteInitializeAsync(CodexAppServerClient client, FakeAppServerTransport transport)
     {

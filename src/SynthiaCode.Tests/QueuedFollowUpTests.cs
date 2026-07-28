@@ -138,13 +138,13 @@ internal static class QueuedFollowUpTests
 
     private static Task ComposerLabelsActiveBehaviorAsync()
     {
-        var viewModel = new TaskViewModel(
+        var viewModel = WorkspaceActionStubs.CreateTaskViewModel(WorkspaceActionStubs.Task(
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => Task.CompletedTask,
             () => false,
-            () => false);
+            () => false));
 
         viewModel.IsTurnRunning = true;
         viewModel.FollowUpBehavior = FollowUpBehavior.Queue;

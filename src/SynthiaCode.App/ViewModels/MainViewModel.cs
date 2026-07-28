@@ -279,6 +279,30 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         StatusMessage = result.ToStatusMessage("image");
     }
 
+    private async Task BeginGeneratedImageEditAsync(string path)
+    {
+        if (attachmentStore is null)
+        {
+            StatusMessage = "Attachment storage is unavailable.";
+            return;
+        }
+
+        try
+        {
+            var attachment = await attachmentStore.ImportFileAsync(path).ConfigureAwait(true);
+            TaskWorkspace.AddAttachment(attachment);
+            const string editPrompt = "$imagegen Edit this image: ";
+            TaskWorkspace.Prompt = string.IsNullOrWhiteSpace(TaskWorkspace.Prompt)
+                ? editPrompt
+                : editPrompt + TaskWorkspace.Prompt.Trim();
+            StatusMessage = "Generated image attached. Describe the edit, then send.";
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        {
+            StatusMessage = $"Could not prepare {Path.GetFileName(path)} for editing: {ex.Message}";
+        }
+    }
+
     public async Task AddAttachmentPathsAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(paths);

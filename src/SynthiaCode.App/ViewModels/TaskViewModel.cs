@@ -27,6 +27,7 @@ public sealed class TaskViewModel : ObservableObject
     private readonly AsyncRelayCommand deleteQueuedFollowUpCommand;
     private readonly AsyncRelayCommand sendQueuedFollowUpCommand;
     private readonly RelayCommand openExternalUriCommand;
+    private readonly AsyncRelayCommand editGeneratedImageCommand;
     private readonly RelayCommand openOptionsCommand;
     private readonly RelayCommand showOptionsMainCommand;
     private readonly RelayCommand showModelsCommand;
@@ -291,6 +292,7 @@ public sealed class TaskViewModel : ObservableObject
     public ICommand DeleteQueuedFollowUpCommand => deleteQueuedFollowUpCommand;
     public ICommand SendQueuedFollowUpCommand => sendQueuedFollowUpCommand;
     public ICommand OpenExternalUriCommand { get; }
+    public ICommand EditGeneratedImageCommand { get; }
     public ICommand OpenOptionsCommand { get; }
     public ICommand ShowOptionsMainCommand { get; }
     public ICommand ShowModelsCommand { get; }
@@ -1026,6 +1028,7 @@ public sealed class TaskViewModel : ObservableObject
         RaisePromptEditCommandStates();
         RaiseQueuedFollowUpCommandStates();
         openExternalUriCommand.RaiseCanExecuteChanged();
+        editGeneratedImageCommand.RaiseCanExecuteChanged();
         openOptionsCommand.RaiseCanExecuteChanged();
         showOptionsMainCommand.RaiseCanExecuteChanged();
         showModelsCommand.RaiseCanExecuteChanged();

@@ -236,10 +236,12 @@ internal static class MarkdownLinkTests
         try
         {
             Uri? activatedUri = null;
+            string? editedPath = null;
             var renderer = new MarkdownTextBlock
             {
                 Markdown = $"Created the infographic.{Environment.NewLine}{Environment.NewLine}[Download the PNG]({imagePath})",
-                LinkCommand = new RelayCommand(parameter => activatedUri = parameter as Uri)
+                LinkCommand = new RelayCommand(parameter => activatedUri = parameter as Uri),
+                EditImageCommand = new RelayCommand(parameter => editedPath = parameter as string)
             };
 
             var preview = renderer.Inlines.OfType<InlineUIContainer>()
@@ -248,7 +250,8 @@ internal static class MarkdownLinkTests
                 ?? throw new InvalidOperationException("generated image preview does not use a bounded card");
             var content = card.Child as StackPanel
                 ?? throw new InvalidOperationException("generated image preview content was not created");
-            var previewButton = content.Children.OfType<Button>().Single();
+            var previewButton = content.Children.OfType<Button>().Single(button => button.Content is Image);
+            var editButton = content.Children.OfType<Button>().Single(button => button.Content is string);
             var image = previewButton.Content as Image
                 ?? throw new InvalidOperationException("generated image preview button does not contain the image");
             var link = ((TextBlock)content.Children.OfType<TextBlock>().Single()).Inlines.OfType<Hyperlink>().Single();
@@ -260,6 +263,15 @@ internal static class MarkdownLinkTests
                 "the generated image preview exposes an accessible expansion action");
             Assert(link.NavigateUri?.IsFile == true, "the embedded download link targets the local image");
             Assert(InlineText(link) == "Download the PNG", "the assistant-provided image label remains clickable");
+            Assert((string)editButton.Content == "Edit image", "the generated-image card exposes an edit action");
+            Assert(
+                AutomationProperties.GetName(editButton) == "Edit generated image: Download the PNG",
+                "the generated-image edit action has an accessible name");
+
+            editButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert(
+                string.Equals(editedPath, imagePath, StringComparison.OrdinalIgnoreCase),
+                "the edit action routes the generated local path through its command");
 
             previewButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Assert(
@@ -288,6 +300,11 @@ internal static class MarkdownLinkTests
             Assert(
                 string.Equals(revealedPath, imagePath, StringComparison.OrdinalIgnoreCase),
                 "the transcript command opens the expanded generated image through the interaction service");
+            Assert(taskWorkspace.EditGeneratedImageCommand.CanExecute(imagePath), "an idle conversation can edit an available generated image");
+            taskWorkspace.IsTurnRunning = true;
+            Assert(!taskWorkspace.EditGeneratedImageCommand.CanExecute(imagePath), "image editing is disabled while a turn is running");
+            taskWorkspace.IsTurnRunning = false;
+            Assert(!taskWorkspace.EditGeneratedImageCommand.CanExecute(textPath + ".missing.png"), "image editing is disabled when the source is missing");
 
             var unsupported = new MarkdownTextBlock { Markdown = $"[Open notes]({textPath})" };
             Assert(!unsupported.Inlines.OfType<InlineUIContainer>().Any(), "non-image local files are not embedded");

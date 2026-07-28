@@ -27,6 +27,7 @@ public sealed class TaskViewModel : ObservableObject
     private readonly AsyncRelayCommand deleteQueuedFollowUpCommand;
     private readonly AsyncRelayCommand sendQueuedFollowUpCommand;
     private readonly RelayCommand openExternalUriCommand;
+    private readonly AsyncRelayCommand editGeneratedImageCommand;
     private readonly RelayCommand openOptionsCommand;
     private readonly RelayCommand showOptionsMainCommand;
     private readonly RelayCommand showModelsCommand;
@@ -76,7 +77,8 @@ public sealed class TaskViewModel : ObservableObject
         Func<CodexConversationTurn, string, Task<bool>>? editPrompt = null,
         Action<string>? showLocalImage = null,
         Func<CodexConversationTurn, Task>? forkConversation = null,
-        Func<CancellationToken, Task<ComposerSkillLoadResult>>? loadComposerSkills = null)
+        Func<CancellationToken, Task<ComposerSkillLoadResult>>? loadComposerSkills = null,
+        Func<string, Task>? editGeneratedImage = null)
     {
         SkillSelector = new ComposerSkillSelectorViewModel(
             loadComposerSkills,
@@ -230,6 +232,14 @@ public sealed class TaskViewModel : ObservableObject
             parameter => parameter is Uri uri &&
                 (ExternalUriPolicy.IsSupported(uri) ||
                  (showLocalImage is not null && LocalImageResourcePolicy.IsSupported(uri, out _))));
+        EditGeneratedImageCommand = editGeneratedImageCommand = new AsyncRelayCommand(
+            parameter => parameter is string path && editGeneratedImage is not null
+                ? editGeneratedImage(path)
+                : Task.CompletedTask,
+            parameter => parameter is string path &&
+                editGeneratedImage is not null &&
+                !IsTurnRunning &&
+                File.Exists(path));
         OpenOptionsCommand = openOptionsCommand = new RelayCommand(
             () =>
             {
@@ -301,6 +311,7 @@ public sealed class TaskViewModel : ObservableObject
     public ICommand DeleteQueuedFollowUpCommand => deleteQueuedFollowUpCommand;
     public ICommand SendQueuedFollowUpCommand => sendQueuedFollowUpCommand;
     public ICommand OpenExternalUriCommand { get; }
+    public ICommand EditGeneratedImageCommand { get; }
     public ICommand OpenOptionsCommand { get; }
     public ICommand ShowOptionsMainCommand { get; }
     public ICommand ShowModelsCommand { get; }
@@ -1022,6 +1033,7 @@ public sealed class TaskViewModel : ObservableObject
         RaisePromptEditCommandStates();
         RaiseQueuedFollowUpCommandStates();
         openExternalUriCommand.RaiseCanExecuteChanged();
+        editGeneratedImageCommand.RaiseCanExecuteChanged();
         openOptionsCommand.RaiseCanExecuteChanged();
         showOptionsMainCommand.RaiseCanExecuteChanged();
         showModelsCommand.RaiseCanExecuteChanged();

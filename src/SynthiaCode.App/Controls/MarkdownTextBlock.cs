@@ -27,6 +27,12 @@ public sealed class MarkdownTextBlock : TextBlock
         typeof(MarkdownTextBlock),
         new PropertyMetadata(null, OnContentPropertyChanged));
 
+    public static readonly DependencyProperty EditImageCommandProperty = DependencyProperty.Register(
+        nameof(EditImageCommand),
+        typeof(ICommand),
+        typeof(MarkdownTextBlock),
+        new PropertyMetadata(null, OnContentPropertyChanged));
+
     public string Markdown
     {
         get => (string)GetValue(MarkdownProperty);
@@ -37,6 +43,12 @@ public sealed class MarkdownTextBlock : TextBlock
     {
         get => (ICommand?)GetValue(LinkCommandProperty);
         set => SetValue(LinkCommandProperty, value);
+    }
+
+    public ICommand? EditImageCommand
+    {
+        get => (ICommand?)GetValue(EditImageCommandProperty);
+        set => SetValue(EditImageCommandProperty, value);
     }
 
     private static void OnContentPropertyChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs e) =>
@@ -454,6 +466,22 @@ public sealed class MarkdownTextBlock : TextBlock
             var content = new StackPanel();
             content.Children.Add(previewButton);
             content.Children.Add(linkText);
+            if (EditImageCommand?.CanExecute(path) == true)
+            {
+                var editButton = new Button
+                {
+                    Content = "Edit image",
+                    Command = EditImageCommand,
+                    CommandParameter = path,
+                    Margin = new Thickness(0, 8, 0, 0),
+                    Padding = new Thickness(12, 5, 12, 5),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    ToolTip = "Attach this image and prepare an imagegen edit prompt"
+                };
+                editButton.SetResourceReference(FrameworkElement.StyleProperty, "CompactButton");
+                AutomationProperties.SetName(editButton, $"Edit generated image: {label}");
+                content.Children.Add(editButton);
+            }
 
             preview = new Border
             {

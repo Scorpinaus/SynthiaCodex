@@ -208,7 +208,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             EditPromptAsync,
             userInteractionService.ShowImagePreview,
             ForkConversationFromTurnAsync,
-            LoadComposerSkillsAsync);
+            LoadComposerSkillsAsync,
+            BeginGeneratedImageEditAsync);
         TaskWorkspace.PropertyChanged += (_, args) => RelayTaskPropertyChanged(args.PropertyName);
 
         ApprovalQueue = new ApprovalQueueViewModel(appServerSessionCoordinator.RespondToServerRequestAsync);
@@ -334,6 +335,30 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             : imported == 0
                 ? failures[0]
                 : $"Added {imported} image{(imported == 1 ? string.Empty : "s")}; {failures.Count} skipped";
+    }
+
+    private async Task BeginGeneratedImageEditAsync(string path)
+    {
+        if (attachmentStore is null)
+        {
+            StatusMessage = "Attachment storage is unavailable.";
+            return;
+        }
+
+        try
+        {
+            var attachment = await attachmentStore.ImportFileAsync(path).ConfigureAwait(true);
+            TaskWorkspace.AddAttachment(attachment);
+            const string editPrompt = "$imagegen Edit this image: ";
+            TaskWorkspace.Prompt = string.IsNullOrWhiteSpace(TaskWorkspace.Prompt)
+                ? editPrompt
+                : editPrompt + TaskWorkspace.Prompt.Trim();
+            StatusMessage = "Generated image attached. Describe the edit, then send.";
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        {
+            StatusMessage = $"Could not prepare {Path.GetFileName(path)} for editing: {ex.Message}";
+        }
     }
 
     public async Task AddAttachmentPathsAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default)

@@ -221,6 +221,13 @@ public sealed class TaskViewModel : ObservableObject
             parameter => parameter is Uri uri &&
                 (ExternalUriPolicy.IsSupported(uri) ||
                  LocalImageResourcePolicy.IsSupported(uri, out _)));
+        EditGeneratedImageCommand = editGeneratedImageCommand = new AsyncRelayCommand(
+            parameter => parameter is string path
+                ? composerActions.EditGeneratedImageAsync(path)
+                : Task.CompletedTask,
+            parameter => parameter is string path &&
+                !IsTurnRunning &&
+                LocalImageResourcePolicy.TryCreateSupportedUri(path, out _, out _));
         OpenOptionsCommand = openOptionsCommand = new RelayCommand(
             () =>
             {

@@ -165,6 +165,22 @@ public sealed class WpfUserInteractionService : IUserInteractionService
         viewer.ShowDialog();
     }
 
+    public GeneratedImageEditSelection? SelectGeneratedImageEdit(string path)
+    {
+        var editor = new GeneratedImageEditWindow(path);
+        if (Application.Current?.MainWindow is { IsVisible: true } owner)
+        {
+            editor.Owner = owner;
+        }
+        else
+        {
+            editor.ShowInTaskbar = true;
+            editor.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        }
+
+        return editor.ShowDialog() == true ? editor.Selection : null;
+    }
+
     public void RevealInExplorer(string path)
     {
         var startInfo = new ProcessStartInfo

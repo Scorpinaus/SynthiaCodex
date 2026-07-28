@@ -281,21 +281,55 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task BeginGeneratedImageEditAsync(string path)
     {
-        if (attachmentStore is null)
-        {
-            StatusMessage = "Attachment storage is unavailable.";
-            return;
-        }
-
         try
         {
-            var attachment = await attachmentStore.ImportFileAsync(path).ConfigureAwait(true);
+            var editSelection = userInteractionService.SelectGeneratedImageEdit(path);
+            if (editSelection is null)
+            {
+                StatusMessage = "Image edit canceled.";
+                return;
+            }
+
+            var result = await attachmentDraftService.ImportImagesAsync([path]).ConfigureAwait(true);
+            if (result.Attachments.Count == 0)
+            {
+                StatusMessage = result.Failures.FirstOrDefault() is { } failure
+                    ? $"Could not prepare image for editing: {failure}"
+                    : $"Could not prepare {Path.GetFileName(path)} for editing.";
+                return;
+            }
+
+            var attachment = result.Attachments[0];
+            AttachmentReference? regionGuide = null;
+            if (editSelection.HasRegionGuide)
+            {
+                await using var guideStream = new MemoryStream(
+                    editSelection.RegionGuidePng!,
+                    writable: false);
+                var sourceName = Path.GetFileNameWithoutExtension(path);
+                regionGuide = await attachmentDraftService.ImportPastedImageAsync(
+                    guideStream,
+                    $"{sourceName}-edit-region.png").ConfigureAwait(true);
+            }
+
             TaskWorkspace.AddAttachment(attachment);
-            const string editPrompt = "$imagegen Edit this image: ";
+            if (regionGuide is not null)
+            {
+                TaskWorkspace.AddAttachment(regionGuide);
+            }
+
+            var editPrompt = regionGuide is null
+                ? $"$imagegen Edit the attached image \"{attachment.DisplayName}\": "
+                : $"$imagegen Edit the attached source image \"{attachment.DisplayName}\". " +
+                  $"The companion image \"{regionGuide.DisplayName}\" is an edit-region guide; " +
+                  "the translucent red mark identifies the area to change. Preserve everything " +
+                  "outside the marked area. Requested change: ";
             TaskWorkspace.Prompt = string.IsNullOrWhiteSpace(TaskWorkspace.Prompt)
                 ? editPrompt
                 : editPrompt + TaskWorkspace.Prompt.Trim();
-            StatusMessage = "Generated image attached. Describe the edit, then send.";
+            StatusMessage = regionGuide is null
+                ? "Generated image attached. Describe the edit, then send."
+                : "Generated image and marked region attached. Describe the edit, then send.";
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         {
@@ -3392,6 +3426,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         public Task LoadModelsAsync() => owner.LoadModelOptionsAsync();
         public void ShowImagePreview(string path) => owner.userInteractionService.ShowImagePreview(path);
+        public Task EditGeneratedImageAsync(string path) => owner.BeginGeneratedImageEditAsync(path);
         public Task<ComposerSkillLoadResult> LoadComposerSkillsAsync(CancellationToken cancellationToken) => owner.LoadComposerSkillsAsync(cancellationToken);
     }
 

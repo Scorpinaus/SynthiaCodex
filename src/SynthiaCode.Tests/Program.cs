@@ -1,5 +1,6 @@
 using SynthiaCode.App.Services;
 using SynthiaCode.App.ViewModels;
+using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Auth;
 using SynthiaCode.Core.Codex;
 using SynthiaCode.Core.Codex.AppServer;
@@ -9,6 +10,7 @@ using SynthiaCode.Core.Settings;
 using SynthiaCode.Core.Terminal;
 using SynthiaCode.Core.Worktrees;
 using SynthiaCode.Infrastructure.Auth;
+using SynthiaCode.Infrastructure.Attachments;
 using SynthiaCode.Infrastructure.Codex;
 using SynthiaCode.Infrastructure.Git;
 using SynthiaCode.Infrastructure.Logging;
@@ -55,6 +57,7 @@ internal static class LegacyBehavioralTests
     ("settings saves are snapshotted and coalesced", TestSettingsSavesAreSnapshottedAndCoalescedAsync),
     ("settings recover interrupted atomic writes", TestSettingsRecoverInterruptedAtomicWritesAsync),
     ("view model applies and persists selected theme", TestViewModelAppliesAndPersistsThemeAsync),
+    ("view model prepares whole-image and marked-region imagegen edits", TestViewModelPreparesGeneratedImageEditsAsync),
     ("view model validates and persists custom Codex instructions", TestViewModelPersistsCustomInstructionsAsync),
     ("view model persists responsive shell state", TestViewModelPersistsResponsiveShellStateAsync),
     ("view model terminal toggle selects terminal workspace", TestViewModelTerminalToggleSelectsTerminalWorkspaceAsync),
@@ -491,6 +494,60 @@ static async Task TestViewModelAppliesAndPersistsThemeAsync()
     await WaitUntilAsync(() => settingsStore.SavedSettings.Theme == "Light", "theme setting saved");
 
     AssertEqual("Light", themeService.AppliedTheme, "changed theme applied");
+}
+
+static async Task TestViewModelPreparesGeneratedImageEditsAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var sourcePath = Path.Combine(temp.Root, "generated-image.png");
+    var png = Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z6JkAAAAASUVORK5CYII=");
+    await File.WriteAllBytesAsync(sourcePath, png);
+
+    await using var transport = new FakeAppServerTransport();
+    var logger = new TestLogger();
+    var interaction = new FakeUserInteractionService();
+    var attachmentStore = new LocalAttachmentStore(
+        Path.Combine(temp.Root, "attachment-store"),
+        logger);
+    await using var viewModel = CreateMainViewModel(
+        transport,
+        temp.Root,
+        AuthReadiness.LikelySignedIn,
+        logger: logger,
+        userInteractionService: interaction,
+        attachmentStore: attachmentStore);
+
+    await ((AsyncRelayCommand)viewModel.TaskWorkspace.EditGeneratedImageCommand)
+        .ExecuteAsync(sourcePath);
+
+    AssertEqual(sourcePath, interaction.SelectedImageEditPath, "whole-image editor source path");
+    AssertEqual(1, viewModel.TaskWorkspace.Attachments.Count, "whole-image edit attachment count");
+    AssertTrue(
+        viewModel.PromptText.StartsWith("$imagegen Edit the attached image", StringComparison.Ordinal),
+        "whole-image edit prepares an imagegen prompt");
+
+    viewModel.TaskWorkspace.ClearAttachments();
+    viewModel.PromptText = string.Empty;
+    var regionGuidePng = Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+    interaction.ImageEditSelection = new GeneratedImageEditSelection(regionGuidePng);
+
+    await ((AsyncRelayCommand)viewModel.TaskWorkspace.EditGeneratedImageCommand)
+        .ExecuteAsync(sourcePath);
+
+    AssertEqual(2, viewModel.TaskWorkspace.Attachments.Count, "region edit source and guide attachments");
+    AssertTrue(
+        viewModel.TaskWorkspace.Attachments[1].DisplayName.EndsWith("-edit-region.png", StringComparison.Ordinal),
+        "region guide has a descriptive attachment name");
+    AssertTrue(
+        viewModel.PromptText.Contains("translucent red mark", StringComparison.Ordinal) &&
+        viewModel.PromptText.Contains("Preserve everything outside", StringComparison.Ordinal),
+        "region edit prompt explains the guide and preservation boundary");
+    AssertEqual(
+        "Generated image and marked region attached. Describe the edit, then send.",
+        viewModel.StatusMessage,
+        "region edit readiness status");
 }
 
 static async Task TestViewModelPersistsCustomInstructionsAsync()
@@ -2951,7 +3008,9 @@ static MainViewModel CreateMainViewModel(
     ICodexProcessService? processService = null,
     IWorktreeService? worktreeService = null,
     ITerminalService? terminalService = null,
-    IAppLogger? logger = null)
+    IAppLogger? logger = null,
+    IUserInteractionService? userInteractionService = null,
+    IAttachmentStore? attachmentStore = null)
 {
     var installation = new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation");
     var effectiveLogger = logger ?? new TestLogger();
@@ -2969,14 +3028,15 @@ static MainViewModel CreateMainViewModel(
         worktreeService ?? new FakeWorktreeService(projectPath, Path.Combine(projectPath, ".test-worktree")),
         new RecentProjectService(),
         new FakeFolderPicker(projectPath),
-        new FakeUserInteractionService(),
+        userInteractionService ?? new FakeUserInteractionService(),
         themeService ?? new FakeThemeService(),
         cliUtilityRunner ?? new FakeCodexCliUtilityRunner(),
         new ThreadStore(),
         new CodexThreadWorkspace(),
         terminalService ?? new FakeTerminalService(),
         effectiveLogger,
-        new GeneralWorkspaceService(Path.Combine(projectPath, ".synthiacode-test-data")));
+        new GeneralWorkspaceService(Path.Combine(projectPath, ".synthiacode-test-data")),
+        attachmentStore);
 }
 
 static async Task WaitUntilAsync(Func<bool> condition, string label)
@@ -3403,6 +3463,11 @@ internal sealed class FakeTerminalSession(string workingDirectory) : ITerminalSe
 
 internal sealed class FakeUserInteractionService : IUserInteractionService
 {
+    public GeneratedImageEditSelection? ImageEditSelection { get; set; } =
+        GeneratedImageEditSelection.EntireImage;
+
+    public string? SelectedImageEditPath { get; private set; }
+
     public bool ConfirmDestructiveAction(string title, string message) => true;
 
     public string? PromptForText(string title, string message, string initialValue) => null;
@@ -3417,6 +3482,12 @@ internal sealed class FakeUserInteractionService : IUserInteractionService
 
     public void ShowImagePreview(string path)
     {
+    }
+
+    public GeneratedImageEditSelection? SelectGeneratedImageEdit(string path)
+    {
+        SelectedImageEditPath = path;
+        return ImageEditSelection;
     }
 
     public void RevealInExplorer(string path)

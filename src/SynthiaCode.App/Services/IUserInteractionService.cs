@@ -12,5 +12,7 @@ public interface IUserInteractionService
 
     void ShowImagePreview(string path);
 
+    GeneratedImageEditSelection? SelectGeneratedImageEdit(string path);
+
     void RevealInExplorer(string path);
 }

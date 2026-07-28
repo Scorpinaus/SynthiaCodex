@@ -35,6 +35,7 @@ public interface IComposerSupportActions
 {
     Task LoadModelsAsync();
     void ShowImagePreview(string path);
+    Task EditGeneratedImageAsync(string path);
     Task<ComposerSkillLoadResult> LoadComposerSkillsAsync(CancellationToken cancellationToken);
 }
 

@@ -1,5 +1,6 @@
 using SynthiaCode.App.Services;
 using SynthiaCode.App.ViewModels;
+using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Codex;
 using SynthiaCode.Core.Codex.Configuration;
@@ -30,6 +31,7 @@ internal sealed class TaskConversationActionStub : ITurnExecutionActions, IFollo
     public Func<QueuedFollowUp, Task> SendQueued { get; init; } = _ => Task.CompletedTask;
     public Func<CodexConversationTurn, string, Task<bool>> EditPrompt { get; init; } = (_, _) => Task.FromResult(false);
     public Action<string> ShowImage { get; init; } = _ => { };
+    public Func<string, Task> EditImage { get; init; } = _ => Task.CompletedTask;
     public Func<string, Task> Fork { get; init; } = _ => Task.CompletedTask;
     public Func<CancellationToken, Task<ComposerSkillLoadResult>> LoadSkills { get; init; } =
         _ => Task.FromResult(new ComposerSkillLoadResult([], false, null));
@@ -46,6 +48,7 @@ internal sealed class TaskConversationActionStub : ITurnExecutionActions, IFollo
     public Task SendQueuedFollowUpAsync(string followUpId) => SendQueued(CreateQueuedFollowUp(followUpId));
     public Task<bool> EditPromptAsync(CodexConversationTurn turn, string editedPrompt) => EditPrompt(turn, editedPrompt);
     public void ShowImagePreview(string path) => ShowImage(path);
+    public Task EditGeneratedImageAsync(string path) => EditImage(path);
     public Task ForkConversationAsync(string turnId) => Fork(turnId);
     public Task<ComposerSkillLoadResult> LoadComposerSkillsAsync(CancellationToken cancellationToken) => LoadSkills(cancellationToken);
 
@@ -128,7 +131,8 @@ internal static class WorkspaceActionStubs
         CodexThreadWorkspace threadWorkspace,
         ITerminalService terminalService,
         IAppLogger logger,
-        IGeneralWorkspaceService generalWorkspaceService)
+        IGeneralWorkspaceService generalWorkspaceService,
+        IAttachmentStore? attachmentStore = null)
     {
         var resolver = new WorkspaceAttachmentResolver();
         var lifecycle = new ThreadLifecycleUseCaseService(
@@ -141,7 +145,10 @@ internal static class WorkspaceActionStubs
         var queue = new FollowUpQueueUseCaseService(
             appServerSessionCoordinator, workflow, settingsStore, threadWorkspace, queues);
         var attachments = new AttachmentDraftOrchestrationService(
-            null, resolver, new CodexTurnRequestFactory(null, resolver), logger);
+            attachmentStore,
+            resolver,
+            new CodexTurnRequestFactory(attachmentStore, resolver),
+            logger);
         return new MainViewModel(
             settingsStore, codexDiscoveryService, appServerSessionCoordinator, authService, folderPicker,
             userInteractionService, themeService, codexCliUtilityRunner, terminalService, logger,
@@ -158,7 +165,8 @@ internal static class WorkspaceActionStubs
         Func<QueuedFollowUp, Task>? sendQueuedFollowUp = null,
         Func<CodexConversationTurn, string, Task<bool>>? editPrompt = null,
         Action<string>? showLocalImage = null, Func<string, Task>? forkConversation = null,
-        Func<CancellationToken, Task<ComposerSkillLoadResult>>? loadComposerSkills = null) => new()
+        Func<CancellationToken, Task<ComposerSkillLoadResult>>? loadComposerSkills = null,
+        Func<string, Task>? editGeneratedImage = null) => new()
     {
         Submit = submit, Cancel = cancel, LoadModels = loadModels, Steer = steer,
         CanCancel = canCancel, CanSteer = canSteer,
@@ -168,6 +176,7 @@ internal static class WorkspaceActionStubs
         SendQueued = sendQueuedFollowUp ?? new Func<QueuedFollowUp, Task>(_ => global::System.Threading.Tasks.Task.CompletedTask),
         EditPrompt = editPrompt ?? new Func<CodexConversationTurn, string, Task<bool>>((_, _) => global::System.Threading.Tasks.Task.FromResult(false)),
         ShowImage = showLocalImage ?? (_ => { }),
+        EditImage = editGeneratedImage ?? new Func<string, Task>(_ => global::System.Threading.Tasks.Task.CompletedTask),
         Fork = forkConversation ?? new Func<string, Task>(_ => global::System.Threading.Tasks.Task.CompletedTask),
         LoadSkills = loadComposerSkills ?? new Func<CancellationToken, Task<ComposerSkillLoadResult>>(_ => global::System.Threading.Tasks.Task.FromResult(new ComposerSkillLoadResult([], false, null)))
     };

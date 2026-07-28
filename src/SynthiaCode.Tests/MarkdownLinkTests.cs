@@ -23,6 +23,7 @@ internal static class MarkdownLinkTests
         ("markdown renderer embeds generated local images", RendererEmbedsGeneratedLocalImagesAsync),
         ("image-generation notifications render an inline chat preview", ImageGenerationNotificationsRenderInlinePreviewAsync),
         ("generated image viewer loads an expanded image", GeneratedImageViewerLoadsExpandedImageAsync),
+        ("generated image editor renders rectangle and freehand region guides", GeneratedImageEditorRendersRegionGuidesAsync),
         ("markdown link renderer preserves unsafe and malformed links", RendererPreservesUnsafeAndMalformedLinksAsync),
         ("markdown link renderer routes link activation through its command", RendererRoutesLinkActivationAsync),
         ("external link policy permits only web destinations", ExternalLinkPolicyPermitsOnlyWebDestinations)
@@ -259,8 +260,8 @@ internal static class MarkdownLinkTests
             Assert(image.Source is not null, "the generated image is decoded into the transcript");
             Assert(image.MaxWidth <= 720 && image.MaxHeight <= 480, "the generated image preview is bounded");
             Assert(
-                AutomationProperties.GetName(previewButton) == "Expand generated image: Download the PNG",
-                "the generated image preview exposes an accessible expansion action");
+                AutomationProperties.GetName(previewButton) == "Edit generated image: Download the PNG",
+                "the generated image preview exposes an accessible edit action");
             Assert(link.NavigateUri?.IsFile == true, "the embedded download link targets the local image");
             Assert(InlineText(link) == "Download the PNG", "the assistant-provided image label remains clickable");
             Assert((string)editButton.Content == "Edit image", "the generated-image card exposes an edit action");
@@ -268,16 +269,16 @@ internal static class MarkdownLinkTests
                 AutomationProperties.GetName(editButton) == "Edit generated image: Download the PNG",
                 "the generated-image edit action has an accessible name");
 
-            editButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            editButton.Command.Execute(editButton.CommandParameter);
             Assert(
                 string.Equals(editedPath, imagePath, StringComparison.OrdinalIgnoreCase),
                 "the edit action routes the generated local path through its command");
 
+            editedPath = null;
             previewButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Assert(
-                activatedUri?.IsFile == true &&
-                string.Equals(activatedUri.LocalPath, imagePath, StringComparison.OrdinalIgnoreCase),
-                "clicking the image preview requests the expanded local image");
+                string.Equals(editedPath, imagePath, StringComparison.OrdinalIgnoreCase),
+                "clicking the generated image starts the edit workflow");
 
             activatedUri = null;
             link.RaiseEvent(new RequestNavigateEventArgs(link.NavigateUri!, null));
@@ -294,13 +295,23 @@ internal static class MarkdownLinkTests
                 () => Task.CompletedTask,
                 () => false,
                 () => false,
-                showLocalImage: path => revealedPath = path));
+                showLocalImage: path => revealedPath = path,
+                editGeneratedImage: path =>
+                {
+                    editedPath = path;
+                    return Task.CompletedTask;
+                }));
             Assert(taskWorkspace.OpenExternalUriCommand.CanExecute(link.NavigateUri), "the transcript command accepts an existing local image");
             taskWorkspace.OpenExternalUriCommand.Execute(link.NavigateUri);
             Assert(
                 string.Equals(revealedPath, imagePath, StringComparison.OrdinalIgnoreCase),
                 "the transcript command opens the expanded generated image through the interaction service");
             Assert(taskWorkspace.EditGeneratedImageCommand.CanExecute(imagePath), "an idle conversation can edit an available generated image");
+            editedPath = null;
+            ((AsyncRelayCommand)taskWorkspace.EditGeneratedImageCommand).ExecuteAsync(imagePath).GetAwaiter().GetResult();
+            Assert(
+                string.Equals(editedPath, imagePath, StringComparison.OrdinalIgnoreCase),
+                "the task workspace routes generated-image edits through its composer action contract");
             taskWorkspace.IsTurnRunning = true;
             Assert(!taskWorkspace.EditGeneratedImageCommand.CanExecute(imagePath), "image editing is disabled while a turn is running");
             taskWorkspace.IsTurnRunning = false;
@@ -413,6 +424,89 @@ internal static class MarkdownLinkTests
             Assert(viewer.Width > 720 && viewer.Height > 480, "the expanded viewer is larger than the transcript preview");
             Assert(viewer.PreviewImage.Source is not null, "the expanded viewer decodes the full image");
             Assert(viewer.PreviewImage.Stretch == System.Windows.Media.Stretch.Uniform, "the expanded image retains its aspect ratio");
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    });
+
+    private static Task GeneratedImageEditorRendersRegionGuidesAsync() => RunOnStaAsync(() =>
+    {
+        const int width = 100;
+        const int height = 80;
+        const int stride = width * 4;
+        var sourcePixels = new byte[stride * height];
+        for (var index = 0; index < sourcePixels.Length; index += 4)
+        {
+            sourcePixels[index] = 180;
+            sourcePixels[index + 1] = 40;
+            sourcePixels[index + 2] = 20;
+            sourcePixels[index + 3] = 255;
+        }
+
+        var source = System.Windows.Media.Imaging.BitmapSource.Create(
+            width,
+            height,
+            96,
+            96,
+            System.Windows.Media.PixelFormats.Bgra32,
+            null,
+            sourcePixels,
+            stride);
+        source.Freeze();
+
+        var rectangleGuide = GeneratedImageRegionGuideRenderer.RenderPng(
+            source,
+            GeneratedImageEditRegion.Rectangle(
+                new NormalizedImagePoint(0.25, 0.25),
+                new NormalizedImagePoint(0.75, 0.75)));
+        var freehandGuide = GeneratedImageRegionGuideRenderer.RenderPng(
+            source,
+            GeneratedImageEditRegion.Freehand(
+            [
+                new NormalizedImagePoint(0.2, 0.2),
+                new NormalizedImagePoint(0.5, 0.5),
+                new NormalizedImagePoint(0.8, 0.7)
+            ]));
+
+        using var rectangleStream = new MemoryStream(rectangleGuide);
+        var decoder = new System.Windows.Media.Imaging.PngBitmapDecoder(
+            rectangleStream,
+            System.Windows.Media.Imaging.BitmapCreateOptions.PreservePixelFormat,
+            System.Windows.Media.Imaging.BitmapCacheOption.OnLoad);
+        var converted = new System.Windows.Media.Imaging.FormatConvertedBitmap(
+            decoder.Frames[0],
+            System.Windows.Media.PixelFormats.Bgra32,
+            null,
+            0);
+        var renderedPixels = new byte[stride * height];
+        converted.CopyPixels(renderedPixels, stride, 0);
+        var outsideOffset = 5 * stride + 5 * 4;
+        var insideOffset = 40 * stride + 50 * 4;
+
+        Assert(converted.PixelWidth == width && converted.PixelHeight == height, "region guide retains the source dimensions");
+        Assert(
+            renderedPixels[outsideOffset] == sourcePixels[outsideOffset] &&
+            renderedPixels[outsideOffset + 2] == sourcePixels[outsideOffset + 2],
+            "region guide preserves pixels outside the marked area");
+        Assert(
+            renderedPixels[insideOffset + 2] > renderedPixels[outsideOffset + 2],
+            "rectangle region is visibly marked in red");
+        Assert(
+            !rectangleGuide.SequenceEqual(freehandGuide),
+            "freehand and rectangle selections produce distinct guides");
+
+        var tempDirectory = Path.Combine(Path.GetTempPath(), $"synthiacode-image-editor-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+        var guidePath = Path.Combine(tempDirectory, "region-guide.png");
+        File.WriteAllBytes(guidePath, rectangleGuide);
+        try
+        {
+            var editor = new GeneratedImageEditWindow(guidePath);
+            Assert(editor.EditorImage.Source is not null, "the edit window loads the generated image");
+            Assert(editor.Selection is null, "the editor begins without an implicit region selection");
+            Assert(editor.Title.Contains("region-guide.png", StringComparison.Ordinal), "the editor identifies its source image");
         }
         finally
         {

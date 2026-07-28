@@ -444,17 +444,17 @@ public sealed class MarkdownTextBlock : TextBlock
             var previewButton = new Button
             {
                 Content = image,
-                Tag = target,
+                Tag = path,
                 Padding = new Thickness(0),
                 BorderThickness = new Thickness(0),
                 Background = Brushes.Transparent,
                 Cursor = Cursors.Hand,
                 HorizontalAlignment = HorizontalAlignment.Left,
-                ToolTip = $"Expand {label}"
+                ToolTip = $"Edit {label}"
             };
             previewButton.SetResourceReference(Control.FocusVisualStyleProperty, "FocusVisual");
             previewButton.Click += OnGeneratedImagePreviewClick;
-            AutomationProperties.SetName(previewButton, $"Expand generated image: {label}");
+            AutomationProperties.SetName(previewButton, $"Edit generated image: {label}");
 
             var linkText = new TextBlock
             {
@@ -476,7 +476,7 @@ public sealed class MarkdownTextBlock : TextBlock
                     Margin = new Thickness(0, 8, 0, 0),
                     Padding = new Thickness(12, 5, 12, 5),
                     HorizontalAlignment = HorizontalAlignment.Left,
-                    ToolTip = "Attach this image and prepare an imagegen edit prompt"
+                    ToolTip = "Edit the whole image or mark a region to change"
                 };
                 editButton.SetResourceReference(FrameworkElement.StyleProperty, "CompactButton");
                 AutomationProperties.SetName(editButton, $"Edit generated image: {label}");
@@ -512,8 +512,17 @@ public sealed class MarkdownTextBlock : TextBlock
 
     private void OnGeneratedImagePreviewClick(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: Uri target } &&
-            LinkCommand?.CanExecute(target) == true)
+        if (sender is not Button { Tag: string path })
+        {
+            return;
+        }
+
+        if (EditImageCommand?.CanExecute(path) == true)
+        {
+            EditImageCommand.Execute(path);
+        }
+        else if (LocalImageResourcePolicy.TryCreateSupportedUri(path, out var target, out _) &&
+                 LinkCommand?.CanExecute(target) == true)
         {
             LinkCommand.Execute(target);
         }

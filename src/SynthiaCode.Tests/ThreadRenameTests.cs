@@ -562,6 +562,9 @@ internal static class ThreadRenameTests
         {
         }
 
+        public GeneratedImageEditSelection? SelectGeneratedImageEdit(string path) =>
+            GeneratedImageEditSelection.EntireImage;
+
         public void RevealInExplorer(string path)
         {
         }

@@ -133,7 +133,11 @@
                             </Border.Style>
                             <StackPanel>
                                 <StackPanel Margin="48,0,0,12">
-                                    <Border Style="{StaticResource ConversationUserSurface}" AutomationProperties.Name="User message">
+                                    <Border Style="{StaticResource ConversationUserSurface}"
+                                            AutomationProperties.Name="User message"
+                                            Cursor="Hand"
+                                            MouseLeftButtonUp="OnUserMessageMouseLeftButtonUp"
+                                            ToolTip="Click to copy user message">
                                         <StackPanel>
                                             <Border Style="{StaticResource StatePill}"
                                                     HorizontalAlignment="Right"

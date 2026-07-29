@@ -209,13 +209,31 @@ public partial class TaskView : UserControl
 
     private void OnCopyMessageClick(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { CommandParameter: string message } &&
-            !string.IsNullOrWhiteSpace(message))
+        if (sender is Button { CommandParameter: string message })
         {
-            Clipboard.SetText(message);
+            CopyMessageToClipboard(message);
         }
 
         e.Handled = true;
+    }
+
+    private void OnUserMessageMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: CodexConversationTurn turn } &&
+            !turn.IsPromptEditing)
+        {
+            CopyMessageToClipboard(turn.UserPrompt);
+        }
+
+        e.Handled = true;
+    }
+
+    private static void CopyMessageToClipboard(string? message)
+    {
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            Clipboard.SetText(message);
+        }
     }
 
     private void OnFindInChatPreviewKeyDown(object sender, KeyEventArgs e)

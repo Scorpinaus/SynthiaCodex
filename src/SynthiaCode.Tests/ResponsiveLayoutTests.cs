@@ -5,6 +5,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using SynthiaCode.App;
@@ -429,6 +430,13 @@ internal static class ResponsiveLayoutTests
         Assert(!string.IsNullOrWhiteSpace(assistantTimestamp.Text), "assistant message has its own timestamp footer");
         var userSurface = FindVisualDescendants<Border>(conversationList)
             .Single(border => AutomationProperties.GetName(border) == "User message");
+        Clipboard.SetText("clipboard sentinel");
+        userSurface.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+        {
+            RoutedEvent = UIElement.MouseLeftButtonUpEvent,
+            Source = userSurface
+        });
+        Assert(Clipboard.GetText() == longLine, "clicking a user message copies its prompt");
         var userFooter = FindVisualDescendants<Grid>(conversationList)
             .Single(grid => AutomationProperties.GetName(grid) == "User message footer");
         var assistantFooter = FindVisualDescendants<Grid>(conversationList)

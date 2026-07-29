@@ -58,6 +58,7 @@ internal static class LegacyBehavioralTests
     ("settings recover interrupted atomic writes", TestSettingsRecoverInterruptedAtomicWritesAsync),
     ("view model applies and persists selected theme", TestViewModelAppliesAndPersistsThemeAsync),
     ("view model prepares whole-image and marked-region imagegen edits", TestViewModelPreparesGeneratedImageEditsAsync),
+    ("view model dispatches image attachment cleanup to its captured UI context", TestViewModelDispatchesImageAttachmentCleanupAsync),
     ("view model validates and persists custom Codex instructions", TestViewModelPersistsCustomInstructionsAsync),
     ("view model persists responsive shell state", TestViewModelPersistsResponsiveShellStateAsync),
     ("view model terminal toggle selects terminal workspace", TestViewModelTerminalToggleSelectsTerminalWorkspaceAsync),
@@ -548,6 +549,74 @@ static async Task TestViewModelPreparesGeneratedImageEditsAsync()
         "Generated image and marked region attached. Describe the edit, then send.",
         viewModel.StatusMessage,
         "region edit readiness status");
+}
+
+static async Task TestViewModelDispatchesImageAttachmentCleanupAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var projectPath = temp.CreateDirectory("ImageEditRepo");
+    var sourcePath = Path.Combine(projectPath, "generated-image.png");
+    var png = Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z6JkAAAAASUVORK5CYII=");
+    await File.WriteAllBytesAsync(sourcePath, png);
+
+    await using var transport = new FakeAppServerTransport();
+    var logger = new TestLogger();
+    var attachmentStore = new LocalAttachmentStore(
+        Path.Combine(temp.Root, "attachment-store"),
+        logger);
+    var context = new InlineTrackingSynchronizationContext();
+    var previousContext = SynchronizationContext.Current;
+    MainViewModel viewModel;
+    try
+    {
+        SynchronizationContext.SetSynchronizationContext(context);
+        viewModel = CreateMainViewModel(
+            transport,
+            projectPath,
+            AuthReadiness.LikelySignedIn,
+            logger: logger,
+            attachmentStore: attachmentStore);
+    }
+    finally
+    {
+        SynchronizationContext.SetSynchronizationContext(previousContext);
+    }
+
+    try
+    {
+        await viewModel.InitializeAsync();
+        viewModel.BrowseProjectCommand.Execute(null);
+        await WaitUntilAsync(
+            () => string.Equals(viewModel.SelectedProjectPath, projectPath, StringComparison.OrdinalIgnoreCase),
+            "image edit project selection");
+        await viewModel.AddImageFilesAsync([sourcePath]);
+        AssertEqual(1, viewModel.TaskWorkspace.Attachments.Count, "image edit turn starts with an attachment");
+
+        viewModel.PromptText = "$imagegen Change the marked area.";
+        var submit = ((AsyncRelayCommand)viewModel.SubmitPromptCommand).ExecuteAsync();
+        await transport.WaitForClientMessageCountAsync(2);
+        transport.ServerSend("""{"id":0,"result":{"userAgent":"test"}}""");
+        await transport.WaitForClientMessageCountAsync(3);
+        transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thread-image-edit"}}}""");
+        await transport.WaitForClientMessageCountAsync(4);
+        transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-image-edit"}}}""");
+
+        await WaitUntilAsync(
+            () => context.SendCount > 0 && viewModel.TaskWorkspace.Attachments.Count == 0,
+            "image attachment cleanup dispatched to captured context");
+        await CompleteAutomaticThreadRenameAsync(transport, "thread-image-edit");
+        await submit;
+
+        AssertTrue(context.SendCount > 0, "turn-start projection marshals through the captured context");
+        transport.ServerSend(
+            """{"method":"turn/completed","params":{"threadId":"thread-image-edit","turn":{"id":"turn-image-edit","status":"completed","items":[]}}}""");
+        await WaitUntilAsync(() => !viewModel.IsTurnRunning, "image edit turn completed");
+    }
+    finally
+    {
+        await viewModel.DisposeAsync();
+    }
 }
 
 static async Task TestViewModelPersistsCustomInstructionsAsync()
@@ -3503,6 +3572,21 @@ internal sealed class FakeThemeService : IThemeService
     {
         AppliedTheme = theme;
     }
+}
+
+internal sealed class InlineTrackingSynchronizationContext : SynchronizationContext
+{
+    private int sendCount;
+
+    public int SendCount => Volatile.Read(ref sendCount);
+
+    public override void Send(SendOrPostCallback callback, object? state)
+    {
+        Interlocked.Increment(ref sendCount);
+        callback(state);
+    }
+
+    public override void Post(SendOrPostCallback callback, object? state) => callback(state);
 }
 
 internal sealed class FakeCodexCliUtilityRunner(CodexCliUtilityResult? result = null) : ICodexCliUtilityRunner

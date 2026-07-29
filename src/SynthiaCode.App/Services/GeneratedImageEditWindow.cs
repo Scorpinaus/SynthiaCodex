@@ -13,14 +13,19 @@ namespace SynthiaCode.App.Services;
 public sealed class GeneratedImageEditWindow : Window
 {
     private const double MinimumSelectionSize = 4;
+    private const double BrushSizeStep = 4;
     private readonly BitmapSource source;
     private readonly Canvas selectionCanvas;
     private readonly TextBlock selectionStatus;
+    private readonly TextBlock brushSizeStatus;
+    private readonly Button decreaseBrushSizeButton;
+    private readonly Button increaseBrushSizeButton;
     private readonly Button useRegionButton;
     private readonly List<NormalizedImagePoint> freehandPoints = [];
     private GeneratedImageEditTool activeTool = GeneratedImageEditTool.Rectangle;
     private GeneratedImageEditRegion? selectedRegion;
     private Point? dragStart;
+    private double brushSize = GeneratedImageEditRegion.DefaultFreehandBrushSize;
 
     public GeneratedImageEditWindow(string path)
     {
@@ -78,9 +83,24 @@ public sealed class GeneratedImageEditWindow : Window
         var rectangleButton = CreateToolButton("Rectangle", "Draw a rectangular edit region");
         var freehandButton = CreateToolButton("Draw", "Draw over the area to change");
         var clearButton = CreateToolButton("Clear", "Clear the selected edit region");
+        decreaseBrushSizeButton = CreateToolButton("−", "Decrease draw brush size");
+        decreaseBrushSizeButton.MinWidth = 40;
+        increaseBrushSizeButton = CreateToolButton("+", "Increase draw brush size");
+        increaseBrushSizeButton.MinWidth = 40;
+        brushSizeStatus = new TextBlock
+        {
+            MinWidth = 94,
+            TextAlignment = TextAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 8, 0)
+        };
+        AutomationProperties.SetName(brushSizeStatus, "Draw brush size");
         rectangleButton.Click += (_, _) => SelectTool(GeneratedImageEditTool.Rectangle);
         freehandButton.Click += (_, _) => SelectTool(GeneratedImageEditTool.Freehand);
         clearButton.Click += (_, _) => ClearSelection();
+        decreaseBrushSizeButton.Click += (_, _) => AdjustBrushSize(-BrushSizeStep);
+        increaseBrushSizeButton.Click += (_, _) => AdjustBrushSize(BrushSizeStep);
+        UpdateBrushControls();
 
         var tools = new StackPanel
         {
@@ -88,6 +108,9 @@ public sealed class GeneratedImageEditWindow : Window
         };
         tools.Children.Add(rectangleButton);
         tools.Children.Add(freehandButton);
+        tools.Children.Add(decreaseBrushSizeButton);
+        tools.Children.Add(brushSizeStatus);
+        tools.Children.Add(increaseBrushSizeButton);
         tools.Children.Add(clearButton);
 
         var toolbar = new DockPanel
@@ -188,6 +211,8 @@ public sealed class GeneratedImageEditWindow : Window
 
     public Image EditorImage { get; }
 
+    public double BrushSize => brushSize;
+
     public GeneratedImageEditSelection? Selection { get; private set; }
 
     private static BitmapSource LoadBitmap(Uri imageUri)
@@ -218,9 +243,42 @@ public sealed class GeneratedImageEditWindow : Window
     {
         activeTool = tool;
         ClearSelection();
+        UpdateBrushControls();
         selectionStatus.Text = tool == GeneratedImageEditTool.Rectangle
             ? "Drag a rectangle around the area to change."
             : "Draw over the area to change. Release when finished.";
+    }
+
+    private void AdjustBrushSize(double change)
+    {
+        var updated = Math.Clamp(
+            brushSize + change,
+            GeneratedImageEditRegion.MinimumFreehandBrushSize,
+            GeneratedImageEditRegion.MaximumFreehandBrushSize);
+        if (updated == brushSize)
+        {
+            return;
+        }
+
+        brushSize = updated;
+        if (selectedRegion?.Kind == GeneratedImageEditRegionKind.Freehand)
+        {
+            selectedRegion = GeneratedImageEditRegion.Freehand(selectedRegion.Points, brushSize);
+            RedrawSelection();
+        }
+
+        UpdateBrushControls();
+    }
+
+    private void UpdateBrushControls()
+    {
+        var isFreehand = activeTool == GeneratedImageEditTool.Freehand;
+        brushSizeStatus.Text = $"Brush: {brushSize:0} px";
+        brushSizeStatus.IsEnabled = isFreehand;
+        decreaseBrushSizeButton.IsEnabled =
+            isFreehand && brushSize > GeneratedImageEditRegion.MinimumFreehandBrushSize;
+        increaseBrushSizeButton.IsEnabled =
+            isFreehand && brushSize < GeneratedImageEditRegion.MaximumFreehandBrushSize;
     }
 
     private void ClearSelection()
@@ -275,7 +333,7 @@ public sealed class GeneratedImageEditWindow : Window
                   Distance(freehandPoints[^1], normalized) >= 0.0025))
         {
             freehandPoints.Add(normalized);
-            selectedRegion = GeneratedImageEditRegion.Freehand(freehandPoints);
+            selectedRegion = GeneratedImageEditRegion.Freehand(freehandPoints, brushSize);
             RedrawSelection();
         }
         e.Handled = true;
@@ -331,7 +389,7 @@ public sealed class GeneratedImageEditWindow : Window
             var line = new Polyline
             {
                 Stroke = new SolidColorBrush(Color.FromArgb(210, 255, 32, 32)),
-                StrokeThickness = 18,
+                StrokeThickness = selectedRegion.BrushSize,
                 StrokeStartLineCap = PenLineCap.Round,
                 StrokeEndLineCap = PenLineCap.Round,
                 StrokeLineJoin = PenLineJoin.Round,

@@ -27,18 +27,37 @@ public readonly record struct NormalizedImagePoint(double X, double Y)
 
 public sealed record GeneratedImageEditRegion(
     GeneratedImageEditRegionKind Kind,
-    IReadOnlyList<NormalizedImagePoint> Points)
+    IReadOnlyList<NormalizedImagePoint> Points,
+    double BrushSize = 18)
 {
+    public const double MinimumFreehandBrushSize = 4;
+    public const double DefaultFreehandBrushSize = 18;
+    public const double MaximumFreehandBrushSize = 64;
+
     public static GeneratedImageEditRegion Rectangle(
         NormalizedImagePoint start,
         NormalizedImagePoint end) =>
         new(GeneratedImageEditRegionKind.Rectangle, [start.Clamp(), end.Clamp()]);
 
     public static GeneratedImageEditRegion Freehand(
-        IEnumerable<NormalizedImagePoint> points) =>
-        new(
+        IEnumerable<NormalizedImagePoint> points,
+        double brushSize = DefaultFreehandBrushSize)
+    {
+        if (!double.IsFinite(brushSize) ||
+            brushSize < MinimumFreehandBrushSize ||
+            brushSize > MaximumFreehandBrushSize)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(brushSize),
+                brushSize,
+                $"Brush size must be between {MinimumFreehandBrushSize} and {MaximumFreehandBrushSize}.");
+        }
+
+        return new(
             GeneratedImageEditRegionKind.Freehand,
-            points.Select(point => point.Clamp()).ToArray());
+            points.Select(point => point.Clamp()).ToArray(),
+            brushSize);
+    }
 }
 
 public static class GeneratedImageRegionGuideRenderer
@@ -90,7 +109,7 @@ public static class GeneratedImageRegionGuideRenderer
                 DrawRectangle(drawing, imageBounds, region.Points);
                 break;
             case GeneratedImageEditRegionKind.Freehand:
-                DrawFreehand(drawing, imageBounds, region.Points);
+                DrawFreehand(drawing, imageBounds, region.Points, region.BrushSize);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(region), region.Kind, "Unsupported image edit region.");
@@ -124,7 +143,8 @@ public static class GeneratedImageRegionGuideRenderer
     private static void DrawFreehand(
         DrawingContext drawing,
         Rect imageBounds,
-        IReadOnlyList<NormalizedImagePoint> points)
+        IReadOnlyList<NormalizedImagePoint> points,
+        double brushSize)
     {
         if (points.Count < 2)
         {
@@ -144,13 +164,19 @@ public static class GeneratedImageRegionGuideRenderer
 
         drawing.DrawGeometry(
             null,
-            new Pen(RegionStroke, Math.Max(12, Math.Min(imageBounds.Width, imageBounds.Height) * 0.035))
+            new Pen(RegionStroke, ScaleFreehandBrushSize(brushSize, imageBounds))
             {
                 StartLineCap = PenLineCap.Round,
                 EndLineCap = PenLineCap.Round,
                 LineJoin = PenLineJoin.Round
             },
             geometry);
+    }
+
+    private static double ScaleFreehandBrushSize(double brushSize, Rect bounds)
+    {
+        var defaultRenderedSize = Math.Max(12, Math.Min(bounds.Width, bounds.Height) * 0.035);
+        return defaultRenderedSize * brushSize / GeneratedImageEditRegion.DefaultFreehandBrushSize;
     }
 
     private static Point ToPixelPoint(NormalizedImagePoint point, Rect bounds)

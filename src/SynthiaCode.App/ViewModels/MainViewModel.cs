@@ -1868,8 +1868,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 submittedImages,
                 CreateTurnStartRequest(activeThreadId, submittedPrompt, submittedImages, workspacePath),
                 automaticTitle,
-                snapshot => TaskWorkspace.ApplyConversationSnapshot(snapshot),
-                started =>
+                snapshot => InvokeOnCapturedSynchronizationContext(
+                    () => TaskWorkspace.ApplyConversationSnapshot(snapshot)),
+                started => InvokeOnCapturedSynchronizationContext(() =>
                 {
                     TaskWorkspace.ApplyConversationSnapshot(started.Snapshot);
                     if (started.Status == CodexTurnStatus.Running)
@@ -1888,7 +1889,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                     StatusMessage = started.Status == CodexTurnStatus.Running
                         ? "Codex turn running"
                         : $"Codex turn {started.Status.ToString().ToLowerInvariant()}";
-                })).ConfigureAwait(true);
+                }))).ConfigureAwait(true);
             TaskWorkspace.SkillSelector.ClearSelectedSkills();
             TaskWorkspace.ApplyConversationSnapshot(result.Snapshot);
             if (SelectedThread is not null)
@@ -2785,6 +2786,19 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             synchronizationContext.Post(_ => ApplyRequest(), null);
         }
+    }
+
+    private void InvokeOnCapturedSynchronizationContext(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        var context = synchronizationContext;
+        if (context is null || ReferenceEquals(SynchronizationContext.Current, context))
+        {
+            action();
+            return;
+        }
+
+        context.Send(_ => action(), null);
     }
 
     private void OnAppServerStateChanged(object? sender, AppServerSessionStateChangedEventArgs args)

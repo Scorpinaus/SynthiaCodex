@@ -24,6 +24,7 @@ internal static class MarkdownLinkTests
         ("image-generation notifications render an inline chat preview", ImageGenerationNotificationsRenderInlinePreviewAsync),
         ("generated image viewer loads an expanded image", GeneratedImageViewerLoadsExpandedImageAsync),
         ("generated image editor renders rectangle and freehand region guides", GeneratedImageEditorRendersRegionGuidesAsync),
+        ("generated image editor increases and decreases the draw brush size", GeneratedImageEditorAdjustsDrawBrushSizeAsync),
         ("markdown link renderer preserves unsafe and malformed links", RendererPreservesUnsafeAndMalformedLinksAsync),
         ("markdown link renderer routes link activation through its command", RendererRoutesLinkActivationAsync),
         ("external link policy permits only web destinations", ExternalLinkPolicyPermitsOnlyWebDestinations)
@@ -514,6 +515,100 @@ internal static class MarkdownLinkTests
         }
     });
 
+    private static Task GeneratedImageEditorAdjustsDrawBrushSizeAsync() => RunOnStaAsync(() =>
+    {
+        const int width = 100;
+        const int height = 80;
+        const int stride = width * 4;
+        var sourcePixels = new byte[stride * height];
+        for (var index = 0; index < sourcePixels.Length; index += 4)
+        {
+            sourcePixels[index] = 180;
+            sourcePixels[index + 1] = 40;
+            sourcePixels[index + 2] = 20;
+            sourcePixels[index + 3] = 255;
+        }
+
+        var source = System.Windows.Media.Imaging.BitmapSource.Create(
+            width,
+            height,
+            96,
+            96,
+            System.Windows.Media.PixelFormats.Bgra32,
+            null,
+            sourcePixels,
+            stride);
+        source.Freeze();
+        NormalizedImagePoint[] freehandPoints =
+        [
+            new(0.2, 0.5),
+            new(0.5, 0.5),
+            new(0.8, 0.5)
+        ];
+
+        var minimumGuide = GeneratedImageRegionGuideRenderer.RenderPng(
+            source,
+            GeneratedImageEditRegion.Freehand(freehandPoints, 4));
+        var maximumGuide = GeneratedImageRegionGuideRenderer.RenderPng(
+            source,
+            GeneratedImageEditRegion.Freehand(freehandPoints, 64));
+        Assert(
+            CountChangedPixels(maximumGuide, sourcePixels, stride) >
+            CountChangedPixels(minimumGuide, sourcePixels, stride) * 2,
+            "the selected brush size changes the width of the exported freehand guide");
+
+        var tempDirectory = Path.Combine(Path.GetTempPath(), $"synthiacode-brush-size-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+        var imagePath = Path.Combine(tempDirectory, "brush-size-source.png");
+        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(source));
+        using (var stream = File.Create(imagePath))
+        {
+            encoder.Save(stream);
+        }
+
+        try
+        {
+            var editor = new GeneratedImageEditWindow(imagePath);
+            var buttons = Descendants<Button>((DependencyObject)editor.Content).ToArray();
+            var drawButton = buttons.Single(
+                button => AutomationProperties.GetName(button) == "Draw over the area to change");
+            var decreaseButton = buttons.Single(
+                button => AutomationProperties.GetName(button) == "Decrease draw brush size");
+            var increaseButton = buttons.Single(
+                button => AutomationProperties.GetName(button) == "Increase draw brush size");
+            var brushSizeStatus = Descendants<TextBlock>((DependencyObject)editor.Content).Single(
+                text => AutomationProperties.GetName(text) == "Draw brush size");
+
+            Assert(!decreaseButton.IsEnabled && !increaseButton.IsEnabled, "brush controls are inactive for the rectangle tool");
+            drawButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert(decreaseButton.IsEnabled && increaseButton.IsEnabled, "selecting Draw enables both brush controls");
+            Assert(editor.BrushSize == 18, "the draw brush starts at the existing visual width");
+
+            increaseButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert(editor.BrushSize == 22, "increase advances the draw brush by one bounded step");
+            Assert(brushSizeStatus.Text.Contains("22 px", StringComparison.Ordinal), "the current brush size is visible");
+            decreaseButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert(editor.BrushSize == 18, "decrease restores the previous draw brush size");
+
+            for (var index = 0; index < 20; index++)
+            {
+                decreaseButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            }
+            Assert(editor.BrushSize == 4 && !decreaseButton.IsEnabled, "decrease stops at the minimum brush size");
+
+            for (var index = 0; index < 20; index++)
+            {
+                increaseButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            }
+            Assert(editor.BrushSize == 64 && !increaseButton.IsEnabled, "increase stops at the maximum brush size");
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    });
+
     private static Task RendererPreservesUnsafeAndMalformedLinksAsync() => RunOnStaAsync(() =>
     {
         const string source = "[local](file:///C:/secret.txt) [script](javascript:alert(1)) [redirect](javascript:https://example.com) [unfinished](https://example.com";
@@ -555,6 +650,53 @@ internal static class MarkdownLinkTests
         Span span => string.Concat(span.Inlines.Select(InlineText)),
         _ => string.Empty
     };
+
+    private static int CountChangedPixels(byte[] png, byte[] sourcePixels, int stride)
+    {
+        using var stream = new MemoryStream(png);
+        var decoder = new System.Windows.Media.Imaging.PngBitmapDecoder(
+            stream,
+            System.Windows.Media.Imaging.BitmapCreateOptions.PreservePixelFormat,
+            System.Windows.Media.Imaging.BitmapCacheOption.OnLoad);
+        var converted = new System.Windows.Media.Imaging.FormatConvertedBitmap(
+            decoder.Frames[0],
+            System.Windows.Media.PixelFormats.Bgra32,
+            null,
+            0);
+        var renderedPixels = new byte[sourcePixels.Length];
+        converted.CopyPixels(renderedPixels, stride, 0);
+
+        var changed = 0;
+        for (var index = 0; index < renderedPixels.Length; index += 4)
+        {
+            if (renderedPixels[index] != sourcePixels[index] ||
+                renderedPixels[index + 1] != sourcePixels[index + 1] ||
+                renderedPixels[index + 2] != sourcePixels[index + 2])
+            {
+                changed++;
+            }
+        }
+
+        return changed;
+    }
+
+    private static IEnumerable<T> Descendants<T>(DependencyObject parent)
+        where T : DependencyObject
+    {
+        for (var index = 0; index < System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(parent, index);
+            if (child is T match)
+            {
+                yield return match;
+            }
+
+            foreach (var descendant in Descendants<T>(child))
+            {
+                yield return descendant;
+            }
+        }
+    }
 
     private static Task RunOnStaAsync(Action action)
     {

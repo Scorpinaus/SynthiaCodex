@@ -16,8 +16,9 @@ Run the normal sweep:
 
 The normal sweep removes:
 
-- each project's `bin\` and `obj\` directories
+- each project's `bin\`, `obj\`, and `artifacts\` directories
 - project and root `TestResults\` directories
+- the root `.tdd-artifacts\` and `artifacts\` directories
 - the root `.vs\` Visual Studio cache
 - the root `SynthiaCode.log` file
 - portable directories matching `portable\SynthiaCode-*\`

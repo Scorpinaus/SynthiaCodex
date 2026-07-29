@@ -89,10 +89,13 @@ Get-ChildItem -LiteralPath $srcPath -Recurse -Filter *.csproj -File | ForEach-Ob
     $projectDirectory = $_.Directory.FullName
     Add-Candidate -Path (Join-Path $projectDirectory "bin") -Category "project build output"
     Add-Candidate -Path (Join-Path $projectDirectory "obj") -Category "project intermediate output"
+    Add-Candidate -Path (Join-Path $projectDirectory "artifacts") -Category "project build artifacts"
     Add-Candidate -Path (Join-Path $projectDirectory "TestResults") -Category "test results"
 }
 
 Add-Candidate -Path (Join-Path $repoFullPath ".vs") -Category "Visual Studio cache"
+Add-Candidate -Path (Join-Path $repoFullPath ".tdd-artifacts") -Category "TDD build artifacts"
+Add-Candidate -Path (Join-Path $repoFullPath "artifacts") -Category "repository build artifacts"
 Add-Candidate -Path (Join-Path $repoFullPath "TestResults") -Category "test results"
 Add-Candidate -Path (Join-Path $repoFullPath "SynthiaCode.log") -Category "root application log"
 

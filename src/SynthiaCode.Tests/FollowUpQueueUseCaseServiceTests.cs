@@ -46,8 +46,8 @@ public sealed class FollowUpQueueUseCaseServiceTests
         var result = await context.Queue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
             context.Settings,
             context.ThreadId,
-            item => new CodexTurnStartRequest(
-                context.ThreadId, item.Text, item.Options.WorkspacePath, Sandbox: null),
+            (item, _) => Task.FromResult(new CodexTurnStartRequest(
+                context.ThreadId, item.Text, item.Options.WorkspacePath, Sandbox: null)),
             _ =>
             {
                 ensureConnectedCalls++;
@@ -81,8 +81,8 @@ public sealed class FollowUpQueueUseCaseServiceTests
         var dispatch = context.Queue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
             context.Settings,
             context.ThreadId,
-            item => new CodexTurnStartRequest(
-                context.ThreadId, item.Text, item.Options.WorkspacePath, Sandbox: null),
+            (item, _) => Task.FromResult(new CodexTurnStartRequest(
+                context.ThreadId, item.Text, item.Options.WorkspacePath, Sandbox: null)),
             _ => Task.CompletedTask));
         var request = await WaitForRequestAsync(transport, "turn/start");
         transport.ServerSend($"{{\"id\":{request["id"]!.ToJsonString()},\"result\":{{\"turn\":{{\"id\":\"turn-queue\"}}}}}}");
@@ -93,6 +93,54 @@ public sealed class FollowUpQueueUseCaseServiceTests
         Assert.Empty(context.Queue.GetSnapshots(context.ThreadId));
         Assert.Empty(context.Settings.ProjectThreads.Single().QueuedFollowUps);
         Assert.True(context.Conversations.IsRunning(context.ThreadId));
+        await context.Queue.DisposeAsync();
+        await context.Coordinator.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Dispatch_awaits_preflight_after_connection_and_immediately_before_remote_start()
+    {
+        await using var transport = new FakeAppServerTransport();
+        var context = CreateContext(transport, new FakeSettingsStore(), "queue-preflight-order");
+        await ConnectAsync(context.Coordinator, transport);
+        await context.Queue.EnqueueAsync(new FollowUpEnqueueUseCaseRequest(
+            context.Settings,
+            context.ThreadId,
+            "queued",
+            new QueuedTurnOptionsSnapshot { WorkspacePath = Path.GetTempPath() },
+            [],
+            []));
+        var calls = new List<string>();
+        var releasePreflight = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var dispatch = context.Queue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
+            context.Settings,
+            context.ThreadId,
+            async (item, cancellationToken) =>
+            {
+                calls.Add("preflight");
+                await releasePreflight.Task.WaitAsync(cancellationToken);
+                return new CodexTurnStartRequest(
+                    context.ThreadId, item.Text, item.Options.WorkspacePath, Sandbox: null);
+            },
+            _ =>
+            {
+                calls.Add("connected");
+                return Task.CompletedTask;
+            }));
+
+        await WaitUntilAsync(() => calls.Count == 2);
+        Assert.Equal(["connected", "preflight"], calls);
+        Assert.DoesNotContain(transport.ClientMessages, message =>
+            string.Equals(JsonNode.Parse(message)?["method"]?.GetValue<string>(), "turn/start", StringComparison.Ordinal));
+
+        releasePreflight.SetResult();
+        var request = await WaitForRequestAsync(transport, "turn/start");
+        Assert.Equal(["connected", "preflight"], calls);
+        transport.ServerSend($"{{\"id\":{request["id"]!.ToJsonString()},\"result\":{{\"turn\":{{\"id\":\"turn-preflight\"}}}}}}");
+
+        var result = await dispatch;
+        Assert.True(result.Dispatch.RemoteTurnStarted);
         await context.Queue.DisposeAsync();
         await context.Coordinator.DisposeAsync();
     }
@@ -161,6 +209,15 @@ public sealed class FollowUpQueueUseCaseServiceTests
                     return request!;
                 }
             }
+            await Task.Delay(20, timeout.Token);
+        }
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> predicate)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        while (!predicate())
+        {
             await Task.Delay(20, timeout.Token);
         }
     }

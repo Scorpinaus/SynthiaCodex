@@ -2520,7 +2520,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private QueuedTurnOptionsSnapshot CaptureQueuedTurnOptions(string workspacePath) =>
         attachmentDraftService.CaptureQueuedOptions(
-            ResolvePermissionPolicy(), workspacePath, ModelOverride, ReasoningEffortOverride, TaskWorkspace.ServiceTierSelection);
+            ResolvePermissionPolicy(), ExecutionPolicy.PermissionMode, workspacePath,
+            ModelOverride, ReasoningEffortOverride, TaskWorkspace.ServiceTierSelection);
 
     private string GetWorkspacePathForThread(string threadId)
     {
@@ -2554,32 +2555,52 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task StartQueuedFollowUpAsync(string threadId)
     {
-        CodexTurnStartRequest CreateStartRequest(QueuedFollowUpSnapshot queued)
+        async Task<CodexTurnStartRequest> PrepareStartRequestAsync(
+            QueuedFollowUpSnapshot queued,
+            CancellationToken cancellationToken)
         {
             var options = queued.Options;
             var workspacePath = Path.GetFullPath(options.WorkspacePath);
+            var models = await appServerSessionCoordinator
+                .ListModelsAsync(cancellationToken)
+                .ConfigureAwait(true);
+            var requirements = await appServerSessionCoordinator
+                .ReadExecutionPolicyRequirementsAsync(cancellationToken)
+                .ConfigureAwait(true);
+            var effectiveConfig = await appServerSessionCoordinator
+                .ReadExecutionPolicyConfigAsync(workspacePath, cancellationToken)
+                .ConfigureAwait(true);
+            var profiles = await appServerSessionCoordinator
+                .ListPermissionProfilesAsync(workspacePath, cancellationToken)
+                .ConfigureAwait(true);
+            var resolved = QueuedTurnOptionResolver.Resolve(
+                options,
+                models,
+                effectiveConfig,
+                requirements,
+                profiles);
             return new CodexTurnStartRequest(
                 threadId,
                 attachmentDraftService.BuildPromptInputs(
                     queued.Text,
                     queued.Attachments,
                     workspacePath,
-                    ResolveModel(options.Model),
+                    resolved.Model,
                     queued.SkillInputs),
                 workspacePath,
-                options.Sandbox,
-                options.Model,
+                resolved.Permissions.Sandbox,
+                string.IsNullOrWhiteSpace(options.Model) ? null : resolved.Model.Model,
                 options.ReasoningEffort,
                 options.ServiceTier,
-                options.ApprovalPolicy,
-                options.ApprovalsReviewer,
-                options.PermissionProfileId);
+                resolved.Permissions.ApprovalPolicy,
+                resolved.Permissions.ApprovalsReviewer,
+                resolved.Permissions.PermissionProfileId);
         }
 
         var result = await followUpQueue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
             settings,
             threadId,
-            CreateStartRequest,
+            PrepareStartRequestAsync,
             EnsureAppServerSessionAsync)).ConfigureAwait(true);
         var dispatch = result.Dispatch;
         if (!dispatch.Attempted) return;

@@ -4,7 +4,7 @@
 - **Repository baseline inspected:** `8686251`
 - **Backlog target:** `feature_parity.md` -> P0 item 1
 - **Scope:** Steer/Queue behavior during an active local Codex turn, a per-thread editable next-turn queue, and a persisted default preference
-- **Implementation status:** Core feature complete and verified on 19 July 2026; remaining refinements are listed below
+- **Implementation status:** Core feature complete on 19 July 2026; dispatch-time model and managed-policy hardening completed and verified on 29 July 2026
 
 ## Implementation completion record
 
@@ -14,6 +14,7 @@ The implemented slice delivers the core P0 outcome:
 - The active composer exposes a context-sensitive primary Queue/Steer action and a visible one-shot inverse action. `Ctrl+Enter` uses the default and `Ctrl+Shift+Enter` uses the inverse without changing the preference.
 - Every Codex thread owns an isolated, persisted queue. Items can be edited inline, reordered, manually sent or steered, and deleted.
 - Queue entries capture their workspace, model, reasoning, service-tier, sandbox, approval, reviewer, and permission-profile request options.
+- Queue entries retain logical permission intent. Immediately before each background `turn/start`, dispatch refreshes the model catalog, managed requirements, workspace config, and permission profiles inside the per-thread gate, then fails closed if the captured model, reasoning, Fast tier, or permission choice is no longer available.
 - A successful `turn/completed` drains exactly the owning thread's FIFO head, including when a different thread is selected and running. Failed/cancelled turns leave pending work paused.
 - Dispatch uses a per-thread semaphore, rechecks head identity and running state, persists `Starting` before the request, and removes the item only after app-server acknowledgement.
 - Interrupted persisted `Starting` entries restore as `NeedsAttention`; restored queues never auto-send merely because the app starts.
@@ -21,7 +22,7 @@ The implemented slice delivers the core P0 outcome:
 - Queue bounds are enforced at 50 items, 64 KiB per item, and 256 KiB aggregate text per thread.
 - The settings General card exposes the preference, the queue panel sits above the composer, and the new controls have accessible names and responsive-layout coverage.
 
-TDD evidence was preserved in the implementation sequence: missing domain symbols failed first, integration tests failed before routing commands existed, WPF tests failed before the queue surface existed, and the archive guard assertion failed before the guard was added. The completed console suite contains 128 passing tests.
+TDD evidence was preserved in the implementation sequence: missing domain symbols failed first, integration tests failed before routing commands existed, WPF tests failed before the queue surface existed, and the archive guard assertion failed before the guard was added. The dispatch-hardening phase likewise began with missing resolver/preflight contracts, then finished with 12/12 focused tests and 252/252 tests in both Debug and Release.
 
 ### Deliberate follow-up refinements
 
@@ -30,7 +31,6 @@ These refinements from the maximal design below were not required for the shippe
 - Interactive and queued starts still share orchestration inside `MainViewModel`; a separate `ConversationTurnCoordinator` was not extracted.
 - Prompt and active guidance retain compatibility buffers instead of moving to one authoritative text property.
 - The explicit inverse button replaces the proposed split-button menu.
-- Enqueue-time resolved options are validated for workspace existence at dispatch, but model-catalog and managed-permission policy are not yet fetched and re-resolved immediately before a background start. Archive/worktree guards and captured thread-explicit options prevent selection drift, but policy revalidation remains the main reason parity is recorded as **Near**, not **Full**.
 - Queue-specific structured telemetry and a live real-Codex disconnect smoke matrix remain to be added; automated ambiguous-state restoration and failure-pausing coverage is present.
 
 ## 1. Outcome

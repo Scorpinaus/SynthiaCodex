@@ -48,6 +48,7 @@ public sealed class SettingsStorageMapperTests
         Assert.Single(saved.ConversationTurns[0].Activity);
         Assert.Equal("attachment", saved.ConversationTurns[0].UserAttachments[0].DisplayName);
         Assert.Equal("model", saved.QueuedFollowUps[0].Options.Model);
+        Assert.Equal(CodexPermissionMode.Custom, saved.QueuedFollowUps[0].Options.PermissionMode);
         Assert.Equal("queue attachment", saved.QueuedFollowUps[0].Attachments[0].DisplayName);
         Assert.Single(saved.QueuedFollowUps[0].SkillInputs);
         Assert.Single(snapshot.ComposerAttachmentDrafts[0].Attachments);
@@ -244,6 +245,7 @@ public sealed class SettingsStorageMapperTests
             Model = "model",
             ReasoningEffort = CodexReasoningEffort.High,
             ServiceTier = CodexServiceTierSelection.Fast,
+            PermissionMode = CodexPermissionMode.Custom,
             Sandbox = CodexSandbox.WorkspaceWrite,
             ApprovalPolicy = CodexApprovalPolicy.OnRequest,
             PermissionProfileId = "profile"

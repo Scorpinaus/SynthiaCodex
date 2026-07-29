@@ -128,6 +128,7 @@ internal static class QueuedFollowUpTests
         var saved = snapshot.ProjectThreads.Single().QueuedFollowUps.Single();
         Assert(saved.Text == "Run the integration tests next", "queued prompt snapshot is independent");
         Assert(saved.Options.Model == "gpt-test", "nested turn options snapshot is independent");
+        Assert(saved.Options.PermissionMode == CodexPermissionMode.AskForApproval, "logical permission intent survives the settings snapshot");
 
         var store = new ThreadStore();
         var presentation = store.GetProjectThreads(snapshot, @"D:\Repo").Single();
@@ -163,6 +164,7 @@ internal static class QueuedFollowUpTests
         Model = "gpt-test",
         ReasoningEffort = CodexReasoningEffort.High,
         ServiceTier = CodexServiceTierSelection.Fast,
+        PermissionMode = CodexPermissionMode.AskForApproval,
         Sandbox = CodexSandbox.WorkspaceWrite,
         ApprovalPolicy = CodexApprovalPolicy.OnRequest,
         ApprovalsReviewer = CodexApprovalsReviewer.User

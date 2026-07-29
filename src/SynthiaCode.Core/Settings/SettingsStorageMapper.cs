@@ -135,6 +135,7 @@ public static class SettingsStorageMapper
             Model = source.Options.Model,
             ReasoningEffort = source.Options.ReasoningEffort,
             ServiceTier = source.Options.ServiceTier,
+            PermissionMode = source.Options.PermissionMode,
             Sandbox = source.Options.Sandbox,
             ApprovalPolicy = source.Options.ApprovalPolicy,
             ApprovalsReviewer = source.Options.ApprovalsReviewer,

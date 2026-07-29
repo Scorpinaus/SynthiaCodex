@@ -2002,13 +2002,13 @@ static async Task TestViewModelQueuesAndDrainsFollowUpAsync()
     AssertTrue(string.IsNullOrWhiteSpace(viewModel.SteeringText), "queueing clears active composer");
     AssertEqual("Run the focused queue tests next", settingsStore.SavedSettings.ProjectThreads.Single().QueuedFollowUps.Single().Text, "queue persists immediately");
 
+    var preflightStart = transport.ClientMessages.Count;
     transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-queue","turn":{"id":"turn-queue-1","status":"completed","items":[]}}}""");
-    await transport.WaitForClientMessageCountAsync(6);
-    var queuedTurn = ParseMessage(transport.ClientMessages[5]);
+    var queuedTurn = await CompleteQueuedDispatchPreflightAsync(transport, projectPath, preflightStart);
     AssertJsonString("turn/start", queuedTurn, "method", "queued follow-up starts a new turn");
     AssertJsonString("thread-queue", queuedTurn, "params.threadId", "queued follow-up stays on its thread");
     AssertJsonString("Run the focused queue tests next", queuedTurn, "params.input.0.text", "queued follow-up prompt");
-    transport.ServerSend("""{"id":4,"result":{"turn":{"id":"turn-queue-2"}}}""");
+    transport.ServerSend($"{{\"id\":{queuedTurn["id"]!.ToJsonString()},\"result\":{{\"turn\":{{\"id\":\"turn-queue-2\"}}}}}}");
 
     await WaitUntilAsync(() => viewModel.IsTurnRunning && viewModel.TaskWorkspace.QueuedFollowUps.Count == 0, "queued follow-up acknowledged");
     AssertEqual(2, viewModel.TaskWorkspace.ConversationTurns.Count, "queued follow-up creates a separate conversation turn");
@@ -2132,13 +2132,13 @@ static async Task TestViewModelDrainsQueuedFollowUpOnBackgroundThreadAsync()
     await CompleteAutomaticThreadRenameAsync(transport, "thread-background-b");
     await secondSubmit;
 
+    var preflightStart = transport.ClientMessages.Count;
     transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-background-a","turn":{"id":"turn-background-a-1","status":"completed","items":[]}}}""");
-    await transport.WaitForClientMessageCountAsync(9);
-    var queuedTurn = ParseMessage(transport.ClientMessages[8]);
+    var queuedTurn = await CompleteQueuedDispatchPreflightAsync(transport, projectPath, preflightStart);
     AssertJsonString("turn/start", queuedTurn, "method", "background queued follow-up starts a turn");
     AssertJsonString("thread-background-a", queuedTurn, "params.threadId", "background queued follow-up stays on its owning thread");
     AssertJsonString("Queued work for the first thread", queuedTurn, "params.input.0.text", "background queued prompt");
-    transport.ServerSend("""{"id":7,"result":{"turn":{"id":"turn-background-a-2"}}}""");
+    transport.ServerSend($"{{\"id\":{queuedTurn["id"]!.ToJsonString()},\"result\":{{\"turn\":{{\"id\":\"turn-background-a-2\"}}}}}}");
 
     await WaitUntilAsync(
         () => settingsStore.SavedSettings.ProjectThreads.Single(thread => thread.ThreadId == "thread-background-a").QueuedFollowUps.Count == 0,
@@ -3149,6 +3149,49 @@ static async Task CompleteAutomaticThreadRenameAsync(
     var requestId = request["id"]?.ToJsonString()
         ?? throw new InvalidOperationException($"Automatic rename for '{threadId}' did not include an id.");
     transport.ServerSend($"{{\"id\":{requestId},\"result\":{{}}}}");
+}
+
+static async Task<JsonObject> CompleteQueuedDispatchPreflightAsync(
+    FakeAppServerTransport transport,
+    string workspacePath,
+    int nextMessage)
+{
+    var modelRequest = await WaitForNextRequestAsync("model/list");
+    Respond(
+        modelRequest,
+        """{"data":[{"id":"gpt-queued","model":"gpt-queued","displayName":"GPT Queued","description":"Queue test model","isDefault":true,"hidden":false,"supportedReasoningEfforts":[],"serviceTiers":[]}]}""");
+
+    var requirementsRequest = await WaitForNextRequestAsync("configRequirements/read");
+    Respond(
+        requirementsRequest,
+        """{"requirements":{"allowedApprovalPolicies":["on-request"],"allowedApprovalsReviewers":["user"],"allowedPermissionProfiles":[":workspace"]}}""");
+
+    var configRequest = await WaitForNextRequestAsync("config/read");
+    AssertJsonString(workspacePath, configRequest, "params.cwd", "queued preflight config workspace");
+    Respond(
+        configRequest,
+        """{"config":{"sandbox_mode":"workspace-write","approval_policy":"on-request","approvals_reviewer":"user"},"origins":{}}""");
+
+    var profilesRequest = await WaitForNextRequestAsync("permissionProfile/list");
+    AssertJsonString(workspacePath, profilesRequest, "params.cwd", "queued preflight permission-profile workspace");
+    Respond(
+        profilesRequest,
+        """{"data":[{"id":":workspace","description":"Workspace boundary","allowed":true}]}""");
+
+    return await WaitForNextRequestAsync("turn/start");
+
+    void Respond(JsonObject request, string result) =>
+        transport.ServerSend($"{{\"id\":{request["id"]!.ToJsonString()},\"result\":{result}}}");
+
+    async Task<JsonObject> WaitForNextRequestAsync(string expectedMethod)
+    {
+        await WaitUntilAsync(
+            () => transport.ClientMessages.Count > nextMessage,
+            $"queued preflight {expectedMethod}");
+        var request = ParseMessage(transport.ClientMessages[nextMessage++]);
+        AssertJsonString(expectedMethod, request, "method", $"queued preflight {expectedMethod} method");
+        return request;
+    }
 }
 
 static void AssertJsonString(string expected, JsonNode node, string path, string label)

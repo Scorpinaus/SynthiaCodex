@@ -56,9 +56,10 @@ public sealed class AttachmentDraftOrchestrationService
         turnRequestFactory.BuildInputs(prompt, attachments, workspacePath, selectedModel, skillInputs);
 
     public QueuedTurnOptionsSnapshot CaptureQueuedOptions(
-        CodexResolvedPermissionMode permissions, string workspacePath, string? model, string? reasoningEffort,
-        CodexServiceTierSelection serviceTier) =>
-        turnRequestFactory.CaptureQueuedOptions(permissions, workspacePath, model, reasoningEffort, serviceTier);
+        CodexResolvedPermissionMode permissions, CodexPermissionMode permissionMode,
+        string workspacePath, string? model, string? reasoningEffort, CodexServiceTierSelection serviceTier) =>
+        turnRequestFactory.CaptureQueuedOptions(
+            permissions, permissionMode, workspacePath, model, reasoningEffort, serviceTier);
 
     public async Task RestoreAndCleanupPersistedAttachmentsAsync(AppSettings settings)
     {

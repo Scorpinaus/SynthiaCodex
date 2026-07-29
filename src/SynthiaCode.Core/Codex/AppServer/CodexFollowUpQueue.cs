@@ -42,6 +42,7 @@ public sealed class QueuedTurnOptionsSnapshot
     public string? Model { get; set; }
     public CodexReasoningEffort? ReasoningEffort { get; set; }
     public CodexServiceTierSelection ServiceTier { get; set; }
+    public CodexPermissionMode? PermissionMode { get; set; }
     public CodexSandbox? Sandbox { get; set; }
     public CodexApprovalPolicy? ApprovalPolicy { get; set; }
     public CodexApprovalsReviewer? ApprovalsReviewer { get; set; }
@@ -53,6 +54,7 @@ public sealed class QueuedTurnOptionsSnapshot
         Model = Model,
         ReasoningEffort = ReasoningEffort,
         ServiceTier = ServiceTier,
+        PermissionMode = PermissionMode,
         Sandbox = Sandbox,
         ApprovalPolicy = ApprovalPolicy,
         ApprovalsReviewer = ApprovalsReviewer,

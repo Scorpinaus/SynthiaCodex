@@ -114,6 +114,8 @@ public sealed class ExecutionPolicyViewModel : ObservableObject
 
     public bool IsLegacyCustom => mode == CodexPermissionMode.CustomLegacy;
 
+    public CodexPermissionMode PermissionMode => mode;
+
     public CodexResolvedPermissionMode ResolvedPolicy => CodexPermissionModeResolver.Resolve(
         mode,
         customProfileId,

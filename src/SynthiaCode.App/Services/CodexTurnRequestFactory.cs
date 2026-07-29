@@ -68,13 +68,14 @@ public sealed class CodexTurnRequestFactory
     }
 
     public QueuedTurnOptionsSnapshot CaptureQueuedOptions(
-        CodexResolvedPermissionMode permissions, string workspacePath, string? model, string? reasoningEffort,
-        CodexServiceTierSelection serviceTier) => new()
+        CodexResolvedPermissionMode permissions, CodexPermissionMode permissionMode,
+        string workspacePath, string? model, string? reasoningEffort, CodexServiceTierSelection serviceTier) => new()
         {
             WorkspacePath = workspacePath,
             Model = NormalizeOverride(model),
             ReasoningEffort = ParseReasoningEffort(reasoningEffort),
             ServiceTier = serviceTier,
+            PermissionMode = permissionMode,
             Sandbox = permissions.Sandbox,
             ApprovalPolicy = permissions.ApprovalPolicy,
             ApprovalsReviewer = permissions.ApprovalsReviewer,

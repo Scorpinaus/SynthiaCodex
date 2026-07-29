@@ -120,7 +120,7 @@
 | Rename chats | New General and project chats replace their placeholder title from the normalized first message after `turn/start` succeeds; manual chat menus also open a validated rename dialog. Both flows call typed `thread/name/set` and persist the acknowledged title locally | **Full** | Automatic titles are deterministic first-message names rather than a later model-generated summary. Project folder names remain filesystem-derived. |
 | Pin, delete, and search chats | Hover- and selection-visible contextual actions; persisted sidebar pin/unpin with pinned-first ordering; confirmed delete; content search across General, project, and archived chats; current-chat occurrence search with next/previous wraparound and highlighting | **Full** | Because app-server has no permanent-delete method, delete first archives an active Codex thread and then removes SynthiaCode's local record; associated worktrees and branches are intentionally preserved. |
 | Steer an active run | Active-turn guidance uses `turn/steer` | **Full** | None for steering itself. |
-| Queue and manage follow-up messages | Per-thread persisted queues support Queue/Steer defaults, one-shot inversion, inline edit, reorder, manual send/steer, delete, and completion-driven FIFO dispatch | **Near** | Dispatch validates the captured workspace but does not yet refresh and re-resolve model-catalog and managed-permission policy immediately before a background start. |
+| Queue and manage follow-up messages | Per-thread persisted queues support Queue/Steer defaults, one-shot inversion, inline edit, reorder, manual send/steer, delete, completion-driven FIFO dispatch, and dispatch-time catalog/policy revalidation | **Full** | Live real-runtime disconnect/reconnect smoke coverage remains validation hardening rather than a functional parity gap. |
 | Parallel top-level chats | Multiple project threads can run and route notifications independently | **Near** | No dedicated global running-task manager or completion notification center. |
 | Long-running/background work | Runs continue while SynthiaCode remains open; reconnect and shutdown are handled | **Partial** | No prevent-sleep setting, background inbox, OS completion notifications, or cloud continuation. |
 | Local worktrees | Assistant-owned Git worktrees can be created, used per chat, listed, and safely removed | **Partial** | No branch picker, Local/Worktree handoff, managed snapshots/restore, permanent worktrees, `.worktreeinclude`, setup scripts, or configurable retention/root. |
@@ -293,13 +293,22 @@ The permissions area moved from **partial** to **full/near-full functional parit
 6. Unknown, stale, and disallowed selections fail closed.
 7. Human-required server requests retain the global approval queue and exact-once response behavior.
 
-P0 queued follow-ups moved from **Missing** to **Near**:
+P0 queued follow-ups moved from **Missing** to **Full**:
 
 1. Queue is the persisted default, Steer remains selectable, and `Ctrl+Shift+Enter` inverts the choice once.
 2. Each thread owns a persisted queue that is visible above the composer and supports inline edit, reorder, manual send/steer, and delete.
 3. Successful completions drain one FIFO item on the owning thread, even when another running thread is selected.
 4. Failed or cancelled turns pause the queue; interrupted `Starting` items restore as `NeedsAttention` and are never retried automatically.
 5. Queue mutations persist immediately, and archive/worktree removal is blocked while queued work remains.
+6. Queued snapshots now retain logical permission intent; dispatch refreshes the model catalog, managed requirements, workspace config, and permission profiles inside the per-thread gate, then fails closed if the captured model, reasoning, Fast tier, or permission choice is no longer allowed.
+
+Queued-dispatch hardening TDD ledger:
+
+| Phase | Implemented checkpoint | Status |
+| --- | --- | --- |
+| Phase 1 - Red coverage | Added focused coverage for refreshed model/reasoning/Fast validation, managed permission-policy re-resolution, removed named profiles, and an awaited in-gate preflight immediately before `turn/start`. The focused build fails on the intentionally missing production contracts. | **Complete** |
+| Phase 2 - Implementation | Added logical permission intent to queued snapshots and every clone/storage boundary; implemented fail-closed catalog and managed-policy resolution; and added an awaited background preflight that refreshes `model/list`, requirements, workspace config, and permission profiles immediately before `turn/start`. Focused implementation and persistence coverage passes 12/12. | **Complete** |
+| Phase 3 - Verification | Focused implementation/persistence coverage passed 12/12; the complete Debug and Release suites each passed 252/252; Debug and Release Rebuild targets completed with zero warnings/errors; and both `SynthiaCode.App.exe` outputs were verified. | **Complete** |
 
 P0 attachments and image input moved from **Missing** to **Near**:
 
@@ -323,17 +332,16 @@ P0 attachments and image input moved from **Missing** to **Near**:
 
 ### P0 — Complete the core local coding experience
 
-1. **Queued follow-ups hardening (core implemented):** refresh and re-resolve model availability and managed permission policy immediately before background dispatch, then add live disconnect/reconnect smoke coverage.
-2. **Attachments and image input (managed external core implemented):** add installed-runtime managed file/folder mention smoke coverage, attachment-specific permission preflight/narrowing, interactive folder review/exclusions, bounded thumbnail decoding, and app-server history attachment materialization. Optional live external roots remain deferred.
-3. **Structured Git review:** add hunk staging/revert, inline diff comments, and a dedicated review target flow.
-4. **Push and pull requests:** add native branch push and GitHub PR creation/status.
-5. **Worktree lifecycle:** add starting-branch selection, setup scripts/actions, Local/Worktree handoff, snapshots/restore, and retention settings.
+1. **Attachments and image input (managed external core implemented):** add installed-runtime managed file/folder mention smoke coverage, attachment-specific permission preflight/narrowing, interactive folder review/exclusions, bounded thumbnail decoding, and app-server history attachment materialization. Optional live external roots remain deferred.
+2. **Structured Git review:** add hunk staging/revert, inline diff comments, and a dedicated review target flow.
+3. **Push and pull requests:** add native branch push and GitHub PR creation/status.
+4. **Worktree lifecycle:** add starting-branch selection, setup scripts/actions, Local/Worktree handoff, snapshots/restore, and retention settings.
 
 ### P1 — Make parallel and long-running work first class
 
 1. **Subagent panel:** show Active/Done agents with inspect, open, steer, and stop controls.
 2. **Chat management (core implemented):** add running-task filtering and optional bulk chat-management actions.
-3. **Notifications/background reliability:** completion notifications, prevent-sleep, and a task inbox.
+3. **Notifications/background reliability:** completion notifications, prevent-sleep, a task inbox, and live real-runtime queued-dispatch disconnect/reconnect smoke coverage.
 4. **Terminal integration:** expose current terminal output to Codex and add reusable project actions.
 5. **MCP visibility:** show configured servers, health, authentication state, and provenance without owning their configuration semantics unnecessarily; add optional skill invocation UX only after the composer contract is defined.
 
@@ -348,7 +356,7 @@ P0 attachments and image input moved from **Missing** to **Near**:
 
 ## Product recommendation
 
-Keep SynthiaCode's parity target focused on the **local coding loop**, not every ChatGPT feature. With the core queued-follow-up workflow implemented, the best next release is the remaining P0 set: attachments, structured review/PR workflows, complete worktree lifecycle, and the smaller queued-dispatch policy-revalidation hardening item. Those close the largest everyday workflow gaps without requiring SynthiaCode to become a browser, connector marketplace, automation platform, or general artifact suite.
+Keep SynthiaCode's parity target focused on the **local coding loop**, not every ChatGPT feature. With queued follow-ups at Full functional parity, the best next release is the remaining P0 set: attachments, structured review/PR workflows, and complete worktree lifecycle. Those close the largest everyday workflow gaps without requiring SynthiaCode to become a browser, connector marketplace, automation platform, or general artifact suite.
 
 ## Audit sources
 

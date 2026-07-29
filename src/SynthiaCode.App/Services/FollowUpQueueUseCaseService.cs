@@ -330,7 +330,6 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                service.BeginTurn(snapshot.Text, snapshot.Attachments);
                 await request.EnsureConnected(cancellationToken).ConfigureAwait(false);
                 var workspacePath = Path.GetFullPath(snapshot.Options.WorkspacePath);
                 if (!Directory.Exists(workspacePath))
@@ -342,9 +341,14 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
                     string.Equals(thread.ThreadId, request.ThreadId, StringComparison.Ordinal))
                     ?? throw new InvalidOperationException(
                         $"Thread '{request.ThreadId}' is no longer available.");
+                var startRequest = await request.PrepareStartRequest(
+                    snapshot.Clone(),
+                    cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                service.BeginTurn(snapshot.Text, snapshot.Attachments);
                 persistedThread.Preview = snapshot.Text;
                 var started = await appServer.StartTurnAsync(
-                    request.CreateStartRequest(snapshot.Clone()),
+                    startRequest,
                     cancellationToken).ConfigureAwait(false);
                 var bound = service.BindPendingTurn(started.TurnId);
                 threadWorkspace.RegisterTurn(request.ThreadId, started.TurnId);
@@ -498,7 +502,7 @@ public sealed record FollowUpEnqueueUseCaseRequest(
 public sealed record FollowUpDispatchUseCaseRequest(
     AppSettings Settings,
     string ThreadId,
-    Func<QueuedFollowUpSnapshot, CodexTurnStartRequest> CreateStartRequest,
+    Func<QueuedFollowUpSnapshot, CancellationToken, Task<CodexTurnStartRequest>> PrepareStartRequest,
     Func<CancellationToken, Task> EnsureConnected);
 
 public sealed record QueuedFollowUpDispatchResult(

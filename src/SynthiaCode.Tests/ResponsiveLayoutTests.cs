@@ -466,6 +466,12 @@ internal static class ResponsiveLayoutTests
         Assert(
             VirtualizingPanel.GetScrollUnit(conversationList) == ScrollUnit.Pixel,
             "transcript uses pixel scrolling for variable-height turns");
+        Assert(
+            ScrollViewer.GetPanningMode(conversationList) == PanningMode.VerticalOnly,
+            "transcript supports direct vertical touch and trackpad panning");
+        Assert(
+            !ScrollViewer.GetIsDeferredScrollingEnabled(conversationList),
+            "scrollbar thumb movement updates the transcript immediately");
 
         Assert(
             !FindVisualDescendants<Expander>(view).Any(expander => Equals(expander.Header, "Run settings")),
@@ -493,6 +499,18 @@ internal static class ResponsiveLayoutTests
         scroller.ScrollToTop();
         PumpLayout(view);
         AssertNear(0, scroller.VerticalOffset, "compact composer preserves a user-scrolled-up position");
+
+        turn.AssistantResponse = $"{tallResponse}{Environment.NewLine}{Environment.NewLine}{longLine}";
+        PumpLayout(view);
+        AssertNear(0, scroller.VerticalOffset, "streaming growth does not pull a reader away from an earlier message");
+
+        var jumpLatestButton = (Button?)view.FindName("JumpLatestButton")
+            ?? throw new InvalidOperationException("jump-to-latest button was not found");
+        Assert(jumpLatestButton.Visibility == Visibility.Visible, "scrolling away exposes the jump-to-latest action");
+        jumpLatestButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        PumpLayout(view);
+        AssertNear(scroller.ScrollableHeight, scroller.VerticalOffset, "jump-to-latest resumes the live transcript");
+        Assert(jumpLatestButton.Visibility == Visibility.Collapsed, "jump-to-latest hides after follow resumes");
     }
 
     private static void VerifyGeneratedImageLayout()

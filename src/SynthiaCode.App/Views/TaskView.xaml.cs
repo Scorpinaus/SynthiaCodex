@@ -17,12 +17,12 @@ namespace SynthiaCode.App.Views;
 
 public partial class TaskView : UserControl
 {
-    private const double FollowLatestThreshold = 24;
-
+    private readonly ConversationScrollCoordinator scrollCoordinator = new();
     private ObservableCollection<CodexConversationTurn>? observedTurns;
     private TaskViewModel? taskViewModel;
     private ScrollViewer? conversationScroller;
-    private bool followLatest = true;
+    private DispatcherOperation? pendingFollowLatest;
+    private string? observedThreadId;
 
     public TaskView()
     {
@@ -76,12 +76,22 @@ public partial class TaskView : UserControl
 
         taskViewModel = main.TaskWorkspace;
         taskViewModel.PropertyChanged += OnTaskViewModelPropertyChanged;
+        observedThreadId = taskViewModel.ConversationThreadId;
+        scrollCoordinator.ResetForConversation();
         ObserveTurns(taskViewModel.ConversationTurns);
+        UpdateJumpLatestVisibility();
         FollowLatest();
     }
 
     private void DetachFromViewModel()
     {
+        if (pendingFollowLatest?.Status == DispatcherOperationStatus.Pending)
+        {
+            pendingFollowLatest.Abort();
+        }
+        pendingFollowLatest = null;
+        conversationScroller = null;
+        observedThreadId = null;
         if (taskViewModel is not null)
         {
             taskViewModel.PropertyChanged -= OnTaskViewModelPropertyChanged;
@@ -97,10 +107,20 @@ public partial class TaskView : UserControl
             ObserveTurns(taskViewModel.ConversationTurns);
             FollowLatest();
         }
+        else if (e.PropertyName == nameof(TaskViewModel.ConversationThreadId) &&
+                 taskViewModel is not null &&
+                 !string.Equals(observedThreadId, taskViewModel.ConversationThreadId, StringComparison.Ordinal))
+        {
+            observedThreadId = taskViewModel.ConversationThreadId;
+            scrollCoordinator.ResetForConversation();
+            UpdateJumpLatestVisibility();
+            FollowLatest();
+        }
         else if (e.PropertyName == nameof(TaskViewModel.CurrentFindInChatTurn) &&
                  taskViewModel?.CurrentFindInChatTurn is { } turn)
         {
-            followLatest = false;
+            scrollCoordinator.Pause();
+            UpdateJumpLatestVisibility();
             ConversationList.ScrollIntoView(turn);
         }
     }
@@ -158,54 +178,88 @@ public partial class TaskView : UserControl
 
     private void FollowLatest()
     {
-        if (!followLatest || observedTurns is null || observedTurns.Count == 0)
+        if (!scrollCoordinator.IsFollowingLatest ||
+            observedTurns is null ||
+            observedTurns.Count == 0 ||
+            pendingFollowLatest?.Status is DispatcherOperationStatus.Pending or DispatcherOperationStatus.Executing)
         {
             return;
         }
 
         var turns = observedTurns;
-        var latest = turns[^1];
-        Dispatcher.BeginInvoke(
+        pendingFollowLatest = Dispatcher.BeginInvoke(
             () =>
             {
-                if (!ReferenceEquals(observedTurns, turns) ||
-                    turns.Count == 0 ||
-                    !ReferenceEquals(turns[^1], latest) ||
-                    !followLatest)
+                try
                 {
-                    return;
-                }
+                    if (!ReferenceEquals(observedTurns, turns) ||
+                        turns.Count == 0 ||
+                        !scrollCoordinator.IsFollowingLatest)
+                    {
+                        return;
+                    }
 
-                conversationScroller ??= FindVisualDescendant<ScrollViewer>(ConversationList);
-                if (conversationScroller is null)
+                    conversationScroller ??= FindVisualDescendant<ScrollViewer>(ConversationList);
+                    if (conversationScroller is null)
+                    {
+                        ConversationList.ScrollIntoView(turns[^1]);
+                        return;
+                    }
+
+                    conversationScroller.ScrollToVerticalOffset(conversationScroller.ScrollableHeight);
+                }
+                finally
                 {
-                    ConversationList.ScrollIntoView(latest);
-                    return;
+                    pendingFollowLatest = null;
                 }
-
-                conversationScroller.ScrollToVerticalOffset(conversationScroller.ScrollableHeight);
             },
             DispatcherPriority.Background);
     }
 
     private void OnConversationScrollChanged(object sender, ScrollChangedEventArgs e)
     {
-        if ((e.ExtentHeightChange != 0 || e.ViewportHeightChange != 0) && followLatest)
+        var shouldFollow = scrollCoordinator.UpdateFromScroll(
+            e.VerticalOffset,
+            e.ExtentHeight,
+            e.ViewportHeight,
+            e.VerticalChange,
+            e.ExtentHeightChange,
+            e.ViewportHeightChange);
+        UpdateJumpLatestVisibility();
+        if (shouldFollow)
         {
             FollowLatest();
+        }
+    }
+
+    private void OnConversationPreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (e.Delta <= 0)
+        {
             return;
         }
 
-        followLatest = e.VerticalOffset >= e.ExtentHeight - e.ViewportHeight - FollowLatestThreshold;
-        JumpLatestButton.Visibility = followLatest ? Visibility.Collapsed : Visibility.Visible;
+        conversationScroller ??= FindVisualDescendant<ScrollViewer>(ConversationList);
+        if (conversationScroller is not { VerticalOffset: > 0 })
+        {
+            return;
+        }
+
+        scrollCoordinator.Pause();
+        UpdateJumpLatestVisibility();
     }
 
     private void OnJumpLatestClick(object sender, RoutedEventArgs e)
     {
-        followLatest = true;
-        JumpLatestButton.Visibility = Visibility.Collapsed;
+        scrollCoordinator.FollowLatest();
+        UpdateJumpLatestVisibility();
         FollowLatest();
     }
+
+    private void UpdateJumpLatestVisibility() =>
+        JumpLatestButton.Visibility = scrollCoordinator.IsFollowingLatest
+            ? Visibility.Collapsed
+            : Visibility.Visible;
 
     private void OnCopyMessageClick(object sender, RoutedEventArgs e)
     {

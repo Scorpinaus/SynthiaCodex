@@ -262,6 +262,8 @@ public sealed class TaskViewModel : ObservableObject
 
     public ObservableCollection<CodexConversationTurn> ConversationTurns => conversationTurns;
 
+    public string? ConversationThreadId => conversation.ThreadId;
+
     public ObservableCollection<string> RawEvents => rawEvents;
 
     public ObservableCollection<QueuedFollowUp> QueuedFollowUps => followUpQueue.Items;
@@ -724,6 +726,10 @@ public sealed class TaskViewModel : ObservableObject
     public void ApplyConversationSnapshot(ConversationWorkspaceSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        var conversationChanged = !string.Equals(
+            conversation.ThreadId,
+            snapshot.ThreadId,
+            StringComparison.Ordinal);
         ClearFindMatchFlags();
         conversation = snapshot;
         timelineItems.Clear();
@@ -749,6 +755,10 @@ public sealed class TaskViewModel : ObservableObject
         OnPropertyChanged(nameof(FinalResponse));
         OnPropertyChanged(nameof(ComposerActionLabel));
         OnPropertyChanged(nameof(HasConversation));
+        if (conversationChanged)
+        {
+            OnPropertyChanged(nameof(ConversationThreadId));
+        }
         OnPropertyChanged(nameof(ContextWindowIndicator));
         OnPropertyChanged(nameof(ContextWindowToolTip));
         OnPropertyChanged(nameof(QueuedFollowUps));

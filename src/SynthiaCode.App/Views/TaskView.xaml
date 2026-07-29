@@ -93,9 +93,12 @@
                      VirtualizingStackPanel.VirtualizationMode="Recycling"
                      VirtualizingPanel.ScrollUnit="Pixel"
                      ScrollViewer.CanContentScroll="True"
+                     ScrollViewer.IsDeferredScrollingEnabled="False"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     ScrollViewer.PanningMode="VerticalOnly"
                      ScrollViewer.ScrollChanged="OnConversationScrollChanged"
+                     PreviewMouseWheel="OnConversationPreviewMouseWheel"
                      AutomationProperties.Name="Multi-turn conversation">
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="ListBoxItem">

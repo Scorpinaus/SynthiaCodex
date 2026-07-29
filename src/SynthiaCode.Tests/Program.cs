@@ -138,6 +138,7 @@ internal static class LegacyBehavioralTests
         .. ApprovalPresentationTests.All,
         .. AccountFeatureTests.All,
         .. ContextWindowIndicatorTests.All,
+        .. ConversationScrollingTests.All,
         .. ResponsiveLayoutTests.All,
         .. PresentationRedesignTests.All,
         .. MarkdownLinkTests.All,

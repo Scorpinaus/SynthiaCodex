@@ -1921,6 +1921,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             var prompts = new List<string>();
             var assistantMessages = new List<string>();
             var generatedImagePaths = new List<string>();
+            var activity = new List<CodexTimelineItem>();
             if (turn["items"] is JsonArray items)
             {
                 foreach (var item in items.OfType<JsonObject>())
@@ -1950,6 +1951,9 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                                 generatedImagePaths.Add(savedPath);
                             }
                             break;
+                        case "collabAgentToolCall":
+                            activity.Add(ParseCollaborationActivity(item));
+                            break;
                     }
                 }
             }
@@ -1962,11 +1966,64 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                 Status = ParseTurnStatus(ReadString(turn, "status")),
                 StartedAt = ReadUnixTimestamp(turn, "startedAt") ?? DateTimeOffset.UtcNow,
                 CompletedAt = ReadUnixTimestamp(turn, "completedAt"),
+                Activity = activity,
                 GeneratedImagePaths = generatedImagePaths
             });
         }
 
         return parsed;
+    }
+
+    private static CodexTimelineItem ParseCollaborationActivity(JsonObject item)
+    {
+        var itemId = ReadString(item, "id") ?? $"restored:{Guid.NewGuid():N}";
+        var tool = ReadString(item, "tool") ?? "agent task";
+        var status = ReadString(item, "status");
+        var prompt = ReadString(item, "prompt");
+        var detail = string.IsNullOrWhiteSpace(prompt) ? tool : $"{tool}: {prompt}";
+        var title = string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase)
+            ? "Delegated work failed"
+            : "Delegated work";
+        var receiverThreadIds = item["receiverThreadIds"] is JsonArray receivers
+            ? receivers
+                .OfType<JsonValue>()
+                .Select(value => value.TryGetValue<string>(out var threadId) ? threadId : null)
+                .Where(threadId => !string.IsNullOrWhiteSpace(threadId))
+                .Cast<string>()
+                .Distinct(StringComparer.Ordinal)
+                .ToArray()
+            : [];
+        var agentStates = item["agentsStates"] is JsonObject states
+            ? states
+                .Where(pair => pair.Value is JsonObject)
+                .Select(pair =>
+                {
+                    var state = (JsonObject)pair.Value!;
+                    return new CodexCollaborationAgentState(
+                        pair.Key,
+                        ReadString(state, "status") ?? "notFound",
+                        ReadString(state, "message"));
+                })
+                .ToArray()
+            : [];
+
+        return new CodexTimelineItem(
+            CodexTimelineItemKind.Collaboration,
+            title,
+            detail,
+            "item/collaboration",
+            DateTimeOffset.UtcNow)
+        {
+            ItemId = itemId,
+            ActivityKey = $"collaboration:{itemId}",
+            CollaborationTool = tool,
+            CollaborationStatus = status,
+            CollaborationPrompt = prompt,
+            CollaborationModel = ReadString(item, "model"),
+            CollaborationSenderThreadId = ReadString(item, "senderThreadId"),
+            CollaborationReceiverThreadIds = receiverThreadIds,
+            CollaborationAgentStates = agentStates
+        };
     }
 
     private static CodexTurnStatus ParseTurnStatus(string? status) => status switch

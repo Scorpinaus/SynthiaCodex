@@ -6,6 +6,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="System.Speech" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Resource Include="Assets\Branding\SynthiaCode.ico" />
     <Resource Include="Assets\Branding\SynthiaCodeLogo.png" />
   </ItemGroup>

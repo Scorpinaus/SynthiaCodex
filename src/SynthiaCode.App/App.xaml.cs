@@ -49,7 +49,8 @@ public partial class App : Application
             services.FollowUpQueueService,
             services.ProjectWorkspaceOperations,
             services.AttachmentDraftService,
-            services.SharedCodexConfigurationService);
+            services.SharedCodexConfigurationService,
+            services.SpeechRecognitionService);
 
         MainWindow = new MainWindow(mainViewModel);
         MainWindow.Show();

@@ -12,6 +12,7 @@
             <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
             <Grid Margin="2,0,2,8">
@@ -67,7 +68,154 @@
                     </Grid>
                 </Border>
             </Grid>
-            <Border Grid.Row="1"
+            <Border x:Name="AgentPanel"
+                    Grid.Row="1"
+                    Margin="2,0,2,10"
+                    Padding="10"
+                    MaxHeight="320"
+                    Background="{DynamicResource PanelBrush}"
+                    BorderBrush="{DynamicResource LineBrush}"
+                    BorderThickness="1"
+                    CornerRadius="7"
+                    Visibility="{Binding TaskWorkspace.HasAgents, Converter={StaticResource BooleanToVisibilityConverter}}"
+                    AutomationProperties.Name="Agent management">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2*"/>
+                        <ColumnDefinition Width="3*"/>
+                    </Grid.ColumnDefinitions>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="0,0,10,0">
+                            <TextBlock Text="Agents" FontSize="15" FontWeight="SemiBold" Margin="2,0,0,8"/>
+                            <TextBlock Text="Active"
+                                       FontWeight="SemiBold"
+                                       Margin="2,0,0,5"
+                                       Visibility="{Binding TaskWorkspace.HasActiveAgents, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                            <ItemsControl x:Name="ActiveAgentsList"
+                                          ItemsSource="{Binding TaskWorkspace.ActiveAgents}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{DynamicResource FieldBrush}"
+                                                BorderBrush="{DynamicResource LineBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="6"
+                                                Padding="8"
+                                                Margin="0,0,0,7">
+                                            <StackPanel>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding ThreadId}"/>
+                                                    <TextBlock Grid.Column="1" Text="{Binding StatusLabel}" Foreground="{DynamicResource SignalBrush}" Margin="8,0,0,0"/>
+                                                </Grid>
+                                                <TextBlock Text="{Binding Prompt}" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="38" Margin="0,3,0,6"/>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Button Content="Open"
+                                                            Command="{Binding DataContext.TaskWorkspace.OpenAgentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                            CommandParameter="{Binding}"
+                                                            Style="{StaticResource CompactButton}"
+                                                            Margin="0,0,6,0"
+                                                            AutomationProperties.Name="Open agent transcript"/>
+                                                    <TextBox Grid.Column="1"
+                                                             Text="{Binding SteeringText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                             MinWidth="100"
+                                                             Padding="5,3"
+                                                             AutomationProperties.Name="Agent steering guidance"/>
+                                                    <Button Grid.Column="2"
+                                                            Content="Steer"
+                                                            Command="{Binding DataContext.TaskWorkspace.SteerAgentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                            CommandParameter="{Binding}"
+                                                            Style="{StaticResource CompactButton}"
+                                                            Margin="6,0,0,0"
+                                                            AutomationProperties.Name="Steer active agent"/>
+                                                    <Button Grid.Column="3"
+                                                            Content="Stop"
+                                                            Command="{Binding DataContext.TaskWorkspace.StopAgentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                            CommandParameter="{Binding}"
+                                                            Style="{StaticResource CompactButton}"
+                                                            Margin="6,0,0,0"
+                                                            AutomationProperties.Name="Stop active agent"/>
+                                                </Grid>
+                                                <TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource DangerBrush}" TextWrapping="Wrap" Margin="0,5,0,0" Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}" AutomationProperties.LiveSetting="Polite"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Text="Done"
+                                       FontWeight="SemiBold"
+                                       Margin="2,3,0,5"
+                                       Visibility="{Binding TaskWorkspace.HasDoneAgents, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                            <ItemsControl x:Name="DoneAgentsList"
+                                          ItemsSource="{Binding TaskWorkspace.DoneAgents}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{DynamicResource FieldBrush}" CornerRadius="6" Padding="8" Margin="0,0,0,6">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding ThreadId}"/>
+                                                    <TextBlock Text="{Binding Prompt}" Foreground="{DynamicResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="1" Text="{Binding StatusLabel}" Foreground="{DynamicResource MutedInkBrush}" VerticalAlignment="Center" Margin="8,0"/>
+                                                <Button Grid.Column="2"
+                                                        Content="Open"
+                                                        Command="{Binding DataContext.TaskWorkspace.OpenAgentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                        CommandParameter="{Binding}"
+                                                        Style="{StaticResource CompactButton}"
+                                                        AutomationProperties.Name="Open agent transcript"/>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+                    <Border x:Name="AgentTranscriptPanel"
+                            Grid.Column="1"
+                            Padding="10"
+                            Background="{DynamicResource FieldBrush}"
+                            CornerRadius="6"
+                            Visibility="{Binding TaskWorkspace.IsAgentTranscriptOpen, Converter={StaticResource BooleanToVisibilityConverter}}"
+                            AutomationProperties.Name="Subagent transcript">
+                        <Grid>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding TaskWorkspace.SelectedAgent.DisplayName}" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding TaskWorkspace.SelectedAgent.ThreadId}" Foreground="{DynamicResource MutedInkBrush}" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Content="Close"
+                                        Command="{Binding TaskWorkspace.CloseAgentTranscriptCommand}"
+                                        Style="{StaticResource CompactButton}"
+                                        AutomationProperties.Name="Close agent transcript"/>
+                            </Grid>
+                            <ScrollViewer Grid.Row="1" Margin="0,8,0,0" VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding TaskWorkspace.SelectedAgent.Transcript}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Margin="0,0,0,10">
+                                                <TextBlock Text="{Binding UserPrompt}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                <controls:MarkdownTextBlock Markdown="{Binding AssistantResponseDisplay}" Style="{StaticResource ConversationBodyText}" Margin="0,4,0,0"/>
+                                                <TextBlock Text="{Binding StatusLabel}" Foreground="{DynamicResource MutedInkBrush}" Margin="0,3,0,0"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Border>
+            <Border Grid.Row="2"
                     Style="{StaticResource EmptyStatePresenter}"
                     MaxWidth="520"
                     Visibility="{Binding TaskWorkspace.HasConversation, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
@@ -84,7 +232,7 @@
                 </StackPanel>
             </Border>
             <ListBox x:Name="ConversationList"
-                     Grid.Row="1"
+                     Grid.Row="2"
                      ItemsSource="{Binding TaskWorkspace.ConversationTurns}"
                      BorderThickness="0"
                      Background="Transparent"
@@ -682,6 +830,42 @@
                                 </ContextMenu>
                             </Button.ContextMenu>
                         </Button>
+                        <Button x:Name="DictationButton"
+                                Command="{Binding TaskWorkspace.ToggleDictationCommand}"
+                                MinHeight="32"
+                                MinWidth="36"
+                                Margin="8,0,0,0"
+                                Padding="8,4"
+                                ToolTip="{Binding TaskWorkspace.DictationToolTip}"
+                                ToolTipService.ShowOnDisabled="True"
+                                AutomationProperties.Name="{Binding TaskWorkspace.DictationAutomationName}"
+                                AutomationProperties.HelpText="{Binding TaskWorkspace.DictationToolTip}">
+                            <Button.Style>
+                                <Style TargetType="{x:Type Button}" BasedOn="{StaticResource IconButton}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding TaskWorkspace.IsDictating}" Value="True">
+                                            <Setter Property="Background" Value="{DynamicResource ActionAccentSubtleBrush}"/>
+                                            <Setter Property="BorderBrush" Value="{DynamicResource ActionAccentBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <Path Data="{StaticResource IconMicrophone}"
+                                  Width="18"
+                                  Height="18"
+                                  Stroke="{DynamicResource TextPrimaryBrush}"
+                                  StrokeThickness="1.4"
+                                  StrokeLineJoin="Round"
+                                  StrokeStartLineCap="Round"
+                                  StrokeEndLineCap="Round"
+                                  Stretch="Uniform"/>
+                        </Button>
+                        <TextBlock Text="{Binding TaskWorkspace.DictationStatusText}"
+                                   Margin="8,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource MutedInkBrush}"
+                                   FontSize="12"
+                                   AutomationProperties.LiveSetting="Polite"/>
                     </WrapPanel>
 
                     <Popup x:Name="SkillsPopup"

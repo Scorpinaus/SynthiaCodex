@@ -7,7 +7,7 @@ using SynthiaCode.Core.Codex.AppServer;
 
 namespace SynthiaCode.App.ViewModels;
 
-public sealed class TaskViewModel : ObservableObject
+public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly AsyncRelayCommand submitCommand;
     private readonly AsyncRelayCommand composerSendCommand;
@@ -15,6 +15,7 @@ public sealed class TaskViewModel : ObservableObject
     private readonly AsyncRelayCommand loadModelsCommand;
     private readonly AsyncRelayCommand steerCommand;
     private readonly AsyncRelayCommand alternateFollowUpCommand;
+    private readonly AsyncRelayCommand toggleDictationCommand;
     private readonly RelayCommand beginPromptEditCommand;
     private readonly RelayCommand cancelPromptEditCommand;
     private readonly AsyncRelayCommand submitPromptEditCommand;
@@ -39,7 +40,14 @@ public sealed class TaskViewModel : ObservableObject
     private readonly RelayCommand closeFindInChatCommand;
     private readonly RelayCommand findNextCommand;
     private readonly RelayCommand findPreviousCommand;
+    private readonly IAgentManagementActions agentActions;
+    private readonly ISpeechRecognitionService speechRecognitionService;
+    private readonly AsyncRelayCommand openAgentCommand;
+    private readonly AsyncRelayCommand steerAgentCommand;
+    private readonly AsyncRelayCommand stopAgentCommand;
+    private readonly RelayCommand closeAgentTranscriptCommand;
     private readonly List<CodexConversationTurn> findMatches = [];
+    private readonly Dictionary<string, AgentThreadViewModel> agentsByThread = new(StringComparer.Ordinal);
     private ConversationWorkspaceSnapshot conversation = ConversationWorkspaceSnapshot.Empty;
     private CodexFollowUpQueue followUpQueue = new();
     private readonly ObservableCollection<CodexTimelineItem> timelineItems = [];
@@ -65,13 +73,25 @@ public sealed class TaskViewModel : ObservableObject
     private bool isFindInChatOpen;
     private string findInChatText = string.Empty;
     private int currentFindMatchIndex = -1;
+    private AgentThreadViewModel? selectedAgent;
+    private bool isAgentTranscriptOpen;
+    private bool isRefreshingAgents;
+    private bool isDictating;
+    private bool isDisposed;
+    private string dictationStatusText = string.Empty;
 
     public TaskViewModel(
         ITurnExecutionActions turnActions,
         IFollowUpManagementActions followUpActions,
         IConversationHistoryActions historyActions,
-        IComposerSupportActions composerActions)
+        IComposerSupportActions composerActions,
+        IAgentManagementActions agentActions,
+        ISpeechRecognitionService? speechRecognitionService = null)
     {
+        this.agentActions = agentActions;
+        this.speechRecognitionService = speechRecognitionService ?? UnavailableSpeechRecognitionService.Instance;
+        this.speechRecognitionService.SpeechRecognized += OnSpeechRecognized;
+        this.speechRecognitionService.Stopped += OnSpeechRecognitionStopped;
         SkillSelector = new ComposerSkillSelectorViewModel(
             composerActions.LoadComposerSkillsAsync,
             () => IsTurnRunning ? SteeringText : Prompt,
@@ -95,6 +115,9 @@ public sealed class TaskViewModel : ObservableObject
         AlternateFollowUpCommand = alternateFollowUpCommand = new AsyncRelayCommand(
             followUpActions.SendAlternateFollowUpAsync,
             turnActions.CanSteerTurn);
+        ToggleDictationCommand = toggleDictationCommand = new AsyncRelayCommand(
+            ToggleDictationAsync,
+            () => IsDictationAvailable && !isDisposed);
         beginPromptEditCommand = new RelayCommand(
             parameter =>
             {
@@ -256,11 +279,37 @@ public sealed class TaskViewModel : ObservableObject
         FindPreviousCommand = findPreviousCommand = new RelayCommand(
             () => MoveFindMatch(-1),
             () => findMatches.Count > 0);
+        OpenAgentCommand = openAgentCommand = new AsyncRelayCommand(OpenAgentAsync, CanOpenAgent);
+        SteerAgentCommand = steerAgentCommand = new AsyncRelayCommand(SteerAgentAsync, CanSteerAgent);
+        StopAgentCommand = stopAgentCommand = new AsyncRelayCommand(StopAgentAsync, CanStopAgent);
+        CloseAgentTranscriptCommand = closeAgentTranscriptCommand = new RelayCommand(CloseAgentTranscript);
     }
 
     public ObservableCollection<CodexTimelineItem> TimelineItems => timelineItems;
 
     public ObservableCollection<CodexConversationTurn> ConversationTurns => conversationTurns;
+
+    public ObservableCollection<AgentThreadViewModel> ActiveAgents { get; } = [];
+
+    public ObservableCollection<AgentThreadViewModel> DoneAgents { get; } = [];
+
+    public bool HasAgents => ActiveAgents.Count > 0 || DoneAgents.Count > 0;
+
+    public bool HasActiveAgents => ActiveAgents.Count > 0;
+
+    public bool HasDoneAgents => DoneAgents.Count > 0;
+
+    public AgentThreadViewModel? SelectedAgent
+    {
+        get => selectedAgent;
+        private set => SetProperty(ref selectedAgent, value);
+    }
+
+    public bool IsAgentTranscriptOpen
+    {
+        get => isAgentTranscriptOpen;
+        private set => SetProperty(ref isAgentTranscriptOpen, value);
+    }
 
     public string? ConversationThreadId => conversation.ThreadId;
 
@@ -289,6 +338,7 @@ public sealed class TaskViewModel : ObservableObject
     public ICommand LoadModelsCommand { get; }
     public ICommand SteerCommand { get; }
     public ICommand AlternateFollowUpCommand { get; }
+    public ICommand ToggleDictationCommand { get; }
     public ICommand BeginPromptEditCommand => beginPromptEditCommand;
     public ICommand CancelPromptEditCommand => cancelPromptEditCommand;
     public ICommand SubmitPromptEditCommand => submitPromptEditCommand;
@@ -313,6 +363,47 @@ public sealed class TaskViewModel : ObservableObject
     public ICommand CloseFindInChatCommand { get; }
     public ICommand FindNextCommand { get; }
     public ICommand FindPreviousCommand { get; }
+    public ICommand OpenAgentCommand { get; }
+    public ICommand SteerAgentCommand { get; }
+    public ICommand StopAgentCommand { get; }
+    public ICommand CloseAgentTranscriptCommand { get; }
+
+    public bool IsDictationAvailable => speechRecognitionService.Availability.IsAvailable;
+
+    public bool IsDictating
+    {
+        get => isDictating;
+        private set
+        {
+            if (SetProperty(ref isDictating, value))
+            {
+                OnPropertyChanged(nameof(DictationToolTip));
+                OnPropertyChanged(nameof(DictationAutomationName));
+            }
+        }
+    }
+
+    public string DictationStatusText
+    {
+        get => dictationStatusText;
+        private set
+        {
+            if (SetProperty(ref dictationStatusText, value ?? string.Empty))
+            {
+                OnPropertyChanged(nameof(DictationToolTip));
+            }
+        }
+    }
+
+    public string DictationToolTip => !IsDictationAvailable
+        ? speechRecognitionService.Availability.Message
+        : IsDictating
+            ? "Stop dictation"
+            : DictationStatusText.StartsWith("Dictation unavailable:", StringComparison.Ordinal)
+                ? DictationStatusText
+                : "Start dictation";
+
+    public string DictationAutomationName => IsDictating ? "Stop dictation" : "Start dictation";
 
     public bool HasAttachments => Attachments.Count > 0;
 
@@ -763,7 +854,223 @@ public sealed class TaskViewModel : ObservableObject
         OnPropertyChanged(nameof(ContextWindowToolTip));
         OnPropertyChanged(nameof(QueuedFollowUps));
         OnPropertyChanged(nameof(HasQueuedFollowUps));
+        RefreshAgents(snapshot, conversationChanged);
         RefreshFindInChatMatches();
+    }
+
+    private void RefreshAgents(ConversationWorkspaceSnapshot snapshot, bool conversationChanged)
+    {
+        isRefreshingAgents = true;
+        try
+        {
+            if (conversationChanged)
+            {
+                agentsByThread.Clear();
+                CloseAgentTranscript();
+            }
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var activity in snapshot.ConversationTurns
+                         .SelectMany(turn => turn.Activity)
+                         .Where(item => item.Kind == CodexTimelineItemKind.Collaboration))
+            {
+                foreach (var threadId in activity.CollaborationReceiverThreadIds)
+                {
+                    var agent = GetOrCreateAgent(threadId);
+                    seen.Add(threadId);
+                    if (string.Equals(activity.CollaborationTool, "spawnAgent", StringComparison.Ordinal))
+                    {
+                        if (!string.IsNullOrWhiteSpace(activity.CollaborationPrompt))
+                        {
+                            agent.Prompt = activity.CollaborationPrompt;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(activity.CollaborationModel))
+                        {
+                            agent.Model = activity.CollaborationModel;
+                        }
+                    }
+                }
+
+                foreach (var state in activity.CollaborationAgentStates)
+                {
+                    var agent = GetOrCreateAgent(state.ThreadId);
+                    seen.Add(state.ThreadId);
+                    agent.SetStatus(state.Status, state.Message);
+                }
+            }
+
+            foreach (var threadId in agentsByThread.Keys.Where(threadId => !seen.Contains(threadId)).ToArray())
+            {
+                if (ReferenceEquals(SelectedAgent, agentsByThread[threadId]))
+                {
+                    CloseAgentTranscript();
+                }
+
+                agentsByThread.Remove(threadId);
+            }
+        }
+        finally
+        {
+            isRefreshingAgents = false;
+        }
+
+        RefreshAgentGroups();
+    }
+
+    private AgentThreadViewModel GetOrCreateAgent(string threadId)
+    {
+        if (agentsByThread.TryGetValue(threadId, out var existing))
+        {
+            return existing;
+        }
+
+        var created = new AgentThreadViewModel(threadId);
+        created.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(AgentThreadViewModel.IsActive) && !isRefreshingAgents)
+            {
+                RefreshAgentGroups();
+            }
+
+            RaiseAgentCommandStates();
+        };
+        agentsByThread.Add(threadId, created);
+        return created;
+    }
+
+    private void RefreshAgentGroups()
+    {
+        ActiveAgents.Clear();
+        DoneAgents.Clear();
+        foreach (var agent in agentsByThread.Values)
+        {
+            (agent.IsActive ? ActiveAgents : DoneAgents).Add(agent);
+        }
+
+        OnPropertyChanged(nameof(ActiveAgents));
+        OnPropertyChanged(nameof(DoneAgents));
+        OnPropertyChanged(nameof(HasAgents));
+        OnPropertyChanged(nameof(HasActiveAgents));
+        OnPropertyChanged(nameof(HasDoneAgents));
+        RaiseAgentCommandStates();
+    }
+
+    private bool CanOpenAgent(object? parameter) =>
+        parameter is AgentThreadViewModel agent && agent.CanOpen;
+
+    private async Task OpenAgentAsync(object? parameter)
+    {
+        if (parameter is not AgentThreadViewModel agent)
+        {
+            return;
+        }
+
+        SelectedAgent = agent;
+        IsAgentTranscriptOpen = true;
+        await LoadAgentTranscriptAsync(agent).ConfigureAwait(true);
+    }
+
+    private bool CanSteerAgent(object? parameter) =>
+        parameter is AgentThreadViewModel agent && agent.CanSteer;
+
+    private async Task SteerAgentAsync(object? parameter)
+    {
+        if (parameter is not AgentThreadViewModel agent)
+        {
+            return;
+        }
+
+        var message = agent.SteeringText.Trim();
+        if (string.IsNullOrWhiteSpace(agent.ActiveTurnId))
+        {
+            await LoadAgentTranscriptAsync(agent).ConfigureAwait(true);
+        }
+
+        if (string.IsNullOrWhiteSpace(agent.ActiveTurnId))
+        {
+            agent.ErrorMessage = "The agent no longer has a running turn to steer.";
+            return;
+        }
+
+        agent.IsBusy = true;
+        agent.ErrorMessage = string.Empty;
+        try
+        {
+            await agentActions.SteerAgentAsync(agent.ThreadId, agent.ActiveTurnId, message).ConfigureAwait(true);
+            agent.SteeringText = string.Empty;
+        }
+        catch (Exception exception)
+        {
+            agent.ErrorMessage = $"Could not steer agent: {exception.Message}";
+        }
+        finally
+        {
+            agent.IsBusy = false;
+        }
+    }
+
+    private bool CanStopAgent(object? parameter) =>
+        parameter is AgentThreadViewModel agent && agent.CanStop;
+
+    private async Task StopAgentAsync(object? parameter)
+    {
+        if (parameter is not AgentThreadViewModel agent)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(agent.ActiveTurnId))
+        {
+            await LoadAgentTranscriptAsync(agent).ConfigureAwait(true);
+        }
+
+        if (string.IsNullOrWhiteSpace(agent.ActiveTurnId))
+        {
+            agent.ErrorMessage = "The agent no longer has a running turn to stop.";
+            return;
+        }
+
+        agent.IsBusy = true;
+        agent.ErrorMessage = string.Empty;
+        try
+        {
+            await agentActions.StopAgentAsync(agent.ThreadId, agent.ActiveTurnId).ConfigureAwait(true);
+            agent.SetStatus("interrupted", "Stopped by user.");
+        }
+        catch (Exception exception)
+        {
+            agent.ErrorMessage = $"Could not stop agent: {exception.Message}";
+        }
+        finally
+        {
+            agent.IsBusy = false;
+        }
+    }
+
+    private async Task LoadAgentTranscriptAsync(AgentThreadViewModel agent)
+    {
+        agent.IsBusy = true;
+        agent.ErrorMessage = string.Empty;
+        try
+        {
+            var result = await agentActions.ReadAgentThreadAsync(agent.ThreadId).ConfigureAwait(true);
+            agent.ReplaceTranscript(result.Turns);
+        }
+        catch (Exception exception)
+        {
+            agent.ErrorMessage = $"Could not open agent transcript: {exception.Message}";
+        }
+        finally
+        {
+            agent.IsBusy = false;
+        }
+    }
+
+    private void CloseAgentTranscript()
+    {
+        IsAgentTranscriptOpen = false;
+        SelectedAgent = null;
     }
 
     public bool HasQueuedFollowUps => QueuedFollowUps.Count > 0;
@@ -820,6 +1127,79 @@ public sealed class TaskViewModel : ObservableObject
         beginPromptEditCommand.RaiseCanExecuteChanged();
         cancelPromptEditCommand.RaiseCanExecuteChanged();
         submitPromptEditCommand.RaiseCanExecuteChanged();
+    }
+
+    private async Task ToggleDictationAsync()
+    {
+        try
+        {
+            if (IsDictating)
+            {
+                await speechRecognitionService.StopAsync().ConfigureAwait(true);
+                IsDictating = false;
+                DictationStatusText = "Dictation stopped";
+                return;
+            }
+
+            DictationStatusText = "Starting dictation...";
+            await speechRecognitionService.StartAsync().ConfigureAwait(true);
+            IsDictating = true;
+            DictationStatusText = "Listening...";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            IsDictating = false;
+            var message = ex.GetBaseException().Message.Trim();
+            DictationStatusText = $"Dictation unavailable: {message}";
+        }
+    }
+
+    private void OnSpeechRecognized(object? sender, SpeechRecognizedEventArgs args)
+    {
+        if (isDisposed)
+        {
+            return;
+        }
+
+        var phrase = args.Text.Trim();
+        if (phrase.Length == 0)
+        {
+            return;
+        }
+
+        if (IsTurnRunning)
+        {
+            SteeringText = AppendRecognizedPhrase(SteeringText, phrase);
+        }
+        else
+        {
+            Prompt = AppendRecognizedPhrase(Prompt, phrase);
+        }
+    }
+
+    private void OnSpeechRecognitionStopped(object? sender, SpeechRecognitionStoppedEventArgs args)
+    {
+        if (isDisposed)
+        {
+            return;
+        }
+
+        IsDictating = false;
+        DictationStatusText = string.IsNullOrWhiteSpace(args.ErrorMessage)
+            ? "Dictation stopped"
+            : $"Dictation unavailable: {args.ErrorMessage.Trim()}";
+    }
+
+    private static string AppendRecognizedPhrase(string current, string phrase)
+    {
+        if (current.Length == 0)
+        {
+            return phrase;
+        }
+
+        return char.IsWhiteSpace(current[^1])
+            ? current + phrase
+            : current + " " + phrase;
     }
 
     private void MoveAttachment(AttachmentReference? attachment, int offset)
@@ -1050,6 +1430,15 @@ public sealed class TaskViewModel : ObservableObject
         showOptionsMainCommand.RaiseCanExecuteChanged();
         showModelsCommand.RaiseCanExecuteChanged();
         showReasoningCommand.RaiseCanExecuteChanged();
+        RaiseAgentCommandStates();
+    }
+
+    private void RaiseAgentCommandStates()
+    {
+        openAgentCommand.RaiseCanExecuteChanged();
+        steerAgentCommand.RaiseCanExecuteChanged();
+        stopAgentCommand.RaiseCanExecuteChanged();
+        closeAgentTranscriptCommand.RaiseCanExecuteChanged();
     }
 
     private void RebuildReasoningOptions()
@@ -1107,6 +1496,31 @@ public sealed class TaskViewModel : ObservableObject
             _ => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(account.PlanType.Replace('_', ' '))
         };
         return $"ChatGPT {plan}";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (isDisposed)
+        {
+            return;
+        }
+
+        isDisposed = true;
+        toggleDictationCommand.RaiseCanExecuteChanged();
+        speechRecognitionService.SpeechRecognized -= OnSpeechRecognized;
+        speechRecognitionService.Stopped -= OnSpeechRecognitionStopped;
+        try
+        {
+            if (IsDictating)
+            {
+                await speechRecognitionService.StopAsync().ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            IsDictating = false;
+            await speechRecognitionService.DisposeAsync().ConfigureAwait(false);
+        }
     }
 }
 

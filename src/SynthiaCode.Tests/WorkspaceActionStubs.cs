@@ -17,7 +17,7 @@ using SynthiaCode.Infrastructure.Codex.Configuration;
 
 /// <summary>Small contract stubs used by presentation tests; production has no delegate adapters.</summary>
 internal sealed class TaskConversationActionStub : ITurnExecutionActions, IFollowUpManagementActions,
-    IConversationHistoryActions, IComposerSupportActions
+    IConversationHistoryActions, IComposerSupportActions, IAgentManagementActions
 {
     public Func<Task> Submit { get; init; } = () => Task.CompletedTask;
     public Func<Task> Cancel { get; init; } = () => Task.CompletedTask;
@@ -51,6 +51,10 @@ internal sealed class TaskConversationActionStub : ITurnExecutionActions, IFollo
     public Task EditGeneratedImageAsync(string path) => EditImage(path);
     public Task ForkConversationAsync(string turnId) => Fork(turnId);
     public Task<ComposerSkillLoadResult> LoadComposerSkillsAsync(CancellationToken cancellationToken) => LoadSkills(cancellationToken);
+    public Task<CodexThreadReadResult> ReadAgentThreadAsync(string threadId) =>
+        Task.FromResult(new CodexThreadReadResult(threadId, []));
+    public Task SteerAgentAsync(string threadId, string turnId, string message) => Task.CompletedTask;
+    public Task StopAgentAsync(string threadId, string turnId) => Task.CompletedTask;
 
     private static QueuedFollowUp CreateQueuedFollowUp(string followUpId)
     {
@@ -96,7 +100,7 @@ internal sealed class ProjectThreadActionStub : IProjectNavigationActions, IThre
 internal static class WorkspaceActionStubs
 {
     public static TaskViewModel CreateTaskViewModel(TaskConversationActionStub actions) =>
-        new(actions, actions, actions, actions);
+        new(actions, actions, actions, actions, actions);
 
     public static ProjectThreadViewModel CreateProjectThreadViewModel(ProjectThreadActionStub actions) =>
         new(actions, actions);

@@ -101,7 +101,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         FollowUpQueueUseCaseService followUpQueue,
         ProjectWorkspaceOperations projectWorkspaceOperations,
         AttachmentDraftOrchestrationService attachmentDraftService,
-        ISharedCodexConfigurationService sharedCodexConfigurationService)
+        ISharedCodexConfigurationService sharedCodexConfigurationService,
+        ISpeechRecognitionService? speechRecognitionService = null)
     {
         this.settingsStore = settingsStore;
         this.appServerSessionCoordinator = appServerSessionCoordinator;
@@ -174,7 +175,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             new TurnExecutionActionAdapter(this),
             new FollowUpManagementActionAdapter(this),
             new ConversationHistoryActionAdapter(this),
-            new ComposerSupportActionAdapter(this));
+            new ComposerSupportActionAdapter(this),
+            new AgentManagementActionAdapter(this),
+            speechRecognitionService);
         TaskWorkspace.PropertyChanged += (_, args) => RelayTaskPropertyChanged(args.PropertyName);
 
         ApprovalQueue = new ApprovalQueueViewModel(appServerSessionCoordinator.RespondToServerRequestAsync);
@@ -2211,6 +2214,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         await TryCancelRunningTurnForShutdownAsync(cancellationToken).ConfigureAwait(true);
         await Terminal.ShutdownAsync().ConfigureAwait(true);
+        await TaskWorkspace.DisposeAsync().ConfigureAwait(true);
         ApprovalQueue.Clear();
         appServerSessionCoordinator.ServerRequestReceived -= OnServerRequestReceived;
         appServerSessionCoordinator.FlushNotifications();
@@ -2408,6 +2412,47 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         !string.IsNullOrWhiteSpace(activeTurnId) &&
         (!string.IsNullOrWhiteSpace(SteeringText) || TaskWorkspace.HasAttachments) &&
         TaskWorkspace.CanSubmitAttachments;
+
+    private async Task<CodexThreadReadResult> ReadAgentThreadAsync(string threadId)
+    {
+        if (IsShuttingDown)
+        {
+            throw new InvalidOperationException("SynthiaCode is shutting down.");
+        }
+
+        var result = await appServerSessionCoordinator.ReadThreadAsync(
+            new CodexThreadReadRequest(threadId),
+            appServerWarmUpCancellation.Token).ConfigureAwait(true);
+        StatusMessage = $"Opened agent {threadId}";
+        return result;
+    }
+
+    private async Task SteerAgentAsync(string threadId, string turnId, string message)
+    {
+        if (IsShuttingDown)
+        {
+            throw new InvalidOperationException("SynthiaCode is shutting down.");
+        }
+
+        await appServerSessionCoordinator.SteerTurnAsync(
+            new CodexTurnSteerRequest(threadId, turnId, message),
+            appServerWarmUpCancellation.Token).ConfigureAwait(true);
+        StatusMessage = $"Steered agent {threadId}";
+    }
+
+    private async Task StopAgentAsync(string threadId, string turnId)
+    {
+        if (IsShuttingDown)
+        {
+            throw new InvalidOperationException("SynthiaCode is shutting down.");
+        }
+
+        await appServerSessionCoordinator.CancelTurnAsync(
+            threadId,
+            turnId,
+            appServerWarmUpCancellation.Token).ConfigureAwait(true);
+        StatusMessage = $"Stopped agent {threadId}";
+    }
 
     private void RaiseThreadCommandStates()
     {
@@ -3455,6 +3500,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         public Task<bool> EditPromptAsync(CodexConversationTurn turn, string editedPrompt) => owner.EditPromptAsync(turn, editedPrompt);
         public Task ForkConversationAsync(string turnId) => owner.ForkConversationFromTurnAsync(turnId);
+    }
+
+    private sealed class AgentManagementActionAdapter(MainViewModel owner) : IAgentManagementActions
+    {
+        public Task<CodexThreadReadResult> ReadAgentThreadAsync(string threadId) => owner.ReadAgentThreadAsync(threadId);
+        public Task SteerAgentAsync(string threadId, string turnId, string message) => owner.SteerAgentAsync(threadId, turnId, message);
+        public Task StopAgentAsync(string threadId, string turnId) => owner.StopAgentAsync(threadId, turnId);
     }
 
     private sealed class ComposerSupportActionAdapter(MainViewModel owner) : IComposerSupportActions

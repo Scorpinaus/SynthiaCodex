@@ -54,7 +54,8 @@ public sealed class AppServices
         TurnExecutionUseCaseService turnExecutionService,
         FollowUpQueueUseCaseService followUpQueueService,
         ProjectWorkspaceOperations projectWorkspaceOperations,
-        AttachmentDraftOrchestrationService attachmentDraftService)
+        AttachmentDraftOrchestrationService attachmentDraftService,
+        ISpeechRecognitionService speechRecognitionService)
     {
         SettingsStore = settingsStore;
         CodexDiscoveryService = codexDiscoveryService;
@@ -80,6 +81,7 @@ public sealed class AppServices
         FollowUpQueueService = followUpQueueService;
         ProjectWorkspaceOperations = projectWorkspaceOperations;
         AttachmentDraftService = attachmentDraftService;
+        SpeechRecognitionService = speechRecognitionService;
     }
 
     public ISettingsStore SettingsStore { get; }
@@ -127,6 +129,8 @@ public sealed class AppServices
     public ProjectWorkspaceOperations ProjectWorkspaceOperations { get; }
 
     public AttachmentDraftOrchestrationService AttachmentDraftService { get; }
+
+    public ISpeechRecognitionService SpeechRecognitionService { get; }
 
     public static AppServices Create()
     {
@@ -189,6 +193,7 @@ public sealed class AppServices
             workspaceAttachmentResolver,
             new CodexTurnRequestFactory(attachmentStore, workspaceAttachmentResolver),
             logger);
+        var speechRecognitionService = new SystemSpeechRecognitionService(logger);
 
         logger.Log(AppLogLevel.Information, "app_services_created", "Application services were created.");
 
@@ -216,6 +221,7 @@ public sealed class AppServices
             turnExecutionService,
             followUpQueueService,
             projectWorkspaceOperations,
-            attachmentDraftService);
+            attachmentDraftService,
+            speechRecognitionService);
     }
 }

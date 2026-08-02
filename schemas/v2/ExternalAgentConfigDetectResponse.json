@@ -68,6 +68,7 @@
         "SUBAGENTS",
         "HOOKS",
         "COMMANDS",
+        "MEMORY",
         "SESSIONS"
       ]
     },
@@ -117,6 +118,12 @@
             "$ref": "#/definitions/McpServerMigration"
           }
         },
+        "memory": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "plugins": {
           "default": [],
           "type": "array",
@@ -129,6 +136,13 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/SessionMigration"
+          }
+        },
+        "skills": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SkillMigration"
           }
         },
         "subagents": {
@@ -176,6 +190,17 @@
             "string",
             "null"
           ]
+        }
+      }
+    },
+    "SkillMigration": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
         }
       }
     },

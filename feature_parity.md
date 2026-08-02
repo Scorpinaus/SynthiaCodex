@@ -1,6 +1,6 @@
 # SynthiaCode and ChatGPT Desktop Feature Parity
 
-- **Audit date:** 25 July 2026
+- **Audit date:** 2 August 2026
 - **SynthiaCode baseline:** working tree based on commit `9b5a8bc`, including automatic first-message naming, manual thread rename, hover-visible sidebar chat actions, sidebar chat management, cross-chat search, find-in-chat, and the completed parity work recorded below
 - **Comparison surface:** ChatGPT desktop app with Codex/local-project capabilities
 - **Scope:** User-visible desktop functionality, local Codex workflows, and capabilities inherited through `codex app-server`
@@ -50,6 +50,12 @@
 | Phase 21.2 | Added seven focused rendered-WPF tests covering validated remote images, safe/inert raw HTML, real nested-list margins, superscript bottom-placed footnotes, Markdown Extra definition lists, language-driven syntax tokens, and exact per-code-block clipboard output. Against the untouched renderer, all 30 prior filtered tests pass and all seven new tests fail at their intended missing behavior. | **Complete** |
 | Phase 21.3 | Implemented bounded HTTP(S) image cards with failure fallback, a native safe-HTML allowlist with literal executable-tag fallback, hierarchical list rows, navigable bottom footnotes, definition-list layout, themed multi-language syntax tokens, language labels, and accessible per-block copy actions. All 37 focused Markdown tests pass; the only legacy test adjustments replace brittle code-block child casts with semantic content assertions. | **Complete** |
 | Phase 21.4 | Resolved two parser/copy defects found during review: footnote declarations inside fenced examples now remain literal, and code copy removes only the fence-separating line ending while preserving intentional trailing blank lines. All 259 tests pass in Debug and Release. Fresh non-incremental builds produced verified Debug and Release executables with zero warnings and errors. | **Complete** |
+| Phase 22.1 | Added red-test coverage for structured collaboration-event projection, Active/Done agent grouping, receiver-thread identity and prompt/status retention, real `thread/read` transcript loading, exact active-turn steer/stop targeting, immediate stopped-state movement, transcript dismissal, and accessible rendered panel controls. The focused build fails at the intended missing agent-management contract before implementation. | **Complete** |
+| Phase 22.2 | Implemented an accessible Active/Done agent panel from canonical `collabAgentToolCall` receiver/state data, durable restoration from parent `thread/read` history, real subagent transcript drill-in, and agent-specific Open, Steer, Stop, and Close controls. Steer and Stop discover and target the subagent's actual running turn; successful interruption immediately moves the row to Done. Focused projection, protocol restoration, command, and rendered-WPF coverage passes. Rendered verification also caught and repaired a runtime-only invalid GridLength value. | **Complete** |
+| Phase 22.3 | Completed the full 266-test regression gate in Debug and Release. Fresh non-incremental solution rebuilds produced verified `SynthiaCode.App.exe` artifacts in both configurations with zero warnings and zero errors; both report file version `0.1.0.0`. `git diff --check` is clean. | **Complete** |
+| Phase 23.1 | Added six red-test contracts for click-to-toggle dictation, non-destructive prompt transcription, active-turn guidance targeting, actionable microphone/recognizer failures, shutdown cleanup, and an accessible vector microphone surface with live status. The focused build fails at the intended missing speech-recognition types before implementation. | **Complete** |
+| Phase 23.2 | Implemented continuous local Windows dictation through the installed speech recognizer selected for the current UI culture. The composer microphone toggles listening, appends finalized phrases to the prompt or active guidance without retaining audio/transcripts, exposes non-color and screen-reader state, reports recognizer/device/privacy failures, and releases recognition at shutdown. The focused Debug gate passes. | **Complete** |
+| Phase 23.3 | Final accessibility review added a button-scoped regression and repaired the unavailable-recognizer state so its explanation remains readable while the microphone control is disabled. The full 272-test regression gate passes in Debug and Release; fresh non-incremental rebuilds completed with zero warnings and errors, and both standard `SynthiaCode.App.exe` artifacts plus the `System.Speech` runtime dependency were verified. | **Complete** |
 
 ## Architecture and release metadata implementation parity
 
@@ -114,10 +120,10 @@
 | Local coding loop | **Strong** | General and project chats, multi-turn work, queued follow-ups, streaming, models, permissions, terminal, Git changes, and worktrees are usable end to end. |
 | Safety and approvals | **Near full** | The three composer permission modes and server-request approvals now map closely to ChatGPT desktop. |
 | Git and worktree lifecycle | **Moderate** | Core isolation and file-level Git operations exist; chunk review, handoff, push, PR, snapshots, and setup actions do not. |
-| Agent orchestration | **Partial** | Parallel top-level chats and collaboration activity exist, but subagent thread inspection and management are absent. |
+| Agent orchestration | **Near** | Parallel chats plus Active/Done subagent inspection, transcripts, steering, and stopping are usable; nicknames, live open-transcript refresh, and custom-agent management remain absent. |
 | Context and multimodal input | **Near** | Per-chat context-window visibility plus image/file/folder picker, paste/drop, previews, queued lifecycle persistence, workspace mentions, and managed external snapshots are implemented; rich artifact viewing and remaining hardening are out of scope. |
 | Tools and integrations | **Moderate** | Skills discovery and enablement are now native Settings surfaces, and configured MCP/web activity can flow through app-server. Browser, Chrome, plugin/connector management, MCP administration, and Scheduled remain absent. |
-| Desktop convenience | **Moderate** | Native Windows shell, themes, diagnostics, custom Codex instruction defaults, shared-configuration source links, cross-chat search, find-in-chat, and core shortcuts exist; notifications, dictation, quick chat, general task deep links, and broader personalization do not. |
+| Desktop convenience | **Moderate** | Native Windows shell, themes, diagnostics, local dictation, custom Codex instruction defaults, shared-configuration source links, cross-chat search, find-in-chat, and core shortcuts exist; notifications, quick chat, general task deep links, and broader personalization do not. |
 
 ## Detailed parity matrix
 
@@ -179,7 +185,7 @@
 | --- | --- | --- | --- |
 | `AGENTS.md` and shared Codex configuration | Settings edits the isolated shared `CODEX_HOME` `AGENTS.md` and `config.toml` with atomic stale-write protection, shows the active shared/workspace source chain in precedence order, and opens or reveals every source | **Full** | Workspace `AGENTS.md` and `.codex/config.toml` sources deliberately deep-link to the external editor rather than being rewritten through the shared-file editor. |
 | Context-window visibility | A live percentage-used indicator sits beside Send; hover details show used/remaining percentages, latest-context tokens versus the model window, and cumulative compactions per persisted chat; app-server compaction lifecycle events render in the transcript | **Full** | Older settings show unavailable usage until app-server sends the first `thread/tokenUsage/updated` notification. Compaction and summarization remain owned by Codex app-server. |
-| Subagent execution | Collaboration notifications render as agent activity when Codex delegates | **Partial** | No Active/Done panel, agent-thread transcript, open/steer/stop controls, nicknames, or custom-agent management. |
+| Subagent execution | Structured collaboration notifications populate an Active/Done panel; each receiver thread can be opened through `thread/read`, inspected as a transcript, steered through `turn/steer`, and stopped through `turn/interrupt` | **Near** | Agent nicknames, continuously refreshed open transcripts, resume controls, and custom-agent management remain absent. |
 | MCP tool execution | Configured MCP tool activity and progress are parsed and shown | **Partial** | No MCP list/add/remove/auth/status UI or elicitation-specific presentation. |
 | Skills | Settings manages active-workspace discovery and enablement; the composer provides an enabled-skill selector, `$` completion, duplicate-path disambiguation, removable invocation chips, and exact structured skill inputs across turns and queued follow-ups | **Near** | Skill creation/install, arbitrary extra roots, and a full `SKILL.md` body editor remain absent. |
 | Plugins and app connectors | No SynthiaCode plugin/connector directory or authorization flow | **Missing** | ChatGPT supports plugins and connected services such as GitHub, Slack, Google Drive, Gmail, and calendars. |
@@ -203,7 +209,7 @@
 | Keyboard shortcuts | Core project, submit, navigation, terminal, settings, refresh, cross-chat search (`Ctrl+K`), and find-in-chat (`Ctrl+F`) shortcuts | **Partial** | No command palette, searchable/customizable shortcut editor, or next/previous chat navigation. |
 | Account and settings pane | Custom Codex instructions, shared configuration editors/provenance, active-workspace skills, a redacted origin-aware effective Codex settings summary, account, appearance, runtime, doctor, diagnostics, and about information | **Near** | ChatGPT still has substantially broader plugin, connector, automation, personalization, and application settings. |
 | Notifications | Status bar and in-app state only | **Missing** | No OS completion notifications or notification preferences. |
-| Dictation/voice input | No speech input | **Missing** | ChatGPT desktop supports dictation. |
+| Dictation/voice input | A composer microphone toggles continuous local Windows recognition, appends finalized phrases to the prompt or active-turn guidance, announces state accessibly, and surfaces recognizer/device/privacy failures without persisting audio or transcript data | **Near** | Recognition depends on an installed Windows speech recognizer for the current UI language rather than ChatGPT's cloud transcription and automatic language handling. |
 | Quick chat, pop-out, always-on-top | No compact or detached chat window | **Missing** | ChatGPT can keep a chat beside another app. |
 | Deep links | No registered SynthiaCode URL scheme | **Missing** | ChatGPT supports links to chats, settings, skills, Scheduled, plugins, and connections. |
 | Personalization and memories | Custom developer instructions and an advanced base-instruction override are editable and persisted; no personality, suggested prompts, or cross-chat memories | **Partial** | Instruction defaults are Codex-specific and apply to future chats rather than providing the broader ChatGPT personalization surface. |
@@ -356,7 +362,7 @@ P0 attachments and image input moved from **Missing** to **Near**:
 
 ### P1 — Make parallel and long-running work first class
 
-1. **Subagent panel:** show Active/Done agents with inspect, open, steer, and stop controls.
+1. **Subagent management (core implemented):** add nicknames, live open-transcript refresh, explicit resume, and custom-agent management on top of the Active/Done inspect/open/steer/stop panel.
 2. **Chat management (core implemented):** add running-task filtering and optional bulk chat-management actions.
 3. **Notifications/background reliability:** completion notifications, prevent-sleep, a task inbox, and live real-runtime queued-dispatch disconnect/reconnect smoke coverage.
 4. **Terminal integration:** expose current terminal output to Codex and add reusable project actions.
@@ -369,7 +375,7 @@ P0 attachments and image input moved from **Missing** to **Near**:
 3. Scheduled tasks and run history.
 4. Remote connections and cloud chats.
 5. Artifact viewer, visualizations, Sites, and richer native image-generation controls.
-6. Rich appearance, shortcut customization, dictation, quick chat, deep links, personalization, and memories.
+6. Rich appearance, shortcut customization, quick chat, deep links, personalization, and memories.
 
 ## Product recommendation
 

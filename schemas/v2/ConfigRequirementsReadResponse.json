@@ -31,7 +31,6 @@
           "type": "string",
           "enum": [
             "untrusted",
-            "on-failure",
             "on-request",
             "never"
           ]
@@ -75,9 +74,55 @@
         }
       ]
     },
+    "BrowserUseRequirements": {
+      "type": "object",
+      "properties": {
+        "disableAutoReview": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "ComputerUseRequirements": {
+      "type": "object",
+      "properties": {
+        "allowLockedComputerUse": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
     "ConfigRequirements": {
       "type": "object",
       "properties": {
+        "allowAppshots": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "allowLoginShell": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "allowManagedHooksOnly": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "allowRemoteControl": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "allowedApprovalPolicies": {
           "type": [
             "array",
@@ -87,7 +132,13 @@
             "$ref": "#/definitions/AskForApproval"
           }
         },
-        "featureRequirements": {
+        "sqliteHome": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "allowedPermissionProfiles": {
           "type": [
             "object",
             "null"
@@ -114,10 +165,98 @@
             "$ref": "#/definitions/WebSearchMode"
           }
         },
+        "allowedWindowsSandboxImplementations": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/WindowsSandboxSetupMode"
+          }
+        },
+        "browserUse": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BrowserUseRequirements"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checkForUpdateOnStartup": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "computerUse": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ComputerUseRequirements"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "defaultPermissions": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "enforceResidency": {
           "anyOf": [
             {
               "$ref": "#/definitions/ResidencyRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "featureRequirements": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "feedback": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FeedbackRequirements"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "windowsSandboxPrivateDesktop": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "logDir": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modelCatalogJson": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "models": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelsRequirements"
             },
             {
               "type": "null"
@@ -136,11 +275,26 @@
             "type"
           ],
           "properties": {
+            "additionalContextLimit": {
+              "description": "Approximate token threshold for spilling this hook's `additionalContext` to disk. `null` uses 2,500 tokens; `0` disables spilling for this hook. The threshold is evaluated against the original context; a spilled preview also includes recovery metadata.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint",
+              "minimum": 0.0
+            },
             "async": {
               "type": "boolean"
             },
             "command": {
               "type": "string"
+            },
+            "commandWindows": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "statusMessage": {
               "type": [
@@ -220,6 +374,17 @@
         }
       }
     },
+    "FeedbackRequirements": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
     "ManagedHooksRequirements": {
       "type": "object",
       "required": [
@@ -230,6 +395,8 @@
         "PreToolUse",
         "SessionStart",
         "Stop",
+        "SubagentStart",
+        "SubagentStop",
         "UserPromptSubmit"
       ],
       "properties": {
@@ -263,6 +430,13 @@
             "$ref": "#/definitions/ConfiguredHookMatcherGroup"
           }
         },
+        "SessionEnd": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConfiguredHookMatcherGroup"
+          }
+        },
         "SessionStart": {
           "type": "array",
           "items": {
@@ -270,6 +444,18 @@
           }
         },
         "Stop": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConfiguredHookMatcherGroup"
+          }
+        },
+        "SubagentStart": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConfiguredHookMatcherGroup"
+          }
+        },
+        "SubagentStop": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/ConfiguredHookMatcherGroup"
@@ -291,6 +477,21 @@
           "type": [
             "string",
             "null"
+          ]
+        }
+      }
+    },
+    "ModelsRequirements": {
+      "type": "object",
+      "properties": {
+        "newThread": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NewThreadModelDefaults"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       }
@@ -414,8 +615,40 @@
       "type": "string",
       "enum": [
         "allow",
-        "none"
+        "deny"
       ]
+    },
+    "NewThreadModelDefaults": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modelReasoningEffort": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "serviceTier": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ReasoningEffort": {
+      "description": "A non-empty reasoning effort value advertised by the model.",
+      "type": "string",
+      "minLength": 1
     },
     "ResidencyRequirement": {
       "type": "string",
@@ -436,7 +669,15 @@
       "enum": [
         "disabled",
         "cached",
+        "indexed",
         "live"
+      ]
+    },
+    "WindowsSandboxSetupMode": {
+      "type": "string",
+      "enum": [
+        "elevated",
+        "unelevated"
       ]
     }
   }

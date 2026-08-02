@@ -31,6 +31,13 @@ public interface IConversationHistoryActions
     Task ForkConversationAsync(string turnId);
 }
 
+public interface IAgentManagementActions
+{
+    Task<CodexThreadReadResult> ReadAgentThreadAsync(string threadId);
+    Task SteerAgentAsync(string threadId, string turnId, string message);
+    Task StopAgentAsync(string threadId, string turnId);
+}
+
 public interface IComposerSupportActions
 {
     Task LoadModelsAsync();

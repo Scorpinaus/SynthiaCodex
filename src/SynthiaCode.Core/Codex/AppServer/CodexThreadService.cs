@@ -878,7 +878,47 @@ public sealed class CodexThreadService
         var status = ReadString(parameters, "item.status");
         var title = !completed ? "Delegating work" : IsFailureStatus(status) ? "Delegated work failed" : "Delegated work";
         var detail = string.IsNullOrWhiteSpace(prompt) ? tool : $"{tool}: {prompt}";
-        return CreateActivity(CodexTimelineItemKind.Collaboration, title, NormalizeActivityDetail(detail), "item/collaboration", itemId, $"collaboration:{itemId}");
+        return CreateActivity(CodexTimelineItemKind.Collaboration, title, NormalizeActivityDetail(detail), "item/collaboration", itemId, $"collaboration:{itemId}") with
+        {
+            CollaborationTool = tool,
+            CollaborationStatus = status,
+            CollaborationPrompt = prompt,
+            CollaborationModel = ReadString(parameters, "item.model"),
+            CollaborationSenderThreadId = ReadString(parameters, "item.senderThreadId"),
+            CollaborationReceiverThreadIds = ReadCollaborationReceiverThreadIds(parameters),
+            CollaborationAgentStates = ReadCollaborationAgentStates(parameters)
+        };
+    }
+
+    private static IReadOnlyList<string> ReadCollaborationReceiverThreadIds(JsonObject parameters) =>
+        parameters["item"]?["receiverThreadIds"] is JsonArray receiverThreadIds
+            ? receiverThreadIds
+                .OfType<JsonValue>()
+                .Select(value => value.TryGetValue<string>(out var threadId) ? threadId : null)
+                .Where(threadId => !string.IsNullOrWhiteSpace(threadId))
+                .Cast<string>()
+                .Distinct(StringComparer.Ordinal)
+                .ToArray()
+            : [];
+
+    private static IReadOnlyList<CodexCollaborationAgentState> ReadCollaborationAgentStates(JsonObject parameters)
+    {
+        if (parameters["item"]?["agentsStates"] is not JsonObject agentStates)
+        {
+            return [];
+        }
+
+        return agentStates
+            .Where(pair => pair.Value is JsonObject)
+            .Select(pair =>
+            {
+                var state = (JsonObject)pair.Value!;
+                return new CodexCollaborationAgentState(
+                    pair.Key,
+                    ReadString(state, "status") ?? "notFound",
+                    ReadString(state, "message"));
+            })
+            .ToArray();
     }
 
     private static CodexTimelineItem CreateWebSearchActivity(JsonObject parameters, string itemId, bool completed)
@@ -1472,6 +1512,11 @@ public sealed class CodexThreadService
     }
 }
 
+public sealed record CodexCollaborationAgentState(
+    string ThreadId,
+    string Status,
+    string? Message);
+
 public sealed record CodexTimelineItem(
     CodexTimelineItemKind Kind,
     string Title,
@@ -1482,6 +1527,20 @@ public sealed record CodexTimelineItem(
     public string ItemId { get; init; } = string.Empty;
 
     public string ActivityKey { get; init; } = string.Empty;
+
+    public string? CollaborationTool { get; init; }
+
+    public string? CollaborationStatus { get; init; }
+
+    public string? CollaborationPrompt { get; init; }
+
+    public string? CollaborationModel { get; init; }
+
+    public string? CollaborationSenderThreadId { get; init; }
+
+    public IReadOnlyList<string> CollaborationReceiverThreadIds { get; init; } = [];
+
+    public IReadOnlyList<CodexCollaborationAgentState> CollaborationAgentStates { get; init; } = [];
 
     [JsonIgnore]
     public bool IsAssistantCommentary => Kind == CodexTimelineItemKind.AssistantCommentary;

@@ -20,10 +20,15 @@
       "type": "object",
       "required": [
         "id",
-        "name",
-        "needsAuth"
+        "name"
       ],
       "properties": {
+        "category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "description": {
           "type": [
             "string",
@@ -41,11 +46,77 @@
         },
         "name": {
           "type": "string"
-        },
-        "needsAuth": {
-          "type": "boolean"
         }
       }
+    },
+    "AppTemplateSummary": {
+      "type": "object",
+      "required": [
+        "materializedAppIds",
+        "name",
+        "templateId"
+      ],
+      "properties": {
+        "canonicalConnectorId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "logoUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "logoUrlDark": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "materializedAppIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AppTemplateUnavailableReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "templateId": {
+          "type": "string"
+        }
+      }
+    },
+    "AppTemplateUnavailableReason": {
+      "type": "string",
+      "enum": [
+        "NOT_CONFIGURED_FOR_WORKSPACE",
+        "NO_ACTIVE_WORKSPACE"
+      ]
     },
     "HookEventName": {
       "type": "string",
@@ -56,7 +127,10 @@
         "preCompact",
         "postCompact",
         "sessionStart",
+        "sessionEnd",
         "userPromptSubmit",
+        "subagentStart",
+        "subagentStop",
         "stop"
       ]
     },
@@ -87,6 +161,7 @@
     "PluginDetail": {
       "type": "object",
       "required": [
+        "appTemplates",
         "apps",
         "hooks",
         "marketplaceName",
@@ -95,6 +170,12 @@
         "summary"
       ],
       "properties": {
+        "appTemplates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AppTemplateSummary"
+          }
+        },
         "apps": {
           "type": "array",
           "items": {
@@ -132,6 +213,21 @@
             "type": "string"
           }
         },
+        "scheduledTasks": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/ScheduledTaskSummary"
+          }
+        },
+        "shareUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "skills": {
           "type": "array",
           "items": {
@@ -164,6 +260,13 @@
         "NOT_AVAILABLE",
         "AVAILABLE",
         "INSTALLED_BY_DEFAULT"
+      ]
+    },
+    "PluginInstallPolicySource": {
+      "type": "string",
+      "enum": [
+        "WORKSPACE_SETTING",
+        "IMPLICIT_CANONICAL_APP"
       ]
     },
     "PluginInterface": {
@@ -243,8 +346,26 @@
             }
           ]
         },
+        "logoDark": {
+          "description": "Local dark-mode logo path, resolved from the installed plugin package.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AbsolutePathBuf"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "logoUrl": {
           "description": "Remote logo URL from the plugin catalog.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "logoUrlDark": {
+          "description": "Remote dark-mode logo URL from the plugin catalog.",
           "type": [
             "string",
             "null"
@@ -302,6 +423,13 @@
         "remotePluginId"
       ],
       "properties": {
+        "canPublishToWorkspace": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "creatorAccountUserId": {
           "type": [
             "string",
@@ -314,10 +442,28 @@
             "null"
           ]
         },
+        "discoverability": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginShareDiscoverability"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "remotePluginId": {
           "type": "string"
         },
-        "shareTargets": {
+        "remoteVersion": {
+          "description": "Version of the remote shared plugin release when available.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sharePrincipals": {
           "type": [
             "array",
             "null"
@@ -334,12 +480,21 @@
         }
       }
     },
+    "PluginShareDiscoverability": {
+      "type": "string",
+      "enum": [
+        "LISTED",
+        "UNLISTED",
+        "PRIVATE"
+      ]
+    },
     "PluginSharePrincipal": {
       "type": "object",
       "required": [
         "name",
         "principalId",
-        "principalType"
+        "principalType",
+        "role"
       ],
       "properties": {
         "name": {
@@ -350,8 +505,19 @@
         },
         "principalType": {
           "$ref": "#/definitions/PluginSharePrincipalType"
+        },
+        "role": {
+          "$ref": "#/definitions/PluginSharePrincipalRole"
         }
       }
+    },
+    "PluginSharePrincipalRole": {
+      "type": "string",
+      "enum": [
+        "reader",
+        "editor",
+        "owner"
+      ]
     },
     "PluginSharePrincipalType": {
       "type": "string",
@@ -422,6 +588,40 @@
           "title": "GitPluginSource"
         },
         {
+          "type": "object",
+          "required": [
+            "package",
+            "type"
+          ],
+          "properties": {
+            "package": {
+              "type": "string"
+            },
+            "registry": {
+              "description": "Optional HTTPS registry URL. Authentication stays in the user's npm config.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "npm"
+              ],
+              "title": "NpmPluginSourceType"
+            },
+            "version": {
+              "description": "Optional npm version or version range.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "title": "NpmPluginSource"
+        },
+        {
           "description": "The plugin is available in the remote catalog. Download metadata is kept server-side and is not exposed through the app-server API.",
           "type": "object",
           "required": [
@@ -473,6 +673,16 @@
         "installPolicy": {
           "$ref": "#/definitions/PluginInstallPolicy"
         },
+        "installPolicySource": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginInstallPolicySource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "installed": {
           "type": "boolean"
         },
@@ -493,8 +703,30 @@
             "type": "string"
           }
         },
+        "localVersion": {
+          "description": "Version of the locally materialized plugin package when available.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mustShowInstallationInterstitial": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
+        },
+        "remotePluginId": {
+          "description": "Backend remote plugin identifier when available.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "shareContext": {
           "description": "Remote sharing context associated with this plugin when available.",
@@ -509,8 +741,153 @@
         },
         "source": {
           "$ref": "#/definitions/PluginSource"
+        },
+        "version": {
+          "description": "Version advertised by the remote marketplace backend when available.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
+    },
+    "ScheduledTaskSchedule": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "intervalHours",
+            "type"
+          ],
+          "properties": {
+            "days": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/definitions/ScheduledTaskWeekday"
+              }
+            },
+            "intervalHours": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "hourly"
+              ],
+              "title": "HourlyScheduledTaskScheduleType"
+            }
+          },
+          "title": "HourlyScheduledTaskSchedule"
+        },
+        {
+          "type": "object",
+          "required": [
+            "time",
+            "type"
+          ],
+          "properties": {
+            "time": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "daily"
+              ],
+              "title": "DailyScheduledTaskScheduleType"
+            }
+          },
+          "title": "DailyScheduledTaskSchedule"
+        },
+        {
+          "type": "object",
+          "required": [
+            "time",
+            "type"
+          ],
+          "properties": {
+            "time": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "weekdays"
+              ],
+              "title": "WeekdaysScheduledTaskScheduleType"
+            }
+          },
+          "title": "WeekdaysScheduledTaskSchedule"
+        },
+        {
+          "type": "object",
+          "required": [
+            "days",
+            "time",
+            "type"
+          ],
+          "properties": {
+            "days": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ScheduledTaskWeekday"
+              }
+            },
+            "time": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "weekly"
+              ],
+              "title": "WeeklyScheduledTaskScheduleType"
+            }
+          },
+          "title": "WeeklyScheduledTaskSchedule"
+        }
+      ]
+    },
+    "ScheduledTaskSummary": {
+      "type": "object",
+      "required": [
+        "key",
+        "name",
+        "prompt",
+        "schedule"
+      ],
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "schedule": {
+          "$ref": "#/definitions/ScheduledTaskSchedule"
+        }
+      }
+    },
+    "ScheduledTaskWeekday": {
+      "type": "string",
+      "enum": [
+        "MO",
+        "TU",
+        "WE",
+        "TH",
+        "FR",
+        "SA",
+        "SU"
+      ]
     },
     "SkillInterface": {
       "type": "object",
@@ -543,6 +920,13 @@
             }
           ]
         },
+        "iconLargeUrl": {
+          "description": "Remote large icon URL from the plugin catalog.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "iconSmall": {
           "anyOf": [
             {
@@ -551,6 +935,13 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "iconSmallUrl": {
+          "description": "Remote small icon URL from the plugin catalog.",
+          "type": [
+            "string",
+            "null"
           ]
         },
         "shortDescription": {

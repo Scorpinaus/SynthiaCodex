@@ -143,10 +143,10 @@ internal static class MarkdownLinkTests
         var codeBlock = (Border)renderer.Inlines.OfType<InlineUIContainer>()
             .Single(container => AutomationProperties.GetName(container.Child) == "Markdown fenced code block")
             .Child;
-        var codeScroller = (ScrollViewer)codeBlock.Child;
+        var codeScroller = ((StackPanel)codeBlock.Child).Children.OfType<ScrollViewer>().Single();
         var codeText = (TextBlock)codeScroller.Content;
         Assert(codeScroller.HorizontalScrollBarVisibility == ScrollBarVisibility.Auto, "fenced code supports horizontal scrolling");
-        Assert(codeText.Text.Contains("**literal markdown**", StringComparison.Ordinal), "fenced code preserves markdown syntax literally");
+        Assert(InlineText(codeText).Contains("**literal markdown**", StringComparison.Ordinal), "fenced code preserves markdown syntax literally");
         Assert(!codeText.Inlines.OfType<Bold>().Any(), "fenced code does not apply inline formatting");
 
         var tildeRenderer = new MarkdownTextBlock { Markdown = "~~~text\ntilde fence\n~~~" };

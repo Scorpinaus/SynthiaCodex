@@ -6,9 +6,11 @@ SynthiaCode is an independent application and is not affiliated with or endorsed
 
 The app is intended to launch and communicate with `codex app-server` while keeping the Windows desktop workflow small, predictable, and easy to test.
 
+**Current release:** 0.1.0
+
 The current build also includes a Git-aware Changes workspace for repository status, working and staged diffs, staging, unstaging, confirmed discard, commits, and editor/Explorer shortcuts.
 
-See the current [SynthiaCode and ChatGPT desktop feature-parity audit](feature_parity.md) for the implemented matrix and prioritized gaps.
+See the [current architecture](docs/current-architecture.md) for the release boundary and the [feature-parity audit](feature_parity.md) for the implemented matrix and prioritized gaps.
 
 ## Modern Windows workspace
 

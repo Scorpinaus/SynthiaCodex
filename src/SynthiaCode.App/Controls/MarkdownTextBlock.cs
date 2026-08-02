@@ -15,6 +15,11 @@ namespace SynthiaCode.App.Controls;
 
 public sealed class MarkdownTextBlock : TextBlock
 {
+    private IReadOnlyDictionary<string, string> footnoteDefinitions =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> footnoteOrdinals = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, FrameworkElement> footnoteTargets = new(StringComparer.OrdinalIgnoreCase);
+
     public static readonly DependencyProperty MarkdownProperty = DependencyProperty.Register(
         nameof(Markdown),
         typeof(string),
@@ -58,19 +63,27 @@ public sealed class MarkdownTextBlock : TextBlock
     {
         Inlines.Clear();
 
-        var source = Markdown ?? string.Empty;
+        footnoteOrdinals.Clear();
+        footnoteTargets.Clear();
+        var source = ExtractFootnoteDefinitions(
+            Markdown ?? string.Empty,
+            out footnoteDefinitions);
         var segmentStart = 0;
         for (var lineStart = 0; lineStart < source.Length; lineStart = FindNextLineStart(source, lineStart))
         {
             Inline? block = null;
             var blockEnd = lineStart;
-            if (TryReadFencedCodeBlock(source, lineStart, out blockEnd, out var code))
+            if (TryReadFencedCodeBlock(source, lineStart, out blockEnd, out var code, out var infoString))
             {
-                block = new InlineUIContainer(CreateFencedCodeBlock(code));
+                block = new InlineUIContainer(CreateFencedCodeBlock(code, infoString));
             }
             else if (TryReadMarkdownTable(source, lineStart, out blockEnd, out var table))
             {
                 block = new InlineUIContainer(CreateTable(table));
+            }
+            else if (TryReadDefinitionList(source, lineStart, out blockEnd, out var definitions))
+            {
+                block = new InlineUIContainer(CreateDefinitionList(definitions));
             }
             else if (TryReadBlockQuote(source, lineStart, out blockEnd, out var quote))
             {
@@ -83,6 +96,10 @@ public sealed class MarkdownTextBlock : TextBlock
             else if (TryReadHorizontalRule(source, lineStart, out blockEnd))
             {
                 block = new InlineUIContainer(CreateHorizontalRule());
+            }
+            else if (TryReadNestedList(source, lineStart, out blockEnd, out var nestedList))
+            {
+                block = new InlineUIContainer(CreateNestedList(nestedList));
             }
             else if (TryReadListItem(source, lineStart, out blockEnd, out var listPrefix, out var listContent, out var listAutomationName))
             {
@@ -101,6 +118,10 @@ public sealed class MarkdownTextBlock : TextBlock
         }
 
         AppendInlineMarkdown(Inlines, source[segmentStart..]);
+        if (footnoteOrdinals.Count > 0)
+        {
+            Inlines.Add(new InlineUIContainer(CreateFootnotes()));
+        }
     }
 
     private void AppendInlineMarkdown(InlineCollection inlines, string source)
@@ -191,12 +212,36 @@ public sealed class MarkdownTextBlock : TextBlock
                 continue;
             }
 
+            if (source[index] == '<' &&
+                TryAppendRawHtml(inlines, source, index, out var htmlEnd))
+            {
+                index = htmlEnd;
+                continue;
+            }
+
+            if (source[index] == '!' &&
+                TryReadRemoteImageLink(source, index, out var remoteImageEnd, out var remoteImageLabel, out var remoteImageUri))
+            {
+                inlines.Add(new InlineUIContainer(CreateRemoteImagePreview(remoteImageLabel, remoteImageUri)));
+                index = remoteImageEnd;
+                continue;
+            }
+
             if (source[index] == '[' &&
                 TryReadLocalImageLink(source, index, hasImageMarker: false, out var localImageEnd, out var localImageLabel, out var localImageUri, out var localImagePath) &&
                 TryCreateGeneratedImagePreview(localImageLabel, localImageUri, localImagePath, out var linkedPreview))
             {
                 inlines.Add(new InlineUIContainer(linkedPreview));
                 index = localImageEnd;
+                continue;
+            }
+
+            if (source[index] == '[' &&
+                TryReadFootnoteReference(source, index, out var footnoteEnd, out var footnoteLabel) &&
+                footnoteDefinitions.ContainsKey(footnoteLabel))
+            {
+                AddFootnoteReference(inlines, footnoteLabel);
+                index = footnoteEnd;
                 continue;
             }
 
@@ -263,6 +308,150 @@ public sealed class MarkdownTextBlock : TextBlock
         return item;
     }
 
+    private StackPanel CreateNestedList(IReadOnlyList<MarkdownListItem> items)
+    {
+        var list = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Margin = new Thickness(0, 4, 0, 4)
+        };
+        BindBlockWidth(list);
+        AutomationProperties.SetName(list, "Markdown list");
+
+        for (var index = 0; index < items.Count; index++)
+        {
+            var item = items[index];
+            var marker = new TextBlock
+            {
+                Text = item.Prefix,
+                MinWidth = 22,
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            AutomationProperties.SetName(marker, item.AutomationName);
+
+            var content = CreateNestedMarkdownTextBlock(item.Content);
+            var row = new Grid
+            {
+                Margin = new Thickness(item.Depth * 24, 1, 0, 1)
+            };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            Grid.SetColumn(content, 1);
+            row.Children.Add(marker);
+            row.Children.Add(content);
+            AutomationProperties.SetName(row, $"Markdown list item depth {item.Depth}: {index + 1}");
+            if (item.TaskState is not null)
+            {
+                AutomationProperties.SetHelpText(row, item.TaskState.Value ? "Checked task" : "Unchecked task");
+            }
+            list.Children.Add(row);
+        }
+
+        return list;
+    }
+
+    private StackPanel CreateDefinitionList(IReadOnlyList<MarkdownDefinitionItem> definitions)
+    {
+        var list = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Margin = new Thickness(0, 4, 0, 4)
+        };
+        BindBlockWidth(list);
+        AutomationProperties.SetName(list, "Markdown definition list");
+
+        foreach (var entry in definitions)
+        {
+            var term = CreateNestedMarkdownTextBlock(entry.Term);
+            term.FontWeight = FontWeights.SemiBold;
+            term.Margin = new Thickness(0, 4, 0, 1);
+            AutomationProperties.SetName(term, $"Markdown definition term: {entry.Term}");
+            list.Children.Add(term);
+
+            foreach (var definitionText in entry.Definitions)
+            {
+                var definition = CreateNestedMarkdownTextBlock(definitionText);
+                definition.Margin = new Thickness(24, 1, 0, 2);
+                AutomationProperties.SetName(definition, "Markdown definition");
+                list.Children.Add(definition);
+            }
+        }
+
+        return list;
+    }
+
+    private void AddFootnoteReference(InlineCollection inlines, string label)
+    {
+        if (!footnoteOrdinals.TryGetValue(label, out var ordinal))
+        {
+            ordinal = footnoteOrdinals.Count + 1;
+            footnoteOrdinals[label] = ordinal;
+        }
+
+        var reference = new Hyperlink(new Run(ordinal.ToString()))
+        {
+            BaselineAlignment = BaselineAlignment.Superscript,
+            ToolTip = new ToolTip { Content = $"Footnote {ordinal}: {label}" }
+        };
+        reference.Click += (_, _) =>
+        {
+            if (footnoteTargets.TryGetValue(label, out var target))
+            {
+                target.BringIntoView();
+                target.Focus();
+            }
+        };
+        AutomationProperties.SetName(reference, $"Markdown footnote reference: {label}");
+        inlines.Add(reference);
+    }
+
+    private StackPanel CreateFootnotes()
+    {
+        var footnotes = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Margin = new Thickness(0, 12, 0, 0)
+        };
+        BindBlockWidth(footnotes);
+        AutomationProperties.SetName(footnotes, "Markdown footnotes");
+
+        var divider = new Border
+        {
+            Height = 1,
+            Margin = new Thickness(0, 0, 0, 7)
+        };
+        divider.SetResourceReference(Border.BackgroundProperty, "LineBrush");
+        footnotes.Children.Add(divider);
+
+        foreach (var entry in footnoteOrdinals.OrderBy(item => item.Value))
+        {
+            var marker = new TextBlock
+            {
+                Text = $"{entry.Value}.",
+                MinWidth = 24,
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            marker.SetResourceReference(TextElement.ForegroundProperty, "TextSecondaryBrush");
+
+            var definition = CreateNestedMarkdownTextBlock(footnoteDefinitions[entry.Key]);
+            var row = new Grid
+            {
+                Focusable = true,
+                Margin = new Thickness(0, 2, 0, 2)
+            };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            Grid.SetColumn(definition, 1);
+            row.Children.Add(marker);
+            row.Children.Add(definition);
+            AutomationProperties.SetName(row, $"Markdown footnote: {entry.Key}");
+            footnoteTargets[entry.Key] = row;
+            footnotes.Children.Add(row);
+        }
+
+        return footnotes;
+    }
+
     private Border CreateHorizontalRule()
     {
         var rule = new Border
@@ -293,16 +482,53 @@ public sealed class MarkdownTextBlock : TextBlock
         return quote;
     }
 
-    private Border CreateFencedCodeBlock(string content)
+    private Border CreateFencedCodeBlock(string content, string infoString)
     {
+        var codeText = RemoveFenceSeparatingLineEnding(content);
+        var languageLabel = MarkdownSyntaxHighlighter.DisplayLabel(infoString);
         var code = new TextBlock
         {
-            Text = content.TrimEnd('\r', '\n'),
             TextWrapping = TextWrapping.NoWrap,
             FontSize = FontSize,
             Foreground = Foreground
         };
         code.SetResourceReference(TextElement.FontFamilyProperty, "MonoFont");
+        if (MarkdownSyntaxHighlighter.TryResolve(infoString, out _, out var language))
+        {
+            MarkdownSyntaxHighlighter.Highlight(code, codeText, language);
+        }
+        else
+        {
+            code.Text = codeText;
+        }
+        AutomationProperties.SetName(code, $"Highlighted {languageLabel} code");
+
+        var languageText = new TextBlock
+        {
+            Text = languageLabel,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        languageText.SetResourceReference(TextElement.ForegroundProperty, "TextSecondaryBrush");
+        AutomationProperties.SetName(languageText, $"Code language: {languageLabel}");
+
+        var copyButton = new Button
+        {
+            Content = "Copy",
+            Tag = codeText,
+            Padding = new Thickness(8, 2, 8, 2),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            ToolTip = $"Copy {languageLabel} code"
+        };
+        copyButton.SetResourceReference(FrameworkElement.StyleProperty, "CompactButton");
+        copyButton.Click += OnCopyCodeClick;
+        AutomationProperties.SetName(copyButton, $"Copy {languageLabel} code");
+
+        var header = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(copyButton, 1);
+        header.Children.Add(languageText);
+        header.Children.Add(copyButton);
 
         var scroller = new ScrollViewer
         {
@@ -310,6 +536,9 @@ public sealed class MarkdownTextBlock : TextBlock
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = ScrollBarVisibility.Disabled
         };
+        var contentPanel = new StackPanel();
+        contentPanel.Children.Add(header);
+        contentPanel.Children.Add(scroller);
         var block = new Border
         {
             BorderThickness = new Thickness(1),
@@ -317,13 +546,33 @@ public sealed class MarkdownTextBlock : TextBlock
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Margin = new Thickness(0, 4, 0, 4),
             Padding = new Thickness(9, 7, 9, 7),
-            Child = scroller
+            Child = contentPanel
         };
         block.SetResourceReference(Border.BackgroundProperty, "SubtleBrush");
         block.SetResourceReference(Border.BorderBrushProperty, "LineBrush");
         BindBlockWidth(block);
         AutomationProperties.SetName(block, "Markdown fenced code block");
         return block;
+    }
+
+    private static void OnCopyCodeClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string code })
+        {
+            Clipboard.SetText(code);
+        }
+    }
+
+    private static string RemoveFenceSeparatingLineEnding(string content)
+    {
+        if (content.EndsWith("\r\n", StringComparison.Ordinal))
+        {
+            return content[..^2];
+        }
+
+        return content.EndsWith('\r') || content.EndsWith('\n')
+            ? content[..^1]
+            : content;
     }
 
     private MarkdownTextBlock CreateNestedMarkdownTextBlock(string content)
@@ -412,6 +661,313 @@ public sealed class MarkdownTextBlock : TextBlock
         };
         link.RequestNavigate += OnLinkRequestNavigate;
         inlines.Add(link);
+    }
+
+    private bool TryAppendRawHtml(
+        InlineCollection inlines,
+        string source,
+        int start,
+        out int end)
+    {
+        end = start;
+        if (source.AsSpan(start).StartsWith("<!--", StringComparison.Ordinal))
+        {
+            var commentEnd = source.IndexOf("-->", start + 4, StringComparison.Ordinal);
+            if (commentEnd < 0)
+            {
+                return false;
+            }
+
+            end = commentEnd + 3;
+            return true;
+        }
+
+        var openingEnd = source.IndexOf('>', start + 1);
+        if (openingEnd < 0)
+        {
+            return false;
+        }
+
+        var opening = source[(start + 1)..openingEnd].Trim();
+        var tagLength = 0;
+        while (tagLength < opening.Length && char.IsLetterOrDigit(opening[tagLength]))
+        {
+            tagLength++;
+        }
+        if (tagLength == 0)
+        {
+            return false;
+        }
+
+        var tag = opening[..tagLength].ToLowerInvariant();
+        if (tag == "br" && opening[tagLength..].Trim() is "" or "/")
+        {
+            inlines.Add(new LineBreak());
+            end = openingEnd + 1;
+            return true;
+        }
+
+        if (tag == "img")
+        {
+            if (!TryGetHtmlAttribute(opening, "src", out var sourceValue) ||
+                !TryGetSafeUri(System.Net.WebUtility.HtmlDecode(sourceValue), out var imageUri))
+            {
+                return false;
+            }
+
+            var label = TryGetHtmlAttribute(opening, "alt", out var alt)
+                ? System.Net.WebUtility.HtmlDecode(alt)
+                : imageUri.Host;
+            inlines.Add(new InlineUIContainer(CreateRemoteImagePreview(label, imageUri)));
+            end = openingEnd + 1;
+            return true;
+        }
+
+        if (!IsSupportedPairedHtmlTag(tag))
+        {
+            return false;
+        }
+
+        var closingTag = $"</{tag}>";
+        var closingStart = source.IndexOf(closingTag, openingEnd + 1, StringComparison.OrdinalIgnoreCase);
+        if (closingStart < 0)
+        {
+            return false;
+        }
+
+        var content = source[(openingEnd + 1)..closingStart];
+        end = closingStart + closingTag.Length;
+        switch (tag)
+        {
+            case "strong":
+            case "b":
+            {
+                var strong = new Bold();
+                AppendInlineMarkdown(strong.Inlines, content);
+                inlines.Add(strong);
+                return true;
+            }
+            case "em":
+            case "i":
+            {
+                var emphasis = new Italic();
+                AppendInlineMarkdown(emphasis.Inlines, content);
+                inlines.Add(emphasis);
+                return true;
+            }
+            case "del":
+            case "s":
+            {
+                var deleted = new Span { TextDecorations = System.Windows.TextDecorations.Strikethrough };
+                AppendInlineMarkdown(deleted.Inlines, content);
+                inlines.Add(deleted);
+                return true;
+            }
+            case "code":
+            case "kbd":
+            {
+                var code = new Run(System.Net.WebUtility.HtmlDecode(content));
+                code.SetResourceReference(TextElement.FontFamilyProperty, "MonoFont");
+                code.SetResourceReference(TextElement.BackgroundProperty, "SubtleBrush");
+                AutomationProperties.SetName(code, "Inline HTML code");
+                inlines.Add(code);
+                return true;
+            }
+            case "a":
+            {
+                if (!TryGetHtmlAttribute(opening, "href", out var href) ||
+                    !TryGetSafeUri(System.Net.WebUtility.HtmlDecode(href), out var target))
+                {
+                    end = start;
+                    return false;
+                }
+
+                var link = new Hyperlink
+                {
+                    NavigateUri = target,
+                    ToolTip = new ToolTip { Content = target.AbsoluteUri }
+                };
+                AppendInlineMarkdown(link.Inlines, content);
+                link.RequestNavigate += OnLinkRequestNavigate;
+                inlines.Add(link);
+                return true;
+            }
+            case "pre":
+            {
+                var preformatted = new Run(System.Net.WebUtility.HtmlDecode(content));
+                preformatted.SetResourceReference(TextElement.FontFamilyProperty, "MonoFont");
+                AutomationProperties.SetName(preformatted, "Raw HTML preformatted text");
+                inlines.Add(preformatted);
+                return true;
+            }
+            case "blockquote":
+            {
+                var quote = new Italic();
+                AutomationProperties.SetName(quote, "Raw HTML block quote");
+                AppendInlineMarkdown(quote.Inlines, content);
+                inlines.Add(quote);
+                return true;
+            }
+            case "h1":
+            case "h2":
+            case "h3":
+            case "h4":
+            case "h5":
+            case "h6":
+            {
+                var heading = CreateHeading(tag[1] - '0', content);
+                inlines.Add(heading);
+                return true;
+            }
+            default:
+            {
+                var block = new Span();
+                if (inlines.Count > 0)
+                {
+                    block.Inlines.Add(new LineBreak());
+                }
+                AppendInlineMarkdown(block.Inlines, content);
+                block.Inlines.Add(new LineBreak());
+                inlines.Add(block);
+                return true;
+            }
+        }
+    }
+
+    private static bool IsSupportedPairedHtmlTag(string tag) =>
+        tag is "strong" or "b" or "em" or "i" or "del" or "s" or "code" or "kbd" or
+            "a" or "p" or "div" or "h1" or "h2" or "h3" or "h4" or "h5" or "h6" or
+            "blockquote" or "pre";
+
+    private static bool TryGetHtmlAttribute(string opening, string attributeName, out string value)
+    {
+        value = string.Empty;
+        for (var index = 0; index < opening.Length;)
+        {
+            while (index < opening.Length && !char.IsLetter(opening[index]))
+            {
+                index++;
+            }
+
+            var nameStart = index;
+            while (index < opening.Length &&
+                   (char.IsLetterOrDigit(opening[index]) || opening[index] is '-' or '_'))
+            {
+                index++;
+            }
+            if (nameStart == index ||
+                !opening[nameStart..index].Equals(attributeName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            while (index < opening.Length && char.IsWhiteSpace(opening[index]))
+            {
+                index++;
+            }
+            if (index >= opening.Length || opening[index] != '=')
+            {
+                continue;
+            }
+
+            index++;
+            while (index < opening.Length && char.IsWhiteSpace(opening[index]))
+            {
+                index++;
+            }
+            if (index >= opening.Length)
+            {
+                return false;
+            }
+
+            if (opening[index] is '"' or '\'')
+            {
+                var quote = opening[index++];
+                var valueEnd = opening.IndexOf(quote, index);
+                if (valueEnd < 0)
+                {
+                    return false;
+                }
+
+                value = opening[index..valueEnd];
+                return true;
+            }
+
+            var unquotedEnd = index;
+            while (unquotedEnd < opening.Length &&
+                   !char.IsWhiteSpace(opening[unquotedEnd]) &&
+                   opening[unquotedEnd] != '/')
+            {
+                unquotedEnd++;
+            }
+            value = opening[index..unquotedEnd];
+            return value.Length > 0;
+        }
+
+        return false;
+    }
+
+    private Border CreateRemoteImagePreview(string label, Uri target)
+    {
+        var bitmap = new BitmapImage();
+        bitmap.BeginInit();
+        bitmap.CacheOption = BitmapCacheOption.OnDemand;
+        bitmap.CreateOptions = BitmapCreateOptions.DelayCreation;
+        bitmap.DecodePixelWidth = 960;
+        bitmap.UriSource = target;
+        bitmap.EndInit();
+
+        var image = new Image
+        {
+            Source = bitmap,
+            MaxWidth = 720,
+            MaxHeight = 480,
+            Stretch = Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        AutomationProperties.SetName(image, $"Remote image: {label}");
+
+        var failureText = new TextBlock
+        {
+            Text = $"Image unavailable: {label}",
+            Visibility = Visibility.Collapsed,
+            TextWrapping = TextWrapping.Wrap
+        };
+        failureText.SetResourceReference(TextElement.ForegroundProperty, "TextSecondaryBrush");
+        image.ImageFailed += (_, _) =>
+        {
+            image.Visibility = Visibility.Collapsed;
+            failureText.Visibility = Visibility.Visible;
+        };
+
+        var linkText = new TextBlock
+        {
+            Margin = new Thickness(0, 8, 0, 0),
+            TextWrapping = TextWrapping.Wrap
+        };
+        AddLink(linkText.Inlines, label, target);
+
+        var content = new StackPanel();
+        content.Children.Add(image);
+        content.Children.Add(failureText);
+        content.Children.Add(linkText);
+
+        var preview = new Border
+        {
+            Child = content,
+            Padding = new Thickness(8),
+            Margin = new Thickness(0, 8, 0, 8),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            ToolTip = target.AbsoluteUri
+        };
+        preview.SetResourceReference(Border.BackgroundProperty, "SurfaceSunkenBrush");
+        preview.SetResourceReference(Border.BorderBrushProperty, "BorderSubtleBrush");
+        preview.SetBinding(
+            FrameworkElement.MaxWidthProperty,
+            new Binding(nameof(ActualWidth)) { Source = this });
+        AutomationProperties.SetName(preview, $"Remote image preview: {label}");
+        return preview;
     }
 
     private bool TryCreateGeneratedImagePreview(
@@ -764,10 +1320,12 @@ public sealed class MarkdownTextBlock : TextBlock
         string source,
         int start,
         out int end,
-        out string content)
+        out string content,
+        out string infoString)
     {
         end = start;
         content = string.Empty;
+        infoString = string.Empty;
         ReadLine(source, start, out var openingLine, out _, out var contentStart);
         if (!TryTrimBlockIndent(openingLine, out var opening) ||
             opening.Length < 3 ||
@@ -786,6 +1344,7 @@ public sealed class MarkdownTextBlock : TextBlock
         {
             return false;
         }
+        infoString = opening[markerLength..].Trim();
 
         for (var current = contentStart; current < source.Length;)
         {
@@ -824,6 +1383,89 @@ public sealed class MarkdownTextBlock : TextBlock
 
         trimmed = indent <= 3 ? line[indent..] : string.Empty;
         return indent <= 3;
+    }
+
+    private static bool TryReadDefinitionList(
+        string source,
+        int start,
+        out int end,
+        out IReadOnlyList<MarkdownDefinitionItem> definitions)
+    {
+        end = start;
+        var parsed = new List<MarkdownDefinitionItem>();
+        var current = start;
+        while (current < source.Length)
+        {
+            if (!TryReadDefinitionItem(source, current, out var itemEnd, out var nextStart, out var item))
+            {
+                break;
+            }
+
+            parsed.Add(item);
+            end = itemEnd;
+            current = nextStart;
+
+            if (current < source.Length)
+            {
+                ReadLine(source, current, out var separator, out _, out var afterSeparator);
+                if (string.IsNullOrWhiteSpace(separator))
+                {
+                    current = afterSeparator;
+                }
+            }
+        }
+
+        if (parsed.Count == 0)
+        {
+            definitions = [];
+            end = start;
+            return false;
+        }
+
+        definitions = parsed;
+        return true;
+    }
+
+    private static bool TryReadDefinitionItem(
+        string source,
+        int start,
+        out int end,
+        out int nextStart,
+        out MarkdownDefinitionItem item)
+    {
+        end = start;
+        nextStart = start;
+        item = null!;
+        ReadLine(source, start, out var termLine, out _, out var definitionStart);
+        var term = termLine.Trim();
+        if (term.Length == 0 || definitionStart >= source.Length)
+        {
+            return false;
+        }
+
+        var values = new List<string>();
+        for (var current = definitionStart; current < source.Length;)
+        {
+            ReadLine(source, current, out var line, out var lineEnd, out var followingLineStart);
+            var trimmed = line.TrimStart();
+            if (trimmed.Length < 2 || trimmed[0] != ':' || !char.IsWhiteSpace(trimmed[1]))
+            {
+                break;
+            }
+
+            values.Add(trimmed[2..].TrimStart());
+            end = lineEnd;
+            nextStart = followingLineStart;
+            current = followingLineStart;
+        }
+
+        if (values.Count == 0)
+        {
+            return false;
+        }
+
+        item = new MarkdownDefinitionItem(term, values);
+        return true;
     }
 
     private static bool TryReadMarkdownTable(string source, int start, out int end, out MarkdownTable table)
@@ -947,6 +1589,123 @@ public sealed class MarkdownTextBlock : TextBlock
         return marker.Length >= 3 && marker.All(character => character == '-');
     });
 
+    private static string ExtractFootnoteDefinitions(
+        string source,
+        out IReadOnlyDictionary<string, string> definitions)
+    {
+        var parsed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var renderedSource = new StringBuilder(source.Length);
+        char? fenceMarker = null;
+        var fenceLength = 0;
+        for (var current = 0; current < source.Length;)
+        {
+            ReadLine(source, current, out var line, out _, out var nextLineStart);
+            if (fenceMarker is not null)
+            {
+                renderedSource.Append(source, current, nextLineStart - current);
+                if (TryTrimBlockIndent(line, out var closing) &&
+                    IsClosingFence(closing, fenceMarker.Value, fenceLength))
+                {
+                    fenceMarker = null;
+                    fenceLength = 0;
+                }
+                current = nextLineStart;
+                continue;
+            }
+
+            if (TryReadOpeningFence(line, out var openingMarker, out var openingLength))
+            {
+                fenceMarker = openingMarker;
+                fenceLength = openingLength;
+                renderedSource.Append(source, current, nextLineStart - current);
+                current = nextLineStart;
+                continue;
+            }
+
+            if (!TryParseFootnoteDefinitionLine(line, out var label, out var definition))
+            {
+                renderedSource.Append(source, current, nextLineStart - current);
+                current = nextLineStart;
+                continue;
+            }
+
+            var definitionText = new StringBuilder(definition);
+            current = nextLineStart;
+            while (current < source.Length)
+            {
+                ReadLine(source, current, out var continuation, out _, out var followingLineStart);
+                var indent = 0;
+                while (indent < continuation.Length && continuation[indent] == ' ')
+                {
+                    indent++;
+                }
+                if (indent < 2 || indent == continuation.Length)
+                {
+                    break;
+                }
+
+                definitionText.AppendLine();
+                definitionText.Append(continuation[indent..]);
+                current = followingLineStart;
+            }
+
+            parsed[label] = definitionText.ToString();
+        }
+
+        definitions = parsed;
+        return renderedSource.ToString();
+    }
+
+    private static bool TryReadOpeningFence(string line, out char marker, out int markerLength)
+    {
+        marker = default;
+        markerLength = 0;
+        if (!TryTrimBlockIndent(line, out var trimmed) ||
+            trimmed.Length < 3 ||
+            trimmed[0] is not '`' and not '~')
+        {
+            return false;
+        }
+
+        marker = trimmed[0];
+        while (markerLength < trimmed.Length && trimmed[markerLength] == marker)
+        {
+            markerLength++;
+        }
+
+        return markerLength >= 3;
+    }
+
+    private static bool TryParseFootnoteDefinitionLine(
+        string line,
+        out string label,
+        out string definition)
+    {
+        label = string.Empty;
+        definition = string.Empty;
+        var trimmed = line.TrimStart();
+        if (line.Length - trimmed.Length > 3 || !trimmed.StartsWith("[^", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var markerEnd = trimmed.IndexOf("]:", 2, StringComparison.Ordinal);
+        if (markerEnd <= 2)
+        {
+            return false;
+        }
+
+        label = trimmed[2..markerEnd].Trim();
+        if (label.Length == 0 || label.Any(char.IsWhiteSpace))
+        {
+            label = string.Empty;
+            return false;
+        }
+
+        definition = trimmed[(markerEnd + 2)..].TrimStart();
+        return true;
+    }
+
     private static void ReadLine(
         string source,
         int start,
@@ -976,6 +1735,38 @@ public sealed class MarkdownTextBlock : TextBlock
     {
         var newline = source.IndexOf('\n', start);
         return newline < 0 ? source.Length : newline + 1;
+    }
+
+    private static bool TryReadFootnoteReference(
+        string source,
+        int start,
+        out int end,
+        out string label)
+    {
+        end = start;
+        label = string.Empty;
+        if (start + 3 >= source.Length ||
+            source[start] != '[' ||
+            source[start + 1] != '^')
+        {
+            return false;
+        }
+
+        var closing = source.IndexOf(']', start + 2);
+        if (closing <= start + 2)
+        {
+            return false;
+        }
+
+        label = source[(start + 2)..closing];
+        if (label.Any(char.IsWhiteSpace))
+        {
+            label = string.Empty;
+            return false;
+        }
+
+        end = closing + 1;
+        return true;
     }
 
     private static bool TryReadMarkdownLink(string source, int start, out int end, out string label, out Uri target)
@@ -1046,6 +1837,144 @@ public sealed class MarkdownTextBlock : TextBlock
         }
 
         label = source[(linkStart + 1)..labelEnd];
+        end = targetEnd + 1;
+        return true;
+    }
+
+    private static bool TryReadNestedList(
+        string source,
+        int start,
+        out int end,
+        out IReadOnlyList<MarkdownListItem> items)
+    {
+        end = start;
+        var parsed = new List<MarkdownListItem>();
+        var baseIndent = -1;
+        var previousDepth = 0;
+        for (var current = start; current < source.Length;)
+        {
+            ReadLine(source, current, out var line, out var lineEnd, out var nextLineStart);
+            if (!TryParseNestedListLine(line, out var indent, out var prefix, out var content, out var automationName, out var taskState))
+            {
+                break;
+            }
+
+            baseIndent = baseIndent < 0 ? indent : baseIndent;
+            if (indent < baseIndent)
+            {
+                break;
+            }
+
+            var depth = Math.Min(previousDepth + 1, Math.Max(0, (indent - baseIndent + 1) / 2));
+            parsed.Add(new MarkdownListItem(depth, prefix, content, automationName, taskState));
+            previousDepth = depth;
+            end = lineEnd;
+            current = nextLineStart;
+        }
+
+        if (parsed.Count < 2 || parsed.All(item => item.Depth == 0))
+        {
+            items = [];
+            end = start;
+            return false;
+        }
+
+        items = parsed;
+        return true;
+    }
+
+    private static bool TryParseNestedListLine(
+        string line,
+        out int indent,
+        out string prefix,
+        out string content,
+        out string automationName,
+        out bool? taskState)
+    {
+        indent = 0;
+        prefix = string.Empty;
+        content = string.Empty;
+        automationName = string.Empty;
+        taskState = null;
+        while (indent < line.Length && line[indent] == ' ')
+        {
+            indent++;
+        }
+        if (indent == line.Length)
+        {
+            return false;
+        }
+
+        var item = line[indent..];
+        if (item.Length >= 2 &&
+            item[0] is '-' or '*' or '+' &&
+            char.IsWhiteSpace(item[1]))
+        {
+            prefix = "\u2022 ";
+            automationName = "Markdown unordered list item";
+            content = item[2..].TrimStart();
+            if (content.Length >= 4 &&
+                content[0] == '[' &&
+                content[2] == ']' &&
+                char.IsWhiteSpace(content[3]) &&
+                content[1] is ' ' or 'x' or 'X')
+            {
+                taskState = content[1] is 'x' or 'X';
+                prefix = taskState.Value ? "\u2611 " : "\u2610 ";
+                automationName = "Markdown task list item";
+                content = content[4..].TrimStart();
+            }
+            return true;
+        }
+
+        var digitEnd = 0;
+        while (digitEnd < item.Length && digitEnd < 9 && char.IsDigit(item[digitEnd]))
+        {
+            digitEnd++;
+        }
+        if (digitEnd == 0 ||
+            digitEnd + 1 >= item.Length ||
+            item[digitEnd] is not '.' and not ')' ||
+            !char.IsWhiteSpace(item[digitEnd + 1]))
+        {
+            return false;
+        }
+
+        prefix = $"{item[..(digitEnd + 1)]} ";
+        content = item[(digitEnd + 2)..].TrimStart();
+        automationName = "Markdown ordered list item";
+        return true;
+    }
+
+    private static bool TryReadRemoteImageLink(
+        string source,
+        int start,
+        out int end,
+        out string label,
+        out Uri target)
+    {
+        end = start;
+        label = string.Empty;
+        target = null!;
+        if (start + 1 >= source.Length || source[start] != '!' || source[start + 1] != '[')
+        {
+            return false;
+        }
+
+        var labelEnd = source.IndexOf("](", start + 2, StringComparison.Ordinal);
+        if (labelEnd <= start + 2)
+        {
+            return false;
+        }
+
+        var targetEnd = source.IndexOf(')', labelEnd + 2);
+        if (targetEnd < 0 ||
+            !TryGetSafeUri(source[(labelEnd + 2)..targetEnd], out target))
+        {
+            return false;
+        }
+
+        label = source[(start + 2)..labelEnd];
         end = targetEnd + 1;
         return true;
     }
@@ -1139,6 +2068,17 @@ public sealed class MarkdownTextBlock : TextBlock
         string[] Header,
         IReadOnlyList<string[]> Rows,
         IReadOnlyList<MarkdownTableAlignment> Alignments);
+
+    private sealed record MarkdownListItem(
+        int Depth,
+        string Prefix,
+        string Content,
+        string AutomationName,
+        bool? TaskState);
+
+    private sealed record MarkdownDefinitionItem(
+        string Term,
+        IReadOnlyList<string> Definitions);
 
     private enum MarkdownTableAlignment
     {

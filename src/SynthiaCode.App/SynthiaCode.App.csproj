@@ -17,9 +17,18 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationIcon>Assets\Branding\SynthiaCode.ico</ApplicationIcon>
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <InformationalVersion>0.1.0</InformationalVersion>
     <Product>SynthiaCode</Product>
     <AssemblyTitle>SynthiaCode</AssemblyTitle>
+    <Authors>SynthiaCode contributors</Authors>
+    <Company>SynthiaCode contributors</Company>
+    <Copyright>Copyright © 2026 SynthiaCode contributors</Copyright>
     <Description>Independent Windows desktop client for OpenAI Codex.</Description>
+    <RepositoryUrl>https://github.com/Scorpinaus/SynthiaCodex</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
 </Project>

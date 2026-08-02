@@ -142,6 +142,7 @@ internal static class LegacyBehavioralTests
         .. ResponsiveLayoutTests.All,
         .. PresentationRedesignTests.All,
         .. MarkdownLinkTests.All,
+        .. AdvancedMarkdownRenderingTests.All,
         .. ProjectlessThreadTests.All,
         .. PromptEditingTests.All,
         .. ChatManagementSearchTests.All,

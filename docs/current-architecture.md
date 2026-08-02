@@ -1,8 +1,9 @@
-# SynthiaCode: Current Architecture through the Modern WPF Redesign
+# SynthiaCode: Current Architecture
 
-**Recorded:** 25 July 2026
-**Phase:** Modern WPF redesign through Phase 17 and product Phase 6A
-**Purpose:** Describe the current architecture, redesigned presentation shell, retained behavioral/performance boundaries, and the Phase 6A Skills/Settings extension.
+**Recorded:** 2 August 2026
+**Release:** 0.1.0
+**Phase:** Modern WPF redesign through Phase 21, with product extensions through generated-image, attachment, prompt-editing, chat-management, and queued-dispatch hardening
+**Purpose:** Describe the current architecture, presentation shell, runtime and persistence boundaries, implemented desktop workflows, and release verification baseline.
 
 ## System shape
 
@@ -13,7 +14,7 @@ The solution is a Windows-only WPF desktop application with four projects:
 | `SynthiaCode.Core` | App-neutral contracts, settings records, thread state, Codex notification state, Git/worktree/terminal models | None |
 | `SynthiaCode.Infrastructure` | Codex CLI/app-server transport, JSON settings, Git, worktrees, ConPTY terminal, auth, logging | Core |
 | `SynthiaCode.App` | WPF composition root, window, theme resources, UI services, commands, presentation state | Core and Infrastructure |
-| `SynthiaCode.Tests` | Console-based behavioral and integration-style assertion runner | App, Core, and Infrastructure |
+| `SynthiaCode.Tests` | xUnit-discovered behavioral and integration-style test suite; the executable entry point remains only as a UTF-8 transport fixture | App, Core, and Infrastructure |
 
 The intended dependency direction is therefore:
 
@@ -22,7 +23,7 @@ Tests ────────────────> App ──────�
   └────────────────────┴─────────────────────────────────────────> Core
 ```
 
-`AppServices.Create()` is the manual composition root. It constructs the concrete infrastructure services and passes 15 dependencies into `MainViewModel`. There is no external dependency-injection container.
+`AppServices.Create()` is the manual composition root. It constructs the concrete infrastructure and application-workflow services, then supplies them to `MainViewModel`. There is no external dependency-injection container.
 
 ## Startup and shutdown
 
@@ -48,11 +49,13 @@ App-server lifecycle is exposed to presentation through `IAppServerSessionCoordi
 
 `MainViewModel.UpdateViewportWidth` projects exclusive compact (800–1099 px), medium (1100–1439 px), and wide (1440 px and above) shell states. The rail is persistent in medium/wide states, the inspector is persistent only when enabled in wide state, and the terminal remains a bounded lower row unless maximized within the center workspace. Existing persisted open/closed preferences remain the source of truth.
 
-Feature controls bind directly to their existing feature view models. Timeline, raw-event, thread, diagnostic, recent-project, and changed-file lists use recycling virtualization and content scrolling. The transcript keeps pixel scrolling for variable-height turns and preserves the existing near-bottom auto-follow threshold; terminal output remains coalesced through the existing 50 ms presentation path.
+Feature controls bind directly to their existing feature view models. Timeline, raw-event, thread, diagnostic, recent-project, and changed-file lists use recycling virtualization and content scrolling. The transcript keeps pixel scrolling for variable-height turns and uses a dedicated 72 px near-latest coordinator that pauses following after deliberate upward navigation and resets follow state when chat identity changes; terminal output remains coalesced through the existing 50 ms presentation path.
 
 `ProjectThreadViewModel` also owns the unified project/thread navigation projection. `ProjectNavigationItemViewModel` groups presentation threads by normalized project path, tracks project disclosure and running summaries, and preserves the existing active-project `Threads` collection as a compatibility surface. The persisted `RecentProjects` and `ProjectThreads` collections remain unchanged.
 
 `ProjectThreadView` renders project-name disclosure rows with their project-scoped threads and empty state; filesystem paths are retained for routing but omitted from the navigation UI. A project-row `+` creates a current-checkout thread immediately; isolated worktree creation is retained in the project's advanced menu. Only the selected project is expanded automatically. Selecting an existing project refreshes its recent timestamp in place rather than reordering the hierarchy. Completed and idle thread pills are intentionally suppressed; running, failed, cancelled, and archived states remain visible. Selected-thread lifecycle operations are exposed through high-contrast contextual action buttons and fully theme-aware context-menu surfaces. The workspace heading above Task and Changes contains only the selected thread title.
+
+Projectless General chats use the same thread lifecycle, transcript, search, pin/archive, rename, and persistence paths without inventing a filesystem CWD. Sidebar chat management and cross-chat search operate on the persisted thread projection, while find-in-chat remains scoped to the selected transcript. User prompts can be copied directly, edited with rollback of later turns, or used as stable fork points; all three actions preserve the original submitted text in turn history.
 
 `UserAccountView` is anchored in an `Auto` row below the independently scrolling project list. Its upward-opening flyout presents the ChatGPT email-derived identity, plan, remaining rate-limit windows, reset times, optional credits, Settings, and authentication actions. `AccountViewModel` reads typed `account/read` and `account/rateLimits/read` results, consumes account notifications before thread routing, keeps account data in memory only, and treats refresh failures as nonfatal. The app-server does not currently expose an authoritative display name or avatar, so the UI uses the email local part and generated initials.
 
@@ -138,9 +141,15 @@ Submitting a follow-up calls `turn/start` with the existing thread ID. A pending
 
 Thread selection and resume use typed `thread/read`/resume results with `includeTurns: true`. Canonical app-server user and assistant messages are reconciled with local turn snapshots, while richer local activity remains attached to its matching turn. If the server cannot provide history, the local snapshot remains usable. Legacy records containing only a preview and final response synthesize one visible completed turn.
 
-`TaskView` presents the collection as a recycling-virtualized chronological transcript. Each turn has a distinct outer boundary, a user-message surface, and an assistant-message surface whose activity expander precedes the final answer, so related work and outcome share one card while adjacent turns remain visually independent. The app-server stream is retained in bounded raw-event and diagnostic collections, while visible turn activity is an allowlisted projection of commentary, commands, file changes, tools, searches, plans, collaboration, guidance, and actionable errors. Activity projection preserves complete user-facing detail, lists every reported changed path, and prefers structured web-search queries, page URLs, and find-in-page data over compatibility summaries. Stable item keys consolidate start, progress, and completion into one row; lifecycle, token, output-delta, reasoning, final-answer, and unknown notifications remain diagnostics-only. It follows live output while the viewport is near the bottom, exposes a Jump to latest action after manual scrolling, hides empty activity, collapses historical activity, wraps long detail without horizontal transcript overflow, and keeps the composer fixed. The first action is labelled Run task; subsequent submissions are labelled Send follow-up. During an active turn, the same composer becomes the guidance input.
+`TaskView` presents the collection as a recycling-virtualized chronological transcript. Each turn has a distinct outer boundary, a user-message surface, and an assistant-message surface whose activity expander precedes the final answer, so related work and outcome share one card while adjacent turns remain visually independent. The app-server stream is retained in bounded raw-event and diagnostic collections, while visible turn activity is an allowlisted projection of commentary, commands, file changes, tools, searches, plans, collaboration, guidance, and actionable errors. Activity projection preserves complete user-facing detail, lists every reported changed path, and prefers structured web-search queries, page URLs, and find-in-page data over compatibility summaries. Stable item keys consolidate start, progress, and completion into one row; lifecycle, token, output-delta, reasoning, final-answer, and unknown notifications remain diagnostics-only. It follows live output while the viewport is near the bottom, exposes a Jump to latest action after manual scrolling, hides empty activity, collapses historical activity, wraps long detail without horizontal transcript overflow, and keeps the composer fixed. Assistant text uses the native Markdown renderer for common technical prose, nested lists, tables, footnotes, definitions, safe links/images/HTML, syntax-highlighted fenced code, and per-block copying; unsafe browser content remains visible and inert. Generated-image completion events are deduplicated into safe local previews and persist through restore and fork. The first action is labelled Run task; subsequent submissions are labelled Send follow-up. During an active turn, the same composer becomes the guidance input.
 
 The composer footer owns one compact model summary instead of a permanent Run settings expander. Its anchored flyout drills into the authenticated model catalog and filters reasoning efforts from the selected model's advertised capabilities. Fast is a catalog-provided service tier rather than a model alias and is enabled only when the selected model advertises `fast`. `account/read.planType` is presentation context only; the visible `model/list` result is the effective capability source for ChatGPT and API-key sessions. Model, reasoning, and inherit/standard/fast preferences persist independently of account entitlements, are revalidated after catalog refresh, and are disabled while the selected turn is active.
+
+### Attachments and generated-image editing
+
+`AttachmentDraftOrchestrationService` coordinates picker, clipboard, drag/drop, draft, queue, and turn attachment state. `WorkspaceAttachmentResolver` accepts only safe workspace-contained file and folder mentions, rejecting roots, sibling-prefix escapes, wildcards, alternate data streams, and reparse escapes. `LocalAttachmentStore` imports external images, files, and deterministic folder snapshots into bounded managed storage without persisting their original external paths. Managed images serialize as `localImage`; managed files and folders serialize as `mention` inputs. Attachment schema v3 persists generic metadata while retaining legacy image compatibility.
+
+Startup rehydrates managed attachment paths and performs reference-aware staging/orphan cleanup. Queued and background sends retain the owning workspace and immutable attachment/options snapshot. The generated-image viewer and editor reuse `LocalImageResourcePolicy`; edits can target the whole image or an exported marked region, with bounded drawing controls and a guide image supplied to image generation.
 
 ### Queued follow-ups
 
@@ -162,7 +171,7 @@ turn/completed (Completed only)
   -> acknowledge and remove, or retain as NeedsAttention
 ```
 
-The first release validates that the captured workspace still exists and never reads the currently selected thread during background dispatch. Refreshing model availability and managed permission requirements immediately before queued dispatch remains a follow-up hardening item.
+Background dispatch validates that the captured workspace still exists and never reads the currently selected thread. Immediately before starting the queued turn it refreshes model availability, effective configuration, and managed permission requirements, then resolves the saved options against that current capability state. A refresh failure leaves the item in `NeedsAttention` rather than sending with stale assumptions.
 
 ### Terminal
 
@@ -189,7 +198,7 @@ The composition root exposes a `CoalescingSettingsStore` around `JsonSettingsSto
 
 Persisted and presented thread state are separate. `AppSettings.ProjectThreads` contains storage-only `PersistedProjectThread` DTOs. `ThreadStore` maps those records to observable `ProjectThreadState` objects for presentation and maps changes back on upsert. JSON property names were preserved, and a literal legacy-settings regression verifies backward-compatible loading without migration.
 
-Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 conversation turns. Each persisted turn retains at most 100 activity items. At baseline, the local `settings.json` was 144,872 bytes. Every physical save emits `settings_saved` duration/size telemetry, while each coordinator batch emits logical request and coalesced-request counts. The synthetic burst baseline is 20 logical requests to one physical write.
+Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 conversation turns. Each persisted turn retains at most 100 activity items plus attachment metadata, prompt-version state, and generated-image paths. Attachment references in drafts, queues, and turns participate in managed-store cleanup. At baseline, the local `settings.json` was 144,872 bytes. Every physical save emits `settings_saved` duration/size telemetry, while each coordinator batch emits logical request and coalesced-request counts. The synthetic burst baseline is 20 logical requests to one physical write.
 
 ## Baseline measurements and constraints
 
@@ -216,9 +225,9 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 
 | Measure | Final local result | Comparison |
 | --- | --- | --- |
-| `MainViewModel.cs` | 3,408 physical lines | Thread lifecycle, turn execution, queue dispatch, and thread-state persistence now execute behind explicit application use-case services; the remaining size is shell/UI projection and unrelated feature coordination. |
+| `MainViewModel.cs` | 3,502 physical lines | Thread lifecycle, turn execution, queue dispatch, and thread-state persistence execute behind explicit application use-case services; the remaining size is shell/UI projection and cross-feature coordination. |
 | `MainWindow.xaml` | 444 physical lines | Custom chrome, adaptive three-zone shell, compact drawers, lower terminal dock, inspector, status, and approval hosting. |
-| Behavioral suite | 239 passing tests | Includes 224 end-to-end behavioral cases plus direct lifecycle, turn, queue, persistence, runtime-controller, and storage-mapper boundary tests. |
+| Behavioral suite | 262 passing tests | Includes 259 existing behavioral cases plus three focused release/architecture metadata regressions, all discovered individually by xUnit. |
 | Startup shell/readiness | 541 ms / 759 ms | unchanged |
 | Codex long stream | 25,001 notifications, 2 UI batches, 20.71 MiB, 40.25 ms | same batching/allocation bound; synthetic CPU time varies locally |
 | Terminal storage/presentation | 39.06 MiB in 2.24 ms; 250,000 retained; 100 chunks to 1 UI update | faster storage run; same presentation bound |
@@ -226,7 +235,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 | Recovery | 27 ms | 5 ms slower locally, still well below interactive latency |
 | Active-resource shutdown | 2 ms | 10 ms faster locally |
 
-The earlier Phase 5D release record completed with zero warnings/errors and 75 passing tests. The Phase 6A release gate supersedes that historical count with the current warning-free Debug/Release builds and 209-test suite.
+Historical phase counts remain in the feature-parity ledger. Release 0.1.0 uses the current xUnit-discovered suite plus warning-free Debug and Release rebuilds as its authoritative gate.
 
 A no-build behavioral-runner invocation took approximately 12 seconds during the initial audit; this is a coarse runner-duration observation, not a product performance metric.
 
@@ -241,4 +250,4 @@ A no-build behavioral-runner invocation took approximately 12 seconds during the
 
 ## Phase boundary
 
-Phase 6A completes active-context skill discovery/enablement and the redacted effective-settings overview. Skill creation/install, composer `$skill` invocation, arbitrary skill roots, MCP management, plugins/connectors, and automations remain later bounded phases.
+Release 0.1.0 includes native active-context skill discovery/enablement and exact-path composer invocation, generated-image display/edit flows, managed and workspace attachments, projectless chats, prompt editing/forking, chat management/search, queued follow-up hardening, and the Phase 21 Markdown surface. Arbitrary skill roots, native MCP administration, plugins/connectors, automations, structured hunk review, push/PR workflows, and full worktree handoff/snapshot lifecycle remain outside the current boundary.

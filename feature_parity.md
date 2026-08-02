@@ -46,6 +46,20 @@
 | Phase 20.1 | Added red-test coverage for pinned streaming follow, deliberate scroll-away preservation during simultaneous content growth, comfortable near-latest resumption, explicit Jump-to-latest behavior, and fresh follow state when switching chats. The expected compile failure confirms the scroll-coordination contract is not yet implemented. | **Complete** |
 | Phase 20.2 | Replaced the transcript's binary 24 px auto-follow check with a dedicated 72 px near-latest coordinator. Streaming content follows only while pinned; upward wheel, scrollbar, keyboard, touch, or trackpad movement pauses follow; later growth preserves the reading position; near-latest navigation and Jump resume it. Background end-scroll requests are coalesced, scrollbar updates are immediate, vertical panning is enabled, and a chat identity change resets stale follow state. Focused policy and rendered-WPF tests pass. | **Complete** |
 | Phase 20.3 | Completed the full 246-test regression gate in Debug and Release. Fresh non-incremental solution builds produced and verified both standard `SynthiaCode.App.exe` artifacts with zero warnings and zero errors; no additional defects surfaced during the final gate. | **Complete** |
+| Phase 21.1 | Researched CommonMark/GitHub/Markdown Extra syntax and WPF image/clipboard behavior, then recorded the native rendering and safety contract for remote images, a non-executable raw-HTML subset, nested lists, footnotes, definition lists, syntax highlighting, and per-block copy actions. | **Complete** |
+| Phase 21.2 | Added seven focused rendered-WPF tests covering validated remote images, safe/inert raw HTML, real nested-list margins, superscript bottom-placed footnotes, Markdown Extra definition lists, language-driven syntax tokens, and exact per-code-block clipboard output. Against the untouched renderer, all 30 prior filtered tests pass and all seven new tests fail at their intended missing behavior. | **Complete** |
+| Phase 21.3 | Implemented bounded HTTP(S) image cards with failure fallback, a native safe-HTML allowlist with literal executable-tag fallback, hierarchical list rows, navigable bottom footnotes, definition-list layout, themed multi-language syntax tokens, language labels, and accessible per-block copy actions. All 37 focused Markdown tests pass; the only legacy test adjustments replace brittle code-block child casts with semantic content assertions. | **Complete** |
+| Phase 21.4 | Resolved two parser/copy defects found during review: footnote declarations inside fenced examples now remain literal, and code copy removes only the fence-separating line ending while preserving intentional trailing blank lines. All 259 tests pass in Debug and Release. Fresh non-incremental builds produced verified Debug and Release executables with zero warnings and errors. | **Complete** |
+
+## Architecture and release metadata implementation parity
+
+| Phase | Implemented outcome | Status |
+| --- | --- | --- |
+| Phase 1 - Test contract | Added three focused xUnit regressions for the executable's release identity, the dated architecture boundary and suite description, and README release/documentation links. All three tests failed against the stale metadata for the intended reasons before implementation. | **Complete** |
+| Phase 2 - Executable metadata | Replaced the SDK's implicit `1.0.0.0` identity with the intentional `0.1.0` release, including stable assembly/file/informational versions, product authorship, copyright, and repository metadata. The focused executable-identity regression passes. | **Complete** |
+| Phase 3 - Architecture snapshot | Updated the dated architecture boundary through Phase 21 and the current product extensions, corrected xUnit ownership and suite metrics, removed stale dependency/count claims, and documented current Markdown, attachment, generated-image, chat, prompt, persistence, and queued-dispatch flows. The focused architecture regression passes. | **Complete** |
+| Phase 4 - Public release surface | Published release `0.1.0` in the README and linked the current architecture and feature-parity records as the authoritative release documentation. All three focused metadata regressions pass. | **Complete** |
+| Phase 5 - Verification | All 262 tests pass in Debug and Release. Fresh non-incremental solution builds completed with zero warnings and errors, and both standard executables were verified with file version `0.1.0.0` and product version `0.1.0` plus the source revision. No additional defects surfaced. | **Complete** |
 
 ## Shared Codex configuration implementation parity
 
@@ -147,7 +161,7 @@
 | Feature | SynthiaCode | Status | Remaining difference |
 | --- | --- | --- | --- |
 | Streaming coding transcript | Batched streaming, distinct user messages, live expanded work details with Markdown commentary and structured activity rows, a collapsed duration disclosure retained above completed final responses, raw diagnostics, bounded history, and Jump to latest | **Full** | None material for text coding tasks. |
-| Assistant Markdown rendering | Headings, bold, italic, combined emphasis, strikethrough, inline and fenced code, ordered/unordered/task lists, block quotes, horizontal rules, aligned pipe tables, safe links/autolinks, escapes, and literal malformed-source fallback | **Near** | No remote Markdown images, raw HTML, nested-list layout, footnotes, definition lists, syntax highlighting, or per-code-block copy action. |
+| Assistant Markdown rendering | Headings, emphasis, strikethrough, inline/fenced code, hierarchical ordered/unordered/task lists, quotes, rules, aligned tables, safe links/autolinks, local and remote images, safe native HTML, footnotes, definition lists, themed syntax highlighting, per-block copy, escapes, and literal unsafe/malformed fallback | **Full** | Arbitrary executable, embedded, form, media, and browser-DOM HTML intentionally remains visible and inert. |
 | Rich activity rows | Commands, complete file changes, tools, MCP calls, structured web-search actions, plans, collaboration, guidance, and errors are projected without client-side text truncation | **Near** | Some newer item families may appear only in raw diagnostics until allowlisted. |
 | Integrated terminal | Per-thread ConPTY PowerShell sessions with start, input, clear, kill, working directory, and bounded output | **Partial** | ChatGPT can directly consume current terminal output and exposes reusable project actions; SynthiaCode does not wire terminal output into agent context or environment actions. |
 | Git status and file diff | Working/staged views, changed-file selection, and refresh | **Near** | Diff is plain text rather than a structured hunk/code-review surface. |
@@ -250,13 +264,16 @@ Chat and project navigation now follows the compact Codex-style disclosure patte
 4. Navigation tooltips, empty states, action labels, Git guidance, and the no-selection title now use chat-oriented wording consistently.
 5. Focused view-model tests and rendered-WPF tests cover independent toggling, command wiring, labels, disclosure state, and content visibility as part of the 161-test suite.
 
-Assistant answer Markdown moved from basic text/link rendering to **Near** parity for common technical responses:
+Assistant answer Markdown moved from basic text/link rendering to **Full** parity for common technical responses:
 
 1. Inline rendering now supports bold, italic, combined bold/italic, strikethrough, styled inline code, safe links/autolinks, and backslash-escaped Markdown punctuation.
 2. Block rendering now supports six ATX heading levels, ordered and unordered lists, checked and unchecked task lists, multi-line block quotes, horizontal rules, and backtick or tilde fenced code blocks with horizontal scrolling.
 3. Pipe tables retain bold/code/link formatting inside cells, honor left/center/right delimiter alignment, use responsive themed grids, and stay within the transcript width.
 4. Invalid tables, unmatched emphasis, and unclosed code fences remain visible rather than being partially consumed; focused parser tests, malformed-input tests, and responsive transcript coverage protect these behaviors.
-5. Remaining Markdown gaps are explicitly limited to remote images, raw HTML, nested-list layout, footnotes, definition lists, syntax highlighting, and code-block-specific copy controls.
+5. Validated HTTP(S) images render in bounded cards with safe source links and nonfatal failure fallback; unsupported schemes remain literal.
+6. A native raw-HTML allowlist supports semantic emphasis, deletion, code, line breaks, safe anchors/images, paragraphs, headings, quotes, and preformatted text without hosting executable browser content.
+7. Contiguous nested lists use real depth margins; superscript references navigate to bottom-placed footnotes; Markdown Extra term/definition groups use accessible native layouts.
+8. Common fenced-code language identifiers produce themed comment/string/number/keyword tokens, a normalized language label, and an accessible copy action scoped to the exact block source.
 
 Activity presentation now follows the combined Codex-style assistant outcome more closely:
 

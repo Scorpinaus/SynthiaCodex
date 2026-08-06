@@ -1,6 +1,7 @@
 using System.IO;
 using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Harnesses;
 using SynthiaCode.Core.Logging;
 using SynthiaCode.Core.Projects;
 using SynthiaCode.Core.Settings;
@@ -18,6 +19,7 @@ public sealed class AttachmentDraftOrchestrationService
     private readonly IAttachmentStore? attachmentStore;
     private readonly WorkspaceAttachmentResolver workspaceAttachmentResolver;
     private readonly CodexTurnRequestFactory turnRequestFactory;
+    private readonly HarnessTurnRequestFactory harnessTurnRequestFactory;
     private readonly IAppLogger logger;
 
     public AttachmentDraftOrchestrationService(
@@ -29,6 +31,7 @@ public sealed class AttachmentDraftOrchestrationService
         this.attachmentStore = attachmentStore;
         this.workspaceAttachmentResolver = workspaceAttachmentResolver;
         this.turnRequestFactory = turnRequestFactory;
+        harnessTurnRequestFactory = new HarnessTurnRequestFactory(attachmentStore, workspaceAttachmentResolver);
         this.logger = logger;
     }
 
@@ -54,6 +57,69 @@ public sealed class AttachmentDraftOrchestrationService
         string prompt, IReadOnlyList<AttachmentReference> attachments, string workspacePath,
         CodexModelOption? selectedModel, IReadOnlyList<CodexSkillInput> skillInputs) =>
         turnRequestFactory.BuildInputs(prompt, attachments, workspacePath, selectedModel, skillInputs);
+
+    public StartConversationCommand CreateHarnessConversationStart(
+        ConversationId conversationId,
+        CodexResolvedPermissionMode permissions,
+        string? model,
+        string workspacePath,
+        string? developerInstructions,
+        string? baseInstructions) =>
+        harnessTurnRequestFactory.CreateConversationStart(
+            conversationId,
+            permissions,
+            model,
+            workspacePath,
+            developerInstructions,
+            baseInstructions);
+
+    public ResumeConversationCommand CreateHarnessConversationResume(
+        ConversationAddress address,
+        CodexResolvedPermissionMode permissions,
+        string? model,
+        string workspacePath,
+        string? developerInstructions,
+        string? baseInstructions) =>
+        harnessTurnRequestFactory.CreateConversationResume(
+            address,
+            permissions,
+            model,
+            workspacePath,
+            developerInstructions,
+            baseInstructions);
+
+    public ForkConversationCommand CreateHarnessConversationFork(
+        ConversationId conversationId,
+        ConversationAddress source,
+        CodexResolvedPermissionMode permissions,
+        string? model,
+        string workspacePath,
+        string? developerInstructions,
+        string? baseInstructions) =>
+        harnessTurnRequestFactory.CreateConversationFork(
+            conversationId,
+            source,
+            permissions,
+            model,
+            workspacePath,
+            developerInstructions,
+            baseInstructions);
+
+    public StartTurnCommand CreateHarnessTurnStart(HarnessTurnRequestComposition composition) =>
+        harnessTurnRequestFactory.CreateTurnStart(composition);
+
+    public IReadOnlyList<HarnessContentPart> BuildHarnessPromptInputs(
+        string prompt,
+        IReadOnlyList<AttachmentReference> attachments,
+        string workspacePath,
+        CodexModelOption? selectedModel,
+        IReadOnlyList<CodexSkillInput> skillInputs) =>
+        harnessTurnRequestFactory.BuildInputs(
+            prompt,
+            attachments,
+            workspacePath,
+            selectedModel,
+            skillInputs);
 
     public QueuedTurnOptionsSnapshot CaptureQueuedOptions(
         CodexResolvedPermissionMode permissions, CodexPermissionMode permissionMode,

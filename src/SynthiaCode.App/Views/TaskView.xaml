@@ -792,6 +792,7 @@
                         </ComboBox>
                         <Button x:Name="SkillsButton"
                                 Command="{Binding TaskWorkspace.SkillSelector.OpenCommand}"
+                                Visibility="{Binding SupportsSkills, Converter={StaticResource BooleanToVisibilityConverter}}"
                                 Style="{StaticResource CompactButton}"
                                 MinHeight="32"
                                 Margin="8,0,0,0"

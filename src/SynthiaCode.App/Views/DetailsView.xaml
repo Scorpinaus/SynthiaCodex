@@ -281,7 +281,8 @@
                         </StackPanel>
                     </Border>
 
-                    <views:SkillsSettingsView x:Name="SkillsSettingsSurface"/>
+                    <views:SkillsSettingsView x:Name="SkillsSettingsSurface"
+                                              Visibility="{Binding SupportsCodexSettings, Converter={StaticResource BooleanToVisibilityConverter}}"/>
 
                     <Border Style="{StaticResource Card}" Margin="0,0,0,10">
                         <StackPanel>

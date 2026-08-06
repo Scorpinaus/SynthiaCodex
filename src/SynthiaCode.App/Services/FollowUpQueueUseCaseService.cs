@@ -1,6 +1,8 @@
 using System.IO;
+using SynthiaCode.Application.Harnesses;
 using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Harnesses;
 using SynthiaCode.Core.Settings;
 
 namespace SynthiaCode.App.Services;
@@ -11,7 +13,7 @@ namespace SynthiaCode.App.Services;
 /// </summary>
 public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
 {
-    private readonly IAppServerSessionCoordinator appServer;
+    private readonly IHarnessOperations harnesses;
     private readonly ConversationWorkflowController conversations;
     private readonly ISettingsStore settingsStore;
     private readonly CodexThreadWorkspace threadWorkspace;
@@ -22,13 +24,13 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
     private Task? disposeTask;
 
     public FollowUpQueueUseCaseService(
-        IAppServerSessionCoordinator appServer,
+        IHarnessOperations harnesses,
         ConversationWorkflowController conversations,
         ISettingsStore settingsStore,
         CodexThreadWorkspace threadWorkspace,
         CodexFollowUpQueueWorkspace queues)
     {
-        this.appServer = appServer;
+        this.harnesses = harnesses;
         this.conversations = conversations;
         this.settingsStore = settingsStore;
         this.threadWorkspace = threadWorkspace;
@@ -101,12 +103,13 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
         AppSettings settings,
         string threadId,
         string followUpId,
-        CodexTurnSteerRequest request,
+        HarnessConnectionOptions connectionOptions,
+        SteerTurnCommand command,
         CancellationToken cancellationToken = default)
     {
         var item = Get(threadId, followUpId)
             ?? throw new InvalidOperationException("The queued follow-up is no longer available.");
-        await appServer.SteerTurnAsync(request, cancellationToken).ConfigureAwait(false);
+        await harnesses.SteerTurnAsync(connectionOptions, command, cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(item.Text))
         {
             conversations.AddGuidance(threadId, item.Text);
@@ -330,7 +333,6 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await request.EnsureConnected(cancellationToken).ConfigureAwait(false);
                 var workspacePath = Path.GetFullPath(snapshot.Options.WorkspacePath);
                 if (!Directory.Exists(workspacePath))
                 {
@@ -341,18 +343,19 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
                     string.Equals(thread.ThreadId, request.ThreadId, StringComparison.Ordinal))
                     ?? throw new InvalidOperationException(
                         $"Thread '{request.ThreadId}' is no longer available.");
-                var startRequest = await request.PrepareStartRequest(
+                var prepared = await request.PrepareStartRequest(
                     snapshot.Clone(),
                     cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
                 service.BeginTurn(snapshot.Text, snapshot.Attachments);
                 persistedThread.Preview = snapshot.Text;
-                var started = await appServer.StartTurnAsync(
-                    startRequest,
+                var started = await harnesses.StartTurnAsync(
+                    prepared.ConnectionOptions,
+                    prepared.Command,
                     cancellationToken).ConfigureAwait(false);
-                var bound = service.BindPendingTurn(started.TurnId);
-                threadWorkspace.RegisterTurn(request.ThreadId, started.TurnId);
-                conversations.RegisterTurnStarted(request.ThreadId, started.TurnId, bound.Status);
+                var bound = service.BindPendingTurn(started.RemoteTurnId);
+                threadWorkspace.RegisterTurn(request.ThreadId, started.RemoteTurnId);
+                conversations.RegisterTurnStarted(request.ThreadId, started.RemoteTurnId, bound.Status);
 
                 try
                 {
@@ -366,7 +369,7 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
                         snapshot.Id,
                         "The follow-up started remotely but its state could not be saved: " + ex.Message,
                         wasRemoteStarted: true,
-                        turnId: started.TurnId,
+                        turnId: started.RemoteTurnId,
                         cancellationToken).ConfigureAwait(false);
                 }
 
@@ -374,7 +377,7 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
                 try
                 {
                     await PersistAsync(request.Settings, request.ThreadId, cancellationToken).ConfigureAwait(false);
-                    return QueuedFollowUpDispatchResult.Started(snapshot.Id, started.TurnId, bound.Status);
+                    return QueuedFollowUpDispatchResult.Started(snapshot.Id, started.RemoteTurnId, bound.Status);
                 }
                 catch (Exception ex)
                 {
@@ -388,7 +391,7 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
                         request,
                         snapshot.Id,
                         restore.LastError,
-                        started.TurnId,
+                        started.RemoteTurnId,
                         cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -502,8 +505,11 @@ public sealed record FollowUpEnqueueUseCaseRequest(
 public sealed record FollowUpDispatchUseCaseRequest(
     AppSettings Settings,
     string ThreadId,
-    Func<QueuedFollowUpSnapshot, CancellationToken, Task<CodexTurnStartRequest>> PrepareStartRequest,
-    Func<CancellationToken, Task> EnsureConnected);
+    Func<QueuedFollowUpSnapshot, CancellationToken, Task<PreparedHarnessTurn>> PrepareStartRequest);
+
+public sealed record PreparedHarnessTurn(
+    HarnessConnectionOptions ConnectionOptions,
+    StartTurnCommand Command);
 
 public sealed record QueuedFollowUpDispatchResult(
     bool Attempted,

@@ -139,6 +139,12 @@ By default it creates a Release, self-contained `win-x64` build. For a framework
 .\scripts\publish-portable.cmd -FrameworkDependent
 ```
 
+## Automated GitHub Builds
+
+Every successful push to `main` publishes a self-contained Windows test build as a GitHub Actions artifact. The same package can be generated for any branch with **Actions -> Windows CI -> Run workflow**; test artifacts are retained for 14 days.
+
+Pushing a version tag that exactly matches the app project's version, such as `v0.1.1`, runs the full test and packaging pipeline and publishes a permanent GitHub Release ZIP with a SHA-256 checksum. See [automated Windows builds and releases](docs/automated-releases.md) for the download, versioning, tagging, and verification steps.
+
 ## Maintenance Sweep
 
 Preview or remove reproducible build output while preserving the current portable app:

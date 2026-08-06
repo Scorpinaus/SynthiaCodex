@@ -6,7 +6,7 @@ using SynthiaCode.Core.Logging;
 
 namespace SynthiaCode.App;
 
-public partial class App : Application
+public partial class App : System.Windows.Application
 {
     private const string MutexName = "SynthiaCode.SingleInstance";
 
@@ -35,6 +35,7 @@ public partial class App : Application
             services.SettingsStore,
             services.CodexDiscoveryService,
             services.AppServerSessionCoordinator,
+            services.HarnessRuntimeCoordinator,
             services.AuthService,
             services.FolderPicker,
             services.UserInteractionService,

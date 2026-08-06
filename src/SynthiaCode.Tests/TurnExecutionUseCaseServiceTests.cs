@@ -1,8 +1,11 @@
 using System.Text.Json.Nodes;
 using SynthiaCode.App.Services;
+using SynthiaCode.Application.Harnesses;
 using SynthiaCode.Core.Codex;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Harnesses;
 using SynthiaCode.Core.Settings;
+using SynthiaCode.Harnesses.Codex;
 using SynthiaCode.Infrastructure.Codex;
 using Xunit;
 
@@ -18,8 +21,10 @@ public sealed class TurnExecutionUseCaseServiceTests
         var store = new ThreadStore();
         var workspace = new CodexThreadWorkspace();
         var queues = new CodexFollowUpQueueWorkspace();
+        await using var harnessRuntime = CreateHarnessRuntime(coordinator);
+        var harnessOperations = new HarnessOperations(harnessRuntime);
         var lifecycle = new ThreadLifecycleUseCaseService(
-            coordinator,
+            harnessOperations,
             new FakeGitService(Path.GetTempPath()),
             new FakeWorktreeService(Path.GetTempPath(), Path.Combine(Path.GetTempPath(), "turn-worktree")),
             store,
@@ -27,7 +32,8 @@ public sealed class TurnExecutionUseCaseServiceTests
             settingsStore);
         var persistence = new ThreadStatePersistenceUseCaseService(settingsStore, store, workspace);
         var conversations = new ConversationWorkflowController(store, workspace, queues);
-        var turns = new TurnExecutionUseCaseService(coordinator, conversations, lifecycle, persistence);
+        var turns = new TurnExecutionUseCaseService(
+            harnessOperations, conversations, lifecycle, persistence);
         var settings = new AppSettings();
         await lifecycle.CreateAsync(new ThreadCreateRequest(
             settings,
@@ -45,9 +51,15 @@ public sealed class TurnExecutionUseCaseServiceTests
         var execution = turns.StartAsync(new TurnExecutionRequest(
             settings,
             "thread-turn",
+            settings.ProjectThreads.Single().GetConversationAddress(),
             "First real prompt",
             [],
-            new CodexTurnStartRequest("thread-turn", "First real prompt", Path.GetTempPath(), Sandbox: null),
+            new HarnessConnectionOptions(Path.GetTempPath()),
+            new StartTurnCommand(
+                settings.ProjectThreads.Single().GetConversationAddress(),
+                [new TextContentPart("First real prompt")],
+                Path.GetTempPath(),
+                HarnessTurnOptions.Default),
             "First real prompt",
             TurnStarted: result => startedPublished.TrySetResult(result)));
         var turnRequest = await WaitForRequestAsync(transport, "turn/start");
@@ -76,8 +88,10 @@ public sealed class TurnExecutionUseCaseServiceTests
         var store = new ThreadStore();
         var workspace = new CodexThreadWorkspace();
         var settingsStore = new FakeSettingsStore();
+        await using var harnessRuntime = CreateHarnessRuntime(coordinator);
+        var harnessOperations = new HarnessOperations(harnessRuntime);
         var lifecycle = new ThreadLifecycleUseCaseService(
-            coordinator,
+            harnessOperations,
             new FakeGitService(Path.GetTempPath()),
             new FakeWorktreeService(Path.GetTempPath(), Path.Combine(Path.GetTempPath(), "cancel-worktree")),
             store,
@@ -85,12 +99,16 @@ public sealed class TurnExecutionUseCaseServiceTests
             settingsStore);
         var persistence = new ThreadStatePersistenceUseCaseService(settingsStore, store, workspace);
         var turns = new TurnExecutionUseCaseService(
-            coordinator,
+            harnessOperations,
             new ConversationWorkflowController(store, workspace, new CodexFollowUpQueueWorkspace()),
             lifecycle,
             persistence);
 
-        var cancel = turns.CancelAsync("thread-cancel", "turn-cancel");
+        var address = CreateAddress("thread-cancel");
+        var cancel = turns.CancelAsync(
+            new HarnessConnectionOptions(Path.GetTempPath()),
+            address,
+            "turn-cancel");
         var request = await WaitForRequestAsync(transport, "turn/interrupt");
         Assert.Equal("thread-cancel", request["params"]?["threadId"]?.GetValue<string>());
         Assert.Equal("turn-cancel", request["params"]?["turnId"]?.GetValue<string>());
@@ -103,6 +121,26 @@ public sealed class TurnExecutionUseCaseServiceTests
         new FakeCodexProcessService(transport),
         new TestLogger(),
         new CodexAppServerClientMetadata("turn-use-case-tests", "Turn Use Case Tests", "1.0"));
+
+    private static HarnessRuntimeCoordinator CreateHarnessRuntime(AppServerSessionCoordinator coordinator)
+    {
+        var installation = new CodexInstallation(
+            true,
+            @"C:\Tools\codex.exe",
+            "codex test",
+            "Codex test",
+            "Test installation");
+        return new HarnessRuntimeCoordinator(new HarnessRegistry([
+            new CodexHarness(new FakeCodexDiscoveryService(installation), coordinator)
+        ]));
+    }
+
+    private static ConversationAddress CreateAddress(string remoteId) => new(
+        new ConversationId(AppSettingsHarnessMigration.CreateDeterministicConversationId(
+            KnownHarnessIds.Codex,
+            remoteId)),
+        HarnessId.Codex,
+        remoteId);
 
     private static async Task ConnectAsync(
         AppServerSessionCoordinator coordinator,

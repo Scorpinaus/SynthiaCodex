@@ -81,7 +81,7 @@ public sealed class WpfUserInteractionService : IUserInteractionService
         dialog.SetResourceReference(Window.ForegroundProperty, "InkBrush");
         cancel.SetResourceReference(FrameworkElement.StyleProperty, "CompactButton");
         accept.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
-        if (Application.Current?.MainWindow is { IsVisible: true } owner)
+        if (System.Windows.Application.Current?.MainWindow is { IsVisible: true } owner)
         {
             dialog.Owner = owner;
         }
@@ -152,7 +152,7 @@ public sealed class WpfUserInteractionService : IUserInteractionService
     public void ShowImagePreview(string path)
     {
         var viewer = new GeneratedImagePreviewWindow(path);
-        if (Application.Current?.MainWindow is { IsVisible: true } owner)
+        if (System.Windows.Application.Current?.MainWindow is { IsVisible: true } owner)
         {
             viewer.Owner = owner;
         }
@@ -168,7 +168,7 @@ public sealed class WpfUserInteractionService : IUserInteractionService
     public GeneratedImageEditSelection? SelectGeneratedImageEdit(string path)
     {
         var editor = new GeneratedImageEditWindow(path);
-        if (Application.Current?.MainWindow is { IsVisible: true } owner)
+        if (System.Windows.Application.Current?.MainWindow is { IsVisible: true } owner)
         {
             editor.Owner = owner;
         }

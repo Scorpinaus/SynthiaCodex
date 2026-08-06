@@ -1,4 +1,5 @@
 using SynthiaCode.App.Services;
+using SynthiaCode.Application.Harnesses;
 using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Auth;
 using SynthiaCode.Core.Codex;
@@ -23,6 +24,7 @@ using SynthiaCode.Core.Terminal;
 using SynthiaCode.Infrastructure.Terminal;
 using SynthiaCode.Core.Workspaces;
 using SynthiaCode.Infrastructure.Workspaces;
+using SynthiaCode.Harnesses.Codex;
 using System.IO;
 using System.Reflection;
 
@@ -34,6 +36,8 @@ public sealed class AppServices
         ISettingsStore settingsStore,
         ICodexDiscoveryService codexDiscoveryService,
         IAppServerSessionCoordinator appServerSessionCoordinator,
+        IHarnessRegistry harnessRegistry,
+        IHarnessRuntimeCoordinator harnessRuntimeCoordinator,
         IAuthService authService,
         IGitService gitService,
         IWorktreeService worktreeService,
@@ -60,6 +64,8 @@ public sealed class AppServices
         SettingsStore = settingsStore;
         CodexDiscoveryService = codexDiscoveryService;
         AppServerSessionCoordinator = appServerSessionCoordinator;
+        HarnessRegistry = harnessRegistry;
+        HarnessRuntimeCoordinator = harnessRuntimeCoordinator;
         AuthService = authService;
         GitService = gitService;
         WorktreeService = worktreeService;
@@ -89,6 +95,10 @@ public sealed class AppServices
     public ICodexDiscoveryService CodexDiscoveryService { get; }
 
     public IAppServerSessionCoordinator AppServerSessionCoordinator { get; }
+
+    public IHarnessRegistry HarnessRegistry { get; }
+
+    public IHarnessRuntimeCoordinator HarnessRuntimeCoordinator { get; }
 
     public IAuthService AuthService { get; }
 
@@ -150,6 +160,11 @@ public sealed class AppServices
                 "synthiacode",
                 "SynthiaCode",
                 Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.1.0"));
+        var harnessRegistry = new HarnessRegistry([
+            new CodexHarness(codexDiscoveryService, appServerSessionCoordinator)
+        ]);
+        var harnessRuntimeCoordinator = new HarnessRuntimeCoordinator(harnessRegistry);
+        var harnessOperations = new HarnessOperations(harnessRuntimeCoordinator);
         var authService = new CodexAuthService(logger, codexRuntimeEnvironment);
         var gitService = new GitService(logger);
         var worktreeService = new WorktreeService(logger);
@@ -167,7 +182,7 @@ public sealed class AppServices
         var sharedCodexConfigurationService =
             new SharedCodexConfigurationService(codexRuntimeEnvironment.HomePath);
         var threadLifecycleService = new ThreadLifecycleUseCaseService(
-            appServerSessionCoordinator, gitService, worktreeService, threadStore, threadWorkspace, settingsStore);
+            harnessOperations, gitService, worktreeService, threadStore, threadWorkspace, settingsStore);
         var threadStatePersistenceService = new ThreadStatePersistenceUseCaseService(
             settingsStore, threadStore, threadWorkspace);
         var followUpQueues = new CodexFollowUpQueueWorkspace();
@@ -176,12 +191,12 @@ public sealed class AppServices
             threadWorkspace,
             followUpQueues);
         var turnExecutionService = new TurnExecutionUseCaseService(
-            appServerSessionCoordinator,
+            harnessOperations,
             conversationWorkflow,
             threadLifecycleService,
             threadStatePersistenceService);
         var followUpQueueService = new FollowUpQueueUseCaseService(
-            appServerSessionCoordinator,
+            harnessOperations,
             conversationWorkflow,
             settingsStore,
             threadWorkspace,
@@ -201,6 +216,8 @@ public sealed class AppServices
             settingsStore,
             codexDiscoveryService,
             appServerSessionCoordinator,
+            harnessRegistry,
+            harnessRuntimeCoordinator,
             authService,
             gitService,
             worktreeService,

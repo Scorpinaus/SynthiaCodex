@@ -1,5 +1,7 @@
+using SynthiaCode.Application.Harnesses;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Git;
+using SynthiaCode.Core.Harnesses;
 using SynthiaCode.Core.Projects;
 using SynthiaCode.Core.Settings;
 using SynthiaCode.Core.Worktrees;
@@ -8,12 +10,12 @@ using System.IO;
 namespace SynthiaCode.App.Services;
 
 /// <summary>
-/// Application use cases that change durable Codex-thread lifecycle state.  It has no
+/// Application use cases that change durable harness-conversation lifecycle state. It has no
 /// WPF dependency; callers project the returned state into navigation and transcript UI.
 /// </summary>
 public sealed class ThreadLifecycleUseCaseService
 {
-    private readonly IAppServerSessionCoordinator appServer;
+    private readonly IHarnessOperations harnesses;
     private readonly IGitService git;
     private readonly IWorktreeService worktrees;
     private readonly ThreadStore threadStore;
@@ -21,14 +23,14 @@ public sealed class ThreadLifecycleUseCaseService
     private readonly ISettingsStore settingsStore;
 
     public ThreadLifecycleUseCaseService(
-        IAppServerSessionCoordinator appServer,
+        IHarnessOperations harnesses,
         IGitService git,
         IWorktreeService worktrees,
         ThreadStore threadStore,
         CodexThreadWorkspace threadWorkspace,
         ISettingsStore settingsStore)
     {
-        this.appServer = appServer;
+        this.harnesses = harnesses;
         this.git = git;
         this.worktrees = worktrees;
         this.threadStore = threadStore;
@@ -41,7 +43,12 @@ public sealed class ThreadLifecycleUseCaseService
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var started = await appServer.StartThreadAsync(request.StartOptions, cancellationToken).ConfigureAwait(false);
+        var started = await harnesses.StartConversationAsync(
+            request.HarnessId,
+            request.ConnectionOptions,
+            request.StartCommand,
+            cancellationToken).ConfigureAwait(false);
+        var threadId = started.Address.RemoteId ?? started.Address.LocalId.ToString();
         AssistantWorktree? worktree = null;
         if (request.CreateWorktree)
         {
@@ -58,29 +65,33 @@ public sealed class ThreadLifecycleUseCaseService
             worktree = await worktrees.CreateAsync(new WorktreeCreateRequest(
                 repository.RootPath,
                 request.WorktreeTaskId,
-                started.ThreadId), cancellationToken).ConfigureAwait(false);
+                threadId), cancellationToken).ConfigureAwait(false);
         }
 
         var created = await CreateAsync(new ThreadCreateRequest(
             request.Settings,
             request.Scope,
-            started.ThreadId,
+            threadId,
             request.Title,
             worktree?.Path ?? request.WorkspacePath,
             worktree?.Branch,
             request.Instructions,
-            request.IsTitlePlaceholder), cancellationToken).ConfigureAwait(false);
+            request.IsTitlePlaceholder,
+            started.Address), cancellationToken).ConfigureAwait(false);
         return new ThreadStartUseCaseResult(created.State, worktree);
     }
 
     public async Task<ThreadResumeUseCaseResult> ResumeAsync(
-        CodexThreadResumeRequest request,
+        ThreadResumeUseCaseRequest request,
         CancellationToken cancellationToken = default)
     {
-        var resumed = await appServer.ResumeThreadAsync(request, cancellationToken).ConfigureAwait(false);
-        var service = threadWorkspace.GetRequired(resumed.ThreadId);
-        service.ReconcileHistory(resumed.Turns ?? []);
-        return new ThreadResumeUseCaseResult(resumed.ThreadId, service.SnapshotConversation());
+        var resumed = await harnesses.ResumeConversationAsync(
+            request.ConnectionOptions,
+            request.Command,
+            cancellationToken).ConfigureAwait(false);
+        var service = threadWorkspace.GetRequired(request.ThreadId);
+        service.ReconcileHistory(resumed.Turns.Select(ToLegacySnapshot));
+        return new ThreadResumeUseCaseResult(request.ThreadId, service.SnapshotConversation());
     }
 
     public async Task<ThreadActivationUseCaseResult> ResumeOrReplaceAsync(
@@ -100,7 +111,9 @@ public sealed class ThreadLifecycleUseCaseService
                 request.Scope,
                 request.ReplacementTitle,
                 request.WorkspacePath,
-                request.ReplacementStartOptions,
+                request.HarnessId,
+                request.ConnectionOptions,
+                request.ReplacementStartCommand,
                 request.Instructions,
                 IsTitlePlaceholder: true,
                 CreateWorktree: false,
@@ -115,6 +128,7 @@ public sealed class ThreadLifecycleUseCaseService
         AppSettings settings,
         string threadId,
         string title,
+        HarnessConnectionOptions connectionOptions,
         CancellationToken cancellationToken = default)
     {
         var persisted = settings.ProjectThreads.FirstOrDefault(thread =>
@@ -124,7 +138,11 @@ public sealed class ThreadLifecycleUseCaseService
             return false;
         }
 
-        await appServer.SetThreadNameAsync(threadId, title, cancellationToken).ConfigureAwait(false);
+        await harnesses.SetConversationNameAsync(
+            connectionOptions,
+            persisted.GetConversationAddress(),
+            title,
+            cancellationToken).ConfigureAwait(false);
         persisted = settings.ProjectThreads.FirstOrDefault(thread =>
             string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
         if (persisted?.IsTitlePlaceholder != true)
@@ -163,14 +181,21 @@ public sealed class ThreadLifecycleUseCaseService
             throw new InvalidOperationException("Only an active completed response can be forked.");
         }
 
-        var forked = await appServer.ForkThreadAsync(request.ForkOptions, cancellationToken).ConfigureAwait(false);
+        var forked = await harnesses.ForkConversationAsync(
+            request.ConnectionOptions,
+            request.ForkCommand,
+            cancellationToken).ConfigureAwait(false);
+        var forkThreadId = forked.Address.RemoteId ?? forked.Address.LocalId.ToString();
         if (rollbackCount > 0)
         {
-            var rollback = await appServer.RollbackThreadAsync(
-                new CodexThreadRollbackRequest(forked.ThreadId, rollbackCount), cancellationToken).ConfigureAwait(false);
-            if (!string.Equals(rollback.ThreadId, forked.ThreadId, StringComparison.Ordinal))
+            var rollback = await harnesses.RollbackConversationAsync(
+                request.ConnectionOptions,
+                new RollbackConversationCommand(forked.Address, rollbackCount),
+                cancellationToken).ConfigureAwait(false);
+            if (rollback.Address.LocalId != forked.Address.LocalId ||
+                rollback.Address.HarnessId != forked.Address.HarnessId)
             {
-                throw new InvalidOperationException("Codex returned a different thread while creating the conversation fork.");
+                throw new InvalidOperationException("The harness returned a different conversation while creating the fork.");
             }
         }
 
@@ -184,19 +209,20 @@ public sealed class ThreadLifecycleUseCaseService
             }
             worktree = await worktrees.CreateAsync(new WorktreeCreateRequest(
                 repository.RootPath,
-                $"fork-{forked.ThreadId}",
-                forked.ThreadId,
+                $"fork-{forkThreadId}",
+                forkThreadId,
                 request.Source.WorktreeBranch ?? "HEAD"), cancellationToken).ConfigureAwait(false);
         }
 
         var state = CreateState(
             request.Source.ScopeKey,
-            forked.ThreadId,
+            forkThreadId,
             $"Fork of {request.Source.DisplayTitle}",
             worktree?.Path ?? request.WorkspacePath,
             worktree?.Branch,
             request.Instructions,
-            isTitlePlaceholder: false);
+            isTitlePlaceholder: false,
+            forked.Address);
         state.Preview = forkPoint?.UserPrompt ?? request.Source.Preview;
         state.FinalResponse = forkPoint?.AssistantResponse ?? sourceService.FinalResponse;
         state.ConversationTurns = sourceConversation
@@ -222,7 +248,8 @@ public sealed class ThreadLifecycleUseCaseService
             request.WorkspacePath,
             request.WorktreeBranch,
             request.Instructions,
-            request.IsTitlePlaceholder);
+            request.IsTitlePlaceholder,
+            request.Address);
         var priorActiveId = threadStore.GetActive(request.Settings, request.Scope)?.ThreadId;
         try
         {
@@ -246,16 +273,28 @@ public sealed class ThreadLifecycleUseCaseService
         }
     }
 
-    public async Task ArchiveAsync(AppSettings settings, string threadId, CancellationToken cancellationToken = default)
+    public async Task ArchiveAsync(
+        AppSettings settings,
+        string threadId,
+        HarnessConnectionOptions connectionOptions,
+        CancellationToken cancellationToken = default)
     {
-        await appServer.ArchiveThreadAsync(threadId, cancellationToken).ConfigureAwait(false);
+        var address = GetAddress(settings, threadId);
+        await harnesses.SetConversationArchivedAsync(
+            connectionOptions, address, archived: true, cancellationToken).ConfigureAwait(false);
         threadStore.SetArchived(settings, threadId, archived: true);
         await settingsStore.SaveAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task UnarchiveAsync(AppSettings settings, string threadId, CancellationToken cancellationToken = default)
+    public async Task UnarchiveAsync(
+        AppSettings settings,
+        string threadId,
+        HarnessConnectionOptions connectionOptions,
+        CancellationToken cancellationToken = default)
     {
-        await appServer.UnarchiveThreadAsync(threadId, cancellationToken).ConfigureAwait(false);
+        var address = GetAddress(settings, threadId);
+        await harnesses.SetConversationArchivedAsync(
+            connectionOptions, address, archived: false, cancellationToken).ConfigureAwait(false);
         threadStore.SetArchived(settings, threadId, archived: false);
         await settingsStore.SaveAsync(settings, cancellationToken).ConfigureAwait(false);
     }
@@ -267,14 +306,25 @@ public sealed class ThreadLifecycleUseCaseService
         return pinned;
     }
 
-    public async Task RenameAsync(AppSettings settings, string threadId, string title, CancellationToken cancellationToken = default)
+    public async Task RenameAsync(
+        AppSettings settings,
+        string threadId,
+        string title,
+        HarnessConnectionOptions connectionOptions,
+        CancellationToken cancellationToken = default)
     {
-        await appServer.SetThreadNameAsync(threadId, title, cancellationToken).ConfigureAwait(false);
+        await harnesses.SetConversationNameAsync(
+            connectionOptions, GetAddress(settings, threadId), title, cancellationToken).ConfigureAwait(false);
         threadStore.Rename(settings, threadId, title);
         await settingsStore.SaveAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task DeleteAsync(AppSettings settings, string threadId, bool archiveFirst, CancellationToken cancellationToken = default)
+    public async Task DeleteAsync(
+        AppSettings settings,
+        string threadId,
+        bool archiveFirst,
+        HarnessConnectionOptions connectionOptions,
+        CancellationToken cancellationToken = default)
     {
         var existing = settings.ProjectThreads.FirstOrDefault(thread =>
             string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal))
@@ -282,7 +332,11 @@ public sealed class ThreadLifecycleUseCaseService
         var restore = SettingsStorageMapper.ToPresentation(existing);
         if (archiveFirst)
         {
-            await appServer.ArchiveThreadAsync(threadId, cancellationToken).ConfigureAwait(false);
+            await harnesses.SetConversationArchivedAsync(
+                connectionOptions,
+                existing.GetConversationAddress(),
+                archived: true,
+                cancellationToken).ConfigureAwait(false);
         }
         threadStore.Delete(settings, threadId);
         try
@@ -330,11 +384,16 @@ public sealed class ThreadLifecycleUseCaseService
 
     private static ProjectThreadState CreateState(
         ThreadScopeKey scope, string threadId, string title, string workspacePath, string? worktreeBranch,
-        ThreadInstructionSnapshot instructions, bool isTitlePlaceholder) => new()
+        ThreadInstructionSnapshot instructions, bool isTitlePlaceholder, ConversationAddress? address = null)
+        => new()
     {
         ScopeKind = scope.Kind,
         ProjectPath = scope.ProjectPath ?? string.Empty,
         ThreadId = threadId,
+        ConversationId = address?.LocalId.Value ??
+            AppSettingsHarnessMigration.CreateDeterministicConversationId(KnownHarnessIds.Codex, threadId),
+        HarnessId = address?.HarnessId.Value ?? KnownHarnessIds.Codex,
+        RemoteConversationId = address?.RemoteId ?? threadId,
         Title = title,
         IsTitlePlaceholder = isTitlePlaceholder,
         Preview = string.Empty,
@@ -352,6 +411,11 @@ public sealed class ThreadLifecycleUseCaseService
         UpdatedAt = DateTimeOffset.UtcNow
     };
 
+    private static ConversationAddress GetAddress(AppSettings settings, string threadId) =>
+        settings.ProjectThreads.FirstOrDefault(thread =>
+            string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal))?.GetConversationAddress()
+        ?? throw new InvalidOperationException($"Chat '{threadId}' was not found.");
+
     private static CodexConversationTurnSnapshot CloneConversationTurn(CodexConversationTurnSnapshot source) => new()
     {
         TurnId = source.TurnId,
@@ -365,13 +429,45 @@ public sealed class ThreadLifecycleUseCaseService
         UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())],
         GeneratedImagePaths = [.. source.GeneratedImagePaths]
     };
+
+    private static CodexConversationTurnSnapshot ToLegacySnapshot(ConversationTurnSnapshot source) => new()
+    {
+        TurnId = source.RemoteTurnId ?? string.Empty,
+        UserPrompt = source.UserPrompt,
+        AssistantResponse = source.AssistantResponse,
+        Status = source.Status switch
+        {
+            ConversationTurnStatus.Idle => CodexTurnStatus.Idle,
+            ConversationTurnStatus.Running => CodexTurnStatus.Running,
+            ConversationTurnStatus.Completed => CodexTurnStatus.Completed,
+            ConversationTurnStatus.Failed => CodexTurnStatus.Failed,
+            ConversationTurnStatus.Cancelled => CodexTurnStatus.Cancelled,
+            _ => CodexTurnStatus.Failed
+        },
+        StartedAt = source.StartedAt ?? DateTimeOffset.UtcNow,
+        CompletedAt = source.CompletedAt,
+        IsSuperseded = source.IsSuperseded,
+        Activity = [.. source.Activity.Select(item => new CodexTimelineItem(
+            item.Kind == ActivityKind.Error ? CodexTimelineItemKind.Error : CodexTimelineItemKind.Raw,
+            item.Title,
+            item.Detail,
+            "harness/activity",
+            item.Timestamp)
+        {
+            ItemId = item.Id,
+            ActivityKey = item.Id
+        })],
+        UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())],
+        GeneratedImagePaths = [.. source.GeneratedImagePaths]
+    };
 }
 
 public sealed record ThreadForkRequest(
     AppSettings Settings,
     ProjectThreadState Source,
     string WorkspacePath,
-    CodexThreadForkRequest ForkOptions,
+    HarnessConnectionOptions ConnectionOptions,
+    ForkConversationCommand ForkCommand,
     ThreadInstructionSnapshot Instructions,
     string? ForkPointTurnId,
     bool CreateWorktree);
@@ -384,7 +480,8 @@ public sealed record ThreadCreateRequest(
     string WorkspacePath,
     string? WorktreeBranch,
     ThreadInstructionSnapshot Instructions,
-    bool IsTitlePlaceholder);
+    bool IsTitlePlaceholder,
+    ConversationAddress? Address = null);
 public sealed record ThreadCreateResult(ProjectThreadState State, string? PreviousActiveThreadId);
 public readonly record struct ThreadInstructionSnapshot(string? DeveloperInstructions, string? BaseInstructions);
 
@@ -393,7 +490,9 @@ public sealed record ThreadStartUseCaseRequest(
     ThreadScopeKey Scope,
     string Title,
     string WorkspacePath,
-    CodexThreadStartOptions StartOptions,
+    HarnessId HarnessId,
+    HarnessConnectionOptions ConnectionOptions,
+    StartConversationCommand StartCommand,
     ThreadInstructionSnapshot Instructions,
     bool IsTitlePlaceholder,
     bool CreateWorktree,
@@ -402,12 +501,18 @@ public sealed record ThreadStartUseCaseResult(ProjectThreadState State, Assistan
 public sealed record ThreadResumeUseCaseResult(
     string ThreadId,
     IReadOnlyList<CodexConversationTurnSnapshot> Turns);
+public sealed record ThreadResumeUseCaseRequest(
+    string ThreadId,
+    HarnessConnectionOptions ConnectionOptions,
+    ResumeConversationCommand Command);
 public sealed record ThreadActivationUseCaseRequest(
     AppSettings Settings,
     ThreadScopeKey Scope,
     string WorkspacePath,
-    CodexThreadResumeRequest ResumeRequest,
-    CodexThreadStartOptions ReplacementStartOptions,
+    HarnessId HarnessId,
+    HarnessConnectionOptions ConnectionOptions,
+    ThreadResumeUseCaseRequest ResumeRequest,
+    StartConversationCommand ReplacementStartCommand,
     ThreadInstructionSnapshot Instructions,
     string ReplacementTitle);
 public sealed record ThreadActivationUseCaseResult(

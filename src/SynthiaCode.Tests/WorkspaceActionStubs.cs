@@ -1,5 +1,6 @@
 using SynthiaCode.App.Services;
 using SynthiaCode.App.ViewModels;
+using SynthiaCode.Application.Harnesses;
 using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Codex;
@@ -14,6 +15,7 @@ using SynthiaCode.Core.Worktrees;
 using SynthiaCode.Core.Workspaces;
 using SynthiaCode.Infrastructure.Attachments;
 using SynthiaCode.Infrastructure.Codex.Configuration;
+using SynthiaCode.Harnesses.Codex;
 
 /// <summary>Small contract stubs used by presentation tests; production has no delegate adapters.</summary>
 internal sealed class TaskConversationActionStub : ITurnExecutionActions, IFollowUpManagementActions,
@@ -23,8 +25,11 @@ internal sealed class TaskConversationActionStub : ITurnExecutionActions, IFollo
     public Func<Task> Cancel { get; init; } = () => Task.CompletedTask;
     public Func<Task> LoadModels { get; init; } = () => Task.CompletedTask;
     public Func<Task> Steer { get; init; } = () => Task.CompletedTask;
+    public Func<bool> CanSubmit { get; init; } = () => true;
     public Func<bool> CanCancel { get; init; } = () => false;
     public Func<bool> CanSteer { get; init; } = () => false;
+    public Func<bool> CanLoad { get; init; } = () => true;
+    public Func<bool> CanFork { get; init; } = () => true;
     public Action<Uri> OpenUri { get; init; } = _ => { };
     public Func<Task> AlternateFollowUp { get; init; } = () => Task.CompletedTask;
     public Func<Task> PersistQueue { get; init; } = () => Task.CompletedTask;
@@ -40,8 +45,10 @@ internal sealed class TaskConversationActionStub : ITurnExecutionActions, IFollo
     public Task CancelAsync() => Cancel();
     public Task LoadModelsAsync() => LoadModels();
     public Task SteerAsync() => Steer();
+    public bool CanSubmitTurn() => CanSubmit();
     public bool CanCancelTurn() => CanCancel();
     public bool CanSteerTurn() => CanSteer();
+    public bool CanLoadModels() => CanLoad();
     public void OpenExternalUri(Uri uri) => OpenUri(uri);
     public Task SendAlternateFollowUpAsync() => AlternateFollowUp();
     public Task PersistFollowUpQueueAsync(IReadOnlyList<QueuedFollowUpSnapshot> snapshots) => PersistQueue();
@@ -50,6 +57,7 @@ internal sealed class TaskConversationActionStub : ITurnExecutionActions, IFollo
     public void ShowImagePreview(string path) => ShowImage(path);
     public Task EditGeneratedImageAsync(string path) => EditImage(path);
     public Task ForkConversationAsync(string turnId) => Fork(turnId);
+    public bool CanForkConversation() => CanFork();
     public Task<ComposerSkillLoadResult> LoadComposerSkillsAsync(CancellationToken cancellationToken) => LoadSkills(cancellationToken);
     public Task<CodexThreadReadResult> ReadAgentThreadAsync(string threadId) =>
         Task.FromResult(new CodexThreadReadResult(threadId, []));
@@ -79,6 +87,7 @@ internal sealed class ProjectThreadActionStub : IProjectNavigationActions, IThre
     public Func<bool> CanCreate { get; init; } = () => false;
     public Func<bool> CanCreateGeneral { get; init; } = () => false;
     public Func<bool> CanUse { get; init; } = () => false;
+    public Func<bool> CanFork { get; init; } = () => false;
     public Func<bool> CanArchive { get; init; } = () => false;
     public Func<bool> CanUnarchive { get; init; } = () => false;
     public Func<bool> CanRemove { get; init; } = () => false;
@@ -93,7 +102,7 @@ internal sealed class ProjectThreadActionStub : IProjectNavigationActions, IThre
     public Task BrowseProjectAsync() => Browse(); public Task OpenRecentProjectAsync(object? parameter) => OpenRecent(parameter);
     public Task CreateThreadAsync() => Create(); public Task CreateGeneralThreadAsync() => CreateGeneral(); public Task CreateProjectThreadAsync() => CreateProject();
     public Task ResumeThreadAsync() => Resume(); public Task ForkThreadAsync() => Fork(); public Task ArchiveThreadAsync() => Archive(); public Task UnarchiveThreadAsync() => Unarchive(); public Task RemoveWorktreeAsync() => RemoveWorktree();
-    public bool CanCreateThread() => CanCreate(); public bool CanCreateGeneralThread() => CanCreateGeneral(); public bool CanUseSelectedThread() => CanUse(); public bool CanArchiveSelectedThread() => CanArchive(); public bool CanUnarchiveSelectedThread() => CanUnarchive(); public bool CanRemoveSelectedWorktree() => CanRemove();
+    public bool CanCreateThread() => CanCreate(); public bool CanCreateGeneralThread() => CanCreateGeneral(); public bool CanUseSelectedThread() => CanUse(); public bool CanForkSelectedThread() => CanFork(); public bool CanArchiveSelectedThread() => CanArchive(); public bool CanUnarchiveSelectedThread() => CanUnarchive(); public bool CanRemoveSelectedWorktree() => CanRemove();
     public void SelectedThreadChanged(ProjectThreadState? state) => SelectionChanged(state); public Task TogglePinThreadAsync() => TogglePin(); public Task DeleteThreadAsync() => Delete(); public bool CanTogglePinThread() => CanTogglePin(); public bool CanDeleteThread() => CanDelete(); public Task RenameThreadAsync() => Rename(); public bool CanRenameThread() => CanRename();
 }
 
@@ -139,22 +148,27 @@ internal static class WorkspaceActionStubs
         IAttachmentStore? attachmentStore = null)
     {
         var resolver = new WorkspaceAttachmentResolver();
+        var harnessRuntime = new HarnessRuntimeCoordinator(new HarnessRegistry([
+            new CodexHarness(codexDiscoveryService, appServerSessionCoordinator)
+        ]));
+        var harnessOperations = new HarnessOperations(harnessRuntime);
         var lifecycle = new ThreadLifecycleUseCaseService(
-            appServerSessionCoordinator, gitService, worktreeService, threadStore, threadWorkspace, settingsStore);
+            harnessOperations, gitService, worktreeService, threadStore, threadWorkspace, settingsStore);
         var persistence = new ThreadStatePersistenceUseCaseService(settingsStore, threadStore, threadWorkspace);
         var queues = new CodexFollowUpQueueWorkspace();
         var workflow = new ConversationWorkflowController(threadStore, threadWorkspace, queues);
         var turns = new TurnExecutionUseCaseService(
-            appServerSessionCoordinator, workflow, lifecycle, persistence);
+            harnessOperations, workflow, lifecycle, persistence);
         var queue = new FollowUpQueueUseCaseService(
-            appServerSessionCoordinator, workflow, settingsStore, threadWorkspace, queues);
+            harnessOperations, workflow, settingsStore, threadWorkspace, queues);
         var attachments = new AttachmentDraftOrchestrationService(
             attachmentStore,
             resolver,
             new CodexTurnRequestFactory(attachmentStore, resolver),
             logger);
         return new MainViewModel(
-            settingsStore, codexDiscoveryService, appServerSessionCoordinator, authService, folderPicker,
+            settingsStore, codexDiscoveryService, appServerSessionCoordinator, harnessRuntime,
+            authService, folderPicker,
             userInteractionService, themeService, codexCliUtilityRunner, terminalService, logger,
             workflow, lifecycle, persistence, turns, queue,
             new ProjectWorkspaceOperations(gitService, worktreeService, recentProjectService, generalWorkspaceService),
@@ -199,7 +213,7 @@ internal static class WorkspaceActionStubs
         Browse = browseProject, OpenRecent = openRecentProject, Create = createThread, CreateGeneral = createGeneralThread,
         CreateProject = createProjectThread, Resume = resumeThread, Fork = forkThread, Archive = archiveThread,
         Unarchive = unarchiveThread, RemoveWorktree = removeWorktree, CanCreate = canCreateThread,
-        CanCreateGeneral = canCreateGeneralThread, CanUse = canUseSelectedThread, CanArchive = canArchiveSelectedThread,
+        CanCreateGeneral = canCreateGeneralThread, CanUse = canUseSelectedThread, CanFork = canUseSelectedThread, CanArchive = canArchiveSelectedThread,
         CanUnarchive = canUnarchiveSelectedThread, CanRemove = canRemoveWorktree, SelectionChanged = selectionChanged,
         TogglePin = togglePinThread ?? new Func<Task>(() => global::System.Threading.Tasks.Task.CompletedTask), Delete = deleteThread ?? new Func<Task>(() => global::System.Threading.Tasks.Task.CompletedTask),
         CanTogglePin = canTogglePinThread ?? (() => false), CanDelete = canDeleteThread ?? (() => false),

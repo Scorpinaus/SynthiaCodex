@@ -1,6 +1,8 @@
 using SynthiaCode.App.Services;
+using SynthiaCode.Application.Harnesses;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Settings;
+using SynthiaCode.Harnesses.InMemory;
 using SynthiaCode.Infrastructure.Codex;
 using Xunit;
 
@@ -81,7 +83,11 @@ public sealed class ThreadLifecycleUseCaseServiceTests
             IsTitlePlaceholder: false));
 
         await Assert.ThrowsAsync<IOException>(() =>
-            service.DeleteAsync(settings, "keep-on-failure", archiveFirst: false));
+            service.DeleteAsync(
+                settings,
+                "keep-on-failure",
+                archiveFirst: false,
+                new HarnessConnectionOptions(Path.GetTempPath())));
 
         Assert.Single(settings.ProjectThreads);
         Assert.Equal("keep-on-failure", settings.ProjectThreads.Single().ThreadId);
@@ -99,7 +105,7 @@ public sealed class ThreadLifecycleUseCaseServiceTests
         ISettingsStore settingsStore,
         ThreadStore store,
         CodexThreadWorkspace workspace) => new(
-        coordinator,
+        new HarnessOperations(new HarnessRuntimeCoordinator(new HarnessRegistry([new InMemoryHarness()]))),
         new FakeGitService(Path.GetTempPath()),
         new FakeWorktreeService(Path.GetTempPath(), Path.Combine(Path.GetTempPath(), "lifecycle-worktree")),
         store,

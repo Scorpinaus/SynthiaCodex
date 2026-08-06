@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Reflection;
 using System.Windows.Input;
+using SynthiaCode.Application.Harnesses;
 using SynthiaCode.App.Services;
 using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Auth;
@@ -9,6 +10,7 @@ using SynthiaCode.Core.Codex;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Codex.Configuration;
 using SynthiaCode.Core.Git;
+using SynthiaCode.Core.Harnesses;
 using SynthiaCode.Core.Logging;
 using SynthiaCode.Core.Projects;
 using SynthiaCode.Core.Settings;
@@ -22,6 +24,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private const int MaximumInstructionBytes = 64 * 1024;
     private readonly ISettingsStore settingsStore;
     private readonly IAppServerSessionCoordinator appServerSessionCoordinator;
+    private readonly IHarnessRuntimeCoordinator harnessRuntimeCoordinator;
     private readonly IFolderPicker folderPicker;
     private readonly IUserInteractionService userInteractionService;
     private readonly IThemeService themeService;
@@ -87,6 +90,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ISettingsStore settingsStore,
         ICodexDiscoveryService codexDiscoveryService,
         IAppServerSessionCoordinator appServerSessionCoordinator,
+        IHarnessRuntimeCoordinator harnessRuntimeCoordinator,
         IAuthService authService,
         IFolderPicker folderPicker,
         IUserInteractionService userInteractionService,
@@ -106,6 +110,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         this.settingsStore = settingsStore;
         this.appServerSessionCoordinator = appServerSessionCoordinator;
+        this.harnessRuntimeCoordinator = harnessRuntimeCoordinator;
         this.folderPicker = folderPicker;
         this.userInteractionService = userInteractionService;
         this.themeService = themeService;
@@ -144,6 +149,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         appServerSessionCoordinator.ServerRequestReceived += OnServerRequestReceived;
         appServerSessionCoordinator.ConnectionFailed += OnAppServerConnectionFailed;
         appServerSessionCoordinator.StateChanged += OnAppServerStateChanged;
+        harnessRuntimeCoordinator.EventReceived += OnHarnessEventReceived;
 
         DiagnosticsViewModel = new DiagnosticsViewModel(
             codexDiscoveryService,
@@ -804,6 +810,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public string FinalResponse => TaskWorkspace.FinalResponse;
 
+    public bool SupportsSkills => Supports(HarnessCapability.Skills, SelectedThread);
+
+    public bool SupportsCodexSettings =>
+        ResolveHarnessId(SelectedThread) == HarnessId.Codex &&
+        (Supports(HarnessCapability.Skills, SelectedThread) ||
+         Supports(HarnessCapability.Configuration, SelectedThread));
+
     public string GitBranch => Git.Branch;
 
     public string GitStatusMessage
@@ -1077,13 +1090,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             var workspacePath = GetWorkspacePath(scope);
             var instructionSnapshot = ResolveDefaultInstructionSnapshot();
-            await EnsureAppServerSessionAsync().ConfigureAwait(true);
+            await EnsureHarnessSessionAsync(ResolveHarnessId(), workspacePath).ConfigureAwait(true);
             var result = await threadLifecycle.StartAsync(new ThreadStartUseCaseRequest(
                 settings,
                 scope,
                 $"Thread {ProjectThreads.Count + 1}",
                 workspacePath,
-                CreateThreadStartOptions(workspacePath, instructionSnapshot),
+                ResolveHarnessId(),
+                CreateHarnessConnectionOptions(workspacePath),
+                CreateConversationStartCommand(workspacePath, instructionSnapshot),
                 new ThreadInstructionSnapshot(instructionSnapshot.DeveloperInstructions, instructionSnapshot.BaseInstructions),
                 IsTitlePlaceholder: true,
                 CreateWorktree: scope.Kind == ThreadScopeKind.Project &&
@@ -1113,7 +1128,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await EnsureAppServerSessionAsync().ConfigureAwait(true);
+            await EnsureHarnessSessionAsync(
+                ResolveHarnessId(SelectedThread),
+                GetActiveWorkspacePath()).ConfigureAwait(true);
             var result = await threadLifecycle
                 .ResumeAsync(CreateThreadResumeRequest(SelectedThread.ThreadId, GetActiveWorkspacePath()))
                 .ConfigureAwait(true);
@@ -1138,7 +1155,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         var forkPoint = string.IsNullOrWhiteSpace(forkPointTurnId) || string.IsNullOrWhiteSpace(activeThreadId)
             ? null
             : conversationWorkflow.GetConversationTurn(activeThreadId, forkPointTurnId);
-        if (!CanUseSelectedThread() ||
+        if (!CanForkSelectedThread() ||
             SelectedThread is null ||
             (!string.IsNullOrWhiteSpace(forkPointTurnId) &&
              (forkPoint is null || IsTurnRunning || forkPoint.IsSuperseded || string.IsNullOrWhiteSpace(forkPoint.AssistantResponse))))
@@ -1148,14 +1165,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await EnsureAppServerSessionAsync().ConfigureAwait(true);
             var sourceThread = SelectedThread;
             var sourceWorkspace = GetActiveWorkspacePath();
+            await EnsureHarnessSessionAsync(
+                ResolveHarnessId(sourceThread),
+                sourceWorkspace).ConfigureAwait(true);
             var instructionSnapshot = ResolveInstructionSnapshot(sourceThread.ThreadId);
             var result = await threadLifecycle.ForkAsync(new ThreadForkRequest(
                 settings,
                 sourceThread,
                 sourceWorkspace,
+                CreateHarnessConnectionOptions(sourceWorkspace),
                 CreateThreadForkRequest(sourceThread.ThreadId, sourceWorkspace, instructionSnapshot),
                 new ThreadInstructionSnapshot(instructionSnapshot.DeveloperInstructions, instructionSnapshot.BaseInstructions),
                 forkPointTurnId,
@@ -1183,9 +1203,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await EnsureAppServerSessionAsync().ConfigureAwait(true);
+            await EnsureHarnessSessionAsync(
+                ResolveHarnessId(SelectedThread),
+                SelectedThread.WorkspacePath ?? SelectedThread.ProjectPath).ConfigureAwait(true);
             await Terminal.StopAndRemoveAsync(SelectedThread.ThreadId).ConfigureAwait(true);
-            await threadLifecycle.ArchiveAsync(settings, SelectedThread.ThreadId).ConfigureAwait(true);
+            await threadLifecycle.ArchiveAsync(
+                settings,
+                SelectedThread.ThreadId,
+                CreateHarnessConnectionOptions(SelectedThread.WorkspacePath ?? SelectedThread.ProjectPath)).ConfigureAwait(true);
             StatusMessage = "Codex thread archived";
             RefreshProjectThreads(SelectedThread.ThreadId);
         }
@@ -1205,8 +1230,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await EnsureAppServerSessionAsync().ConfigureAwait(true);
-            await threadLifecycle.UnarchiveAsync(settings, SelectedThread.ThreadId).ConfigureAwait(true);
+            await EnsureHarnessSessionAsync(
+                ResolveHarnessId(SelectedThread),
+                SelectedThread.WorkspacePath ?? SelectedThread.ProjectPath).ConfigureAwait(true);
+            await threadLifecycle.UnarchiveAsync(
+                settings,
+                SelectedThread.ThreadId,
+                CreateHarnessConnectionOptions(SelectedThread.WorkspacePath ?? SelectedThread.ProjectPath)).ConfigureAwait(true);
             StatusMessage = "Codex thread unarchived";
             RefreshProjectThreads(SelectedThread.ThreadId);
         }
@@ -1270,8 +1300,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await EnsureAppServerSessionAsync().ConfigureAwait(true);
-            await threadLifecycle.RenameAsync(settings, thread.ThreadId, title).ConfigureAwait(true);
+            await EnsureHarnessSessionAsync(
+                ResolveHarnessId(thread),
+                thread.WorkspacePath ?? thread.ProjectPath).ConfigureAwait(true);
+            await threadLifecycle.RenameAsync(
+                settings,
+                thread.ThreadId,
+                title,
+                CreateHarnessConnectionOptions(thread.WorkspacePath ?? thread.ProjectPath)).ConfigureAwait(true);
             RefreshProjectThreads(thread.ThreadId);
             StatusMessage = "Chat renamed";
         }
@@ -1304,11 +1340,19 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            if (!thread.IsArchived) await EnsureAppServerSessionAsync().ConfigureAwait(true);
+            if (!thread.IsArchived)
+            {
+                await EnsureHarnessSessionAsync(
+                    ResolveHarnessId(thread),
+                    thread.WorkspacePath ?? thread.ProjectPath).ConfigureAwait(true);
+            }
 
             await Terminal.StopAndRemoveAsync(thread.ThreadId).ConfigureAwait(true);
             await threadLifecycle.DeleteAsync(
-                settings, thread.ThreadId, !thread.IsArchived).ConfigureAwait(true);
+                settings,
+                thread.ThreadId,
+                !thread.IsArchived,
+                CreateHarnessConnectionOptions(thread.WorkspacePath ?? thread.ProjectPath)).ConfigureAwait(true);
             await followUpQueue.RemoveAsync(thread.ThreadId).ConfigureAwait(true);
             conversationWorkflow.RemoveRuntime(thread.ThreadId);
             var nextThreadId = conversationWorkflow.GetThreads(settings, thread.ScopeKey).FirstOrDefault()?.ThreadId;
@@ -1409,7 +1453,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         if (IsTurnRunning)
         {
-            if (appServerSessionCoordinator.State != AppServerSessionState.Connected || string.IsNullOrWhiteSpace(activeTurnId))
+            if (!IsHarnessConnected(FindThread(threadId)) || string.IsNullOrWhiteSpace(activeTurnId))
             {
                 StatusMessage = "The active turn is not ready for steering";
                 return;
@@ -1422,10 +1466,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                     settings,
                     threadId,
                     item.Id,
-                    new CodexTurnSteerRequest(
-                        threadId,
+                    CreateHarnessConnectionOptions(item.Options.WorkspacePath),
+                    new SteerTurnCommand(
+                        GetConversationAddress(threadId),
                         turnId,
-                        attachmentDraftService.BuildPromptInputs(
+                        attachmentDraftService.BuildHarnessPromptInputs(
                             item.Text, item.Attachments, item.Options.WorkspacePath,
                             ResolveModel(item.Options.Model), item.SkillInputs))).ConfigureAwait(true);
                 ApplyFollowUpQueueMutation(threadId, mutation);
@@ -1459,7 +1504,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task SendSteerAsync()
     {
-        if (!CanSteerTurn() || appServerSessionCoordinator.State != AppServerSessionState.Connected || activeThreadId is null || activeTurnId is null)
+        if (!CanSteerTurn() || activeThreadId is null || activeTurnId is null)
         {
             return;
         }
@@ -1472,10 +1517,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var attachments = TaskWorkspace.Attachments.Select(attachment => attachment.Clone()).ToList();
             await turnExecution.SteerAsync(
                 threadId,
-                new CodexTurnSteerRequest(
-                    threadId,
+                CreateHarnessConnectionOptions(GetActiveWorkspacePath()),
+                new SteerTurnCommand(
+                    GetConversationAddress(threadId),
                     turnId,
-                    attachmentDraftService.BuildPromptInputs(
+                    attachmentDraftService.BuildHarnessPromptInputs(
                         guidance, attachments, GetActiveWorkspacePath(), TaskWorkspace.SelectedModel,
                         TaskWorkspace.SkillSelector.ResolveSkillInputs(guidance))),
                 guidance).ConfigureAwait(true);
@@ -1818,13 +1864,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         if (IsTurnRunning)
         {
-            StatusMessage = "A Codex turn is already running";
+            StatusMessage = $"A {ResolveHarnessName(SelectedThread)} turn is already running";
             return;
         }
 
         if (string.IsNullOrWhiteSpace(PromptText) && !TaskWorkspace.HasAttachments)
         {
-            StatusMessage = "Enter a prompt or attach an image before starting a Codex task";
+            StatusMessage = "Enter a prompt or attach an image before starting a task";
             return;
         }
 
@@ -1834,26 +1880,28 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        if (!currentCodex.IsFound)
+        if (!IsHarnessReady(SelectedThread))
         {
-            StatusMessage = "Install Codex CLI before starting a task";
+            StatusMessage = $"The {ResolveHarnessName(SelectedThread)} harness is unavailable";
             return;
         }
 
-        if (currentAuth.Readiness is AuthReadiness.Unavailable or AuthReadiness.NotSignedIn)
+        if (!Supports(HarnessCapability.StartTurn, SelectedThread))
         {
-            StatusMessage = "Sign in with Codex before starting a task";
+            StatusMessage = $"{ResolveHarnessName(SelectedThread)} cannot start turns";
             return;
         }
 
-        StatusMessage = "Starting Codex task";
+        StatusMessage = $"Starting {ResolveHarnessName(SelectedThread)} task";
 
         try
         {
             var submittedPrompt = PromptText.Trim();
             var submittedImages = TaskWorkspace.Attachments.Select(image => image.Clone()).ToList();
             TaskWorkspace.SubmittedPrompt = submittedPrompt;
-            await EnsureAppServerSessionAsync().ConfigureAwait(true);
+            await EnsureHarnessSessionAsync(
+                ResolveHarnessId(SelectedThread),
+                GetActiveWorkspacePath()).ConfigureAwait(true);
             activeThreadId = await EnsureActiveThreadAsync().ConfigureAwait(true);
             var persistedThread = settings.ProjectThreads.FirstOrDefault(thread =>
                 string.Equals(thread.ThreadId, activeThreadId, StringComparison.Ordinal));
@@ -1867,9 +1915,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var result = await turnExecution.StartAsync(new TurnExecutionRequest(
                 settings,
                 activeThreadId,
+                GetConversationAddress(activeThreadId),
                 submittedPrompt,
                 submittedImages,
-                CreateTurnStartRequest(activeThreadId, submittedPrompt, submittedImages, workspacePath),
+                CreateHarnessConnectionOptions(workspacePath),
+                CreateHarnessTurnStartCommand(activeThreadId, submittedPrompt, submittedImages, workspacePath),
                 automaticTitle,
                 snapshot => InvokeOnCapturedSynchronizationContext(
                     () => TaskWorkspace.ApplyConversationSnapshot(snapshot)),
@@ -2001,23 +2051,27 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         TurnEditExecutionResult result;
         try
         {
-            var startRequest = CreateTurnStartRequest(
+            var startRequest = CreateHarnessTurnStartCommand(
                 threadId,
                 submittedPrompt,
                 submittedAttachments,
                 workspacePath);
             StatusMessage = "Rewinding Codex thread for edited prompt";
-            await EnsureAppServerSessionAsync().ConfigureAwait(true);
+            await EnsureHarnessSessionAsync(
+                ResolveHarnessId(FindThread(threadId)),
+                workspacePath).ConfigureAwait(true);
             settings.LastModelOverride = NormalizeOverride(ModelOverride);
             settings.LastReasoningEffortOverride = NormalizeOverride(ReasoningEffortOverride);
             settings.LastServiceTierOverride = ToSettingsValue(TaskWorkspace.ServiceTierSelection);
             result = await turnExecution.EditAsync(new TurnEditExecutionRequest(
                 settings,
                 threadId,
+                GetConversationAddress(threadId),
                 sourceTurn.TurnId,
                 rollbackCount,
                 submittedPrompt,
                 submittedAttachments,
+                CreateHarnessConnectionOptions(workspacePath),
                 startRequest)).ConfigureAwait(true);
         }
         catch (Exception ex)
@@ -2093,7 +2147,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 scope,
                 $"Thread {ProjectThreads.Count + 1}",
                 workspacePath,
-                CreateThreadStartOptions(workspacePath, instructionSnapshot),
+                ResolveHarnessId(),
+                CreateHarnessConnectionOptions(workspacePath),
+                CreateConversationStartCommand(workspacePath, instructionSnapshot),
                 new ThreadInstructionSnapshot(instructionSnapshot.DeveloperInstructions, instructionSnapshot.BaseInstructions),
                 IsTitlePlaceholder: true,
                 CreateWorktree: scope.Kind == ThreadScopeKind.Project &&
@@ -2116,8 +2172,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             settings,
             scope,
             workspacePath,
+            ResolveHarnessId(FindThread(previousThreadId)),
+            CreateHarnessConnectionOptions(workspacePath),
             CreateThreadResumeRequest(previousThreadId, GetActiveWorkspacePath()),
-            CreateThreadStartOptions(workspacePath, existingInstructionSnapshot),
+            CreateConversationStartCommand(workspacePath, existingInstructionSnapshot),
             new ThreadInstructionSnapshot(
                 existingInstructionSnapshot.DeveloperInstructions,
                 existingInstructionSnapshot.BaseInstructions),
@@ -2154,7 +2212,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        if (!CanCancelTurn() || appServerSessionCoordinator.State != AppServerSessionState.Connected || string.IsNullOrWhiteSpace(activeThreadId) || string.IsNullOrWhiteSpace(activeTurnId))
+        if (!CanCancelTurn() || string.IsNullOrWhiteSpace(activeThreadId) || string.IsNullOrWhiteSpace(activeTurnId))
         {
             StatusMessage = "No active turn to cancel";
             return;
@@ -2162,7 +2220,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await turnExecution.CancelAsync(activeThreadId, activeTurnId).ConfigureAwait(true);
+            await turnExecution.CancelAsync(
+                CreateHarnessConnectionOptions(GetActiveWorkspacePath()),
+                GetConversationAddress(activeThreadId),
+                activeTurnId).ConfigureAwait(true);
             UpdateThreadActivity(activeThreadId, isRunning: true, "Cancelling");
             StatusMessage = "Cancellation requested";
         }
@@ -2217,9 +2278,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         await TaskWorkspace.DisposeAsync().ConfigureAwait(true);
         ApprovalQueue.Clear();
         appServerSessionCoordinator.ServerRequestReceived -= OnServerRequestReceived;
+        harnessRuntimeCoordinator.EventReceived -= OnHarnessEventReceived;
         appServerSessionCoordinator.FlushNotifications();
         await Skills.DisposeAsync().ConfigureAwait(true);
         await followUpQueue.DisposeAsync().ConfigureAwait(true);
+        await harnessRuntimeCoordinator.DisposeAsync().ConfigureAwait(true);
         await appServerSessionCoordinator.DisposeAsync().ConfigureAwait(true);
         await SaveActiveThreadStateAsync().ConfigureAwait(true);
 
@@ -2244,7 +2307,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task TryCancelRunningTurnForShutdownAsync(CancellationToken cancellationToken)
     {
-        if (appServerSessionCoordinator.State != AppServerSessionState.Connected)
+        if (!conversationWorkflow.SnapshotRunningThreadIds().Any(threadId =>
+                IsHarnessConnected(FindThread(threadId))) &&
+            (string.IsNullOrWhiteSpace(activeThreadId) ||
+             !IsHarnessConnected(FindThread(activeThreadId))))
         {
             return;
         }
@@ -2261,7 +2327,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(TimeSpan.FromSeconds(2));
-                await turnExecution.CancelAsync(turn.Key, turn.Value, timeout.Token).ConfigureAwait(true);
+                await turnExecution.CancelAsync(
+                    CreateHarnessConnectionOptions(GetWorkspacePathForThread(turn.Key)),
+                    GetConversationAddress(turn.Key),
+                    turn.Value,
+                    timeout.Token).ConfigureAwait(true);
                 conversationWorkflow.RegisterTurnFinished(turn.Key);
                 StatusMessage = "Cancellation requested";
             }
@@ -2286,44 +2356,54 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        if (!currentCodex.IsFound)
+        if (!IsHarnessReady(SelectedThread))
         {
-            StatusMessage = "Install Codex CLI before loading models";
+            StatusMessage = $"The {ResolveHarnessName(SelectedThread)} harness is unavailable";
             return;
         }
 
-        if (currentAuth.Readiness is AuthReadiness.Unavailable or AuthReadiness.NotSignedIn)
+        if (!Supports(HarnessCapability.ModelCatalog, SelectedThread))
         {
-            StatusMessage = "Sign in with Codex before loading models";
+            StatusMessage = $"{ResolveHarnessName(SelectedThread)} does not provide a model catalog";
             return;
         }
 
         loadModelsCommand.RaiseCanExecuteChanged();
-        StatusMessage = "Loading Codex models";
+        StatusMessage = $"Loading {ResolveHarnessName(SelectedThread)} models";
         TaskWorkspace.SetModelCatalogLoading();
 
         try
         {
-            await EnsureAppServerSessionAsync().ConfigureAwait(true);
+            var harnessId = ResolveHarnessId(SelectedThread);
+            var session = await harnessRuntimeCoordinator.GetOrConnectAsync(
+                harnessId,
+                CreateHarnessConnectionOptions(GetActiveWorkspacePathIfAvailable()),
+                appServerWarmUpCancellation.Token).ConfigureAwait(true);
             CodexAccountInfo? account = null;
-            try
+            if (harnessId == HarnessId.Codex)
             {
-                account = (await appServerSessionCoordinator.ReadAccountAsync().ConfigureAwait(true)).Account;
+                try
+                {
+                    account = (await appServerSessionCoordinator.ReadAccountAsync().ConfigureAwait(true)).Account;
+                }
+                catch (Exception ex)
+                {
+                    logger.Log(
+                        AppLogLevel.Warning,
+                        "codex_model_account_read_failed",
+                        "Could not read account context while loading the model catalog.",
+                        exception: ex);
+                }
             }
-            catch (Exception ex)
-            {
-                logger.Log(
-                    AppLogLevel.Warning,
-                    "codex_model_account_read_failed",
-                    "Could not read account context while loading the model catalog.",
-                    exception: ex);
-            }
-            var models = await appServerSessionCoordinator.ListModelsAsync().ConfigureAwait(true);
-            TaskWorkspace.ApplyModelCatalog(models, account);
+            var models = await session
+                .RequireFeature<IModelCatalogFeature>(HarnessCapability.ModelCatalog)
+                .ListModelsAsync(appServerWarmUpCancellation.Token)
+                .ConfigureAwait(true);
+            TaskWorkspace.ApplyModelCatalog(models.Select(ToPresentationModel).ToArray(), account);
 
             StatusMessage = TaskWorkspace.ModelCatalog.Count == 0
-                ? "No Codex models returned"
-                : $"Loaded {TaskWorkspace.ModelCatalog.Count} Codex models";
+                ? $"No {ResolveHarnessName(SelectedThread)} models returned"
+                : $"Loaded {TaskWorkspace.ModelCatalog.Count} {ResolveHarnessName(SelectedThread)} models";
         }
         catch (Exception ex)
         {
@@ -2340,19 +2420,132 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         : TaskWorkspace.ModelCatalog.FirstOrDefault(option =>
             string.Equals(option.Model, model, StringComparison.OrdinalIgnoreCase));
 
+    private static CodexModelOption ToPresentationModel(HarnessModelDescriptor model)
+    {
+        var reasoning = model.Options.FirstOrDefault(option =>
+            string.Equals(option.Id, "reasoning-effort", StringComparison.OrdinalIgnoreCase));
+        var reasoningOptions = (reasoning?.Choices ?? [])
+            .Select(choice => (Choice: choice, Effort: ParseReasoningEffort(choice.Id)))
+            .Where(item => item.Effort is not null)
+            .Select(item => new CodexReasoningOption(item.Effort!.Value, item.Choice.Description))
+            .ToArray();
+        var defaultReasoning = reasoning?.Choices.FirstOrDefault(choice => choice.IsDefault) is { } defaultChoice
+            ? ParseReasoningEffort(defaultChoice.Id)
+            : null;
+        var serviceTiers = model.Options.FirstOrDefault(option =>
+                string.Equals(option.Id, "service-tier", StringComparison.OrdinalIgnoreCase))?.Choices
+            .Select(choice => new CodexServiceTierOption(
+                choice.Id,
+                choice.DisplayName,
+                choice.Description))
+            .ToArray() ?? [];
+        return new CodexModelOption(
+            model.Id,
+            model.Id,
+            model.DisplayName,
+            model.Description,
+            model.IsDefault,
+            model.IsHidden,
+            defaultReasoning,
+            reasoningOptions,
+            serviceTiers,
+            model.AvailabilityMessage,
+            InputModalities: model.InputModalities.Select(modality => modality switch
+            {
+                HarnessInputModality.Image => CodexInputModality.Image,
+                _ => CodexInputModality.Text
+            }).Distinct().ToArray());
+    }
+
+    private static CodexReasoningEffort? ParseReasoningEffort(string? value) =>
+        value?.Trim().ToLowerInvariant() switch
+        {
+            "none" => CodexReasoningEffort.None,
+            "minimal" => CodexReasoningEffort.Minimal,
+            "low" => CodexReasoningEffort.Low,
+            "medium" => CodexReasoningEffort.Medium,
+            "high" => CodexReasoningEffort.High,
+            "xhigh" => CodexReasoningEffort.XHigh,
+            _ => null
+        };
+
+    private HarnessId ResolveHarnessId(ProjectThreadState? thread = null) => new(
+        string.IsNullOrWhiteSpace(thread?.HarnessId)
+            ? string.IsNullOrWhiteSpace(settings.DefaultHarnessId)
+                ? KnownHarnessIds.Codex
+                : settings.DefaultHarnessId
+            : thread.HarnessId);
+
+    private ProjectThreadState? FindThread(string? threadId) => string.IsNullOrWhiteSpace(threadId)
+        ? null
+        : settings.ProjectThreads.FirstOrDefault(thread =>
+            string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal)) is { } persisted
+                ? SettingsStorageMapper.ToPresentation(persisted)
+                : null;
+
+    private HarnessCapabilities ResolveCapabilities(ProjectThreadState? thread = null)
+    {
+        var harnessId = ResolveHarnessId(thread);
+        if (harnessRuntimeCoordinator.TryGetSession(harnessId, out var session))
+        {
+            return session!.Capabilities;
+        }
+        return harnessRuntimeCoordinator.Registry.TryGet(harnessId, out var harness)
+            ? harness!.Descriptor.Capabilities
+            : HarnessCapabilities.None;
+    }
+
+    private string ResolveHarnessName(ProjectThreadState? thread = null)
+    {
+        var harnessId = ResolveHarnessId(thread);
+        return harnessRuntimeCoordinator.Registry.TryGet(harnessId, out var harness)
+            ? harness!.Descriptor.DisplayName
+            : harnessId.Value;
+    }
+
+    private bool Supports(HarnessCapability capability, ProjectThreadState? thread = null) =>
+        ResolveCapabilities(thread).Supports(capability);
+
+    private bool IsHarnessReady(ProjectThreadState? thread = null)
+    {
+        var harnessId = ResolveHarnessId(thread);
+        if (!harnessRuntimeCoordinator.Registry.TryGet(harnessId, out _))
+        {
+            return false;
+        }
+        return harnessId != HarnessId.Codex ||
+            currentCodex.IsFound &&
+            currentAuth.Readiness is not (AuthReadiness.Unavailable or AuthReadiness.NotSignedIn);
+    }
+
+    private bool IsHarnessConnected(ProjectThreadState? thread = null)
+    {
+        var harnessId = ResolveHarnessId(thread);
+        return harnessRuntimeCoordinator.TryGetSession(harnessId, out var session) &&
+            session?.State == HarnessSessionState.Connected;
+    }
+
+    private bool CanSubmitTurn() =>
+        !IsShuttingDown &&
+        IsHarnessReady(SelectedThread) &&
+        Supports(HarnessCapability.StartTurn, SelectedThread) &&
+        (SelectedThread is not null || Supports(HarnessCapability.CreateConversation)) &&
+        TaskWorkspace.CanSubmitAttachments;
+
     private bool CanCancelTurn()
     {
         return !IsShuttingDown &&
             IsTurnRunning &&
-            appServerSessionCoordinator.State == AppServerSessionState.Connected &&
+            IsHarnessConnected(FindThread(activeThreadId)) &&
+            Supports(HarnessCapability.CancelTurn, FindThread(activeThreadId)) &&
             !string.IsNullOrWhiteSpace(activeThreadId) &&
             !string.IsNullOrWhiteSpace(activeTurnId);
     }
 
     private bool CanManageThreads() =>
         !IsShuttingDown &&
-        currentCodex.IsFound &&
-        currentAuth.Readiness is not (AuthReadiness.Unavailable or AuthReadiness.NotSignedIn);
+        IsHarnessReady() &&
+        Supports(HarnessCapability.CreateConversation);
 
     private bool CanCreateThreadInCurrentScope() =>
         CanManageThreads() &&
@@ -2361,30 +2554,50 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool CanCreateGeneralThread() =>
         CanManageThreads() && !string.IsNullOrWhiteSpace(generalWorkspacePath);
 
-    private bool CanUseSelectedThread() => CanManageThreads() && SelectedThread is not null;
+    private bool CanUseSelectedThread() =>
+        !IsShuttingDown &&
+        SelectedThread is not null &&
+        IsHarnessReady(SelectedThread) &&
+        Supports(HarnessCapability.ResumeConversation, SelectedThread);
+
+    private bool CanForkSelectedThread() =>
+        !IsShuttingDown &&
+        SelectedThread is not null &&
+        IsHarnessReady(SelectedThread) &&
+        Supports(HarnessCapability.ForkConversation, SelectedThread);
 
     private bool CanArchiveSelectedThread() =>
         CanUseSelectedThread() &&
+        Supports(HarnessCapability.ArchiveConversation, SelectedThread) &&
         SelectedThread?.IsArchived == false &&
         !IsTurnRunning &&
         !SelectedThreadHasQueuedFollowUps();
 
     private bool CanUnarchiveSelectedThread() =>
-        CanUseSelectedThread() && SelectedThread?.IsArchived == true;
+        SelectedThread is not null &&
+        IsHarnessReady(SelectedThread) &&
+        Supports(HarnessCapability.ArchiveConversation, SelectedThread) &&
+        SelectedThread.IsArchived;
 
     private bool CanToggleSelectedThreadPin() =>
         !IsShuttingDown && SelectedThread is not null;
 
-    private bool CanRenameSelectedThread() => CanUseSelectedThread();
+    private bool CanRenameSelectedThread() =>
+        !IsShuttingDown &&
+        SelectedThread is not null &&
+        IsHarnessReady(SelectedThread) &&
+        Supports(HarnessCapability.RenameConversation, SelectedThread);
 
     private bool CanDeleteSelectedThread() =>
         !IsShuttingDown &&
         SelectedThread is { IsRunning: false } &&
+        (SelectedThread.IsArchived || Supports(HarnessCapability.ArchiveConversation, SelectedThread)) &&
         !IsTurnRunning &&
         !SelectedThreadHasQueuedFollowUps();
 
     private bool CanRemoveSelectedWorktree() =>
-        CanUseSelectedThread() &&
+        !IsShuttingDown &&
+        SelectedThread is not null &&
         SelectedThread?.ScopeKind == ThreadScopeKind.Project &&
         SelectedThread?.IsRunning == false &&
         string.Equals(SelectedThread.Mode, "worktree", StringComparison.OrdinalIgnoreCase) &&
@@ -2407,11 +2620,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool CanSteerTurn() =>
         !IsShuttingDown &&
         IsTurnRunning &&
-        appServerSessionCoordinator.State == AppServerSessionState.Connected &&
+        IsHarnessConnected(FindThread(activeThreadId)) &&
+        Supports(HarnessCapability.SteerTurn, FindThread(activeThreadId)) &&
         !string.IsNullOrWhiteSpace(activeThreadId) &&
         !string.IsNullOrWhiteSpace(activeTurnId) &&
         (!string.IsNullOrWhiteSpace(SteeringText) || TaskWorkspace.HasAttachments) &&
         TaskWorkspace.CanSubmitAttachments;
+
+    private bool CanLoadModels() =>
+        !IsShuttingDown &&
+        IsHarnessReady(SelectedThread) &&
+        Supports(HarnessCapability.ModelCatalog, SelectedThread);
 
     private async Task<CodexThreadReadResult> ReadAgentThreadAsync(string threadId)
     {
@@ -2512,24 +2731,38 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         return path;
     }
 
-    private CodexThreadStartOptions CreateThreadStartOptions(
+    private StartConversationCommand CreateConversationStartCommand(
         string cwd,
         CodexInstructionSnapshot instructionSnapshot) =>
-        attachmentDraftService.CreateThreadStart(
-            ResolvePermissionPolicy(), ModelOverride, cwd,
-            instructionSnapshot.DeveloperInstructions, instructionSnapshot.BaseInstructions);
+        attachmentDraftService.CreateHarnessConversationStart(
+            ConversationId.New(),
+            ResolvePermissionPolicy(),
+            ModelOverride,
+            cwd,
+            instructionSnapshot.DeveloperInstructions,
+            instructionSnapshot.BaseInstructions);
 
-    private CodexThreadResumeRequest CreateThreadResumeRequest(string threadId, string cwd) =>
-        attachmentDraftService.CreateThreadResume(
-            ResolvePermissionPolicy(), ModelOverride, threadId, cwd,
+    private ThreadResumeUseCaseRequest CreateThreadResumeRequest(string threadId, string cwd) => new(
+        threadId,
+        CreateHarnessConnectionOptions(cwd),
+        attachmentDraftService.CreateHarnessConversationResume(
+            GetConversationAddress(threadId),
+            ResolvePermissionPolicy(),
+            ModelOverride,
+            cwd,
             ResolveInstructionSnapshot(threadId).DeveloperInstructions,
-            ResolveInstructionSnapshot(threadId).BaseInstructions);
+            ResolveInstructionSnapshot(threadId).BaseInstructions));
 
-    private CodexThreadForkRequest CreateThreadForkRequest(
+    private ForkConversationCommand CreateThreadForkRequest(
         string threadId, string cwd, CodexInstructionSnapshot instructionSnapshot) =>
-        attachmentDraftService.CreateThreadFork(
-            ResolvePermissionPolicy(), ModelOverride, threadId, cwd,
-            instructionSnapshot.DeveloperInstructions, instructionSnapshot.BaseInstructions);
+        attachmentDraftService.CreateHarnessConversationFork(
+            ConversationId.New(),
+            GetConversationAddress(threadId),
+            ResolvePermissionPolicy(),
+            ModelOverride,
+            cwd,
+            instructionSnapshot.DeveloperInstructions,
+            instructionSnapshot.BaseInstructions);
 
     private CodexInstructionSnapshot ResolveDefaultInstructionSnapshot() => new(
         settings.CustomDeveloperInstructionsEnabled
@@ -2553,15 +2786,44 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private static string? NormalizeInstructionOverride(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value;
 
-    private CodexTurnStartRequest CreateTurnStartRequest(
+    private StartTurnCommand CreateHarnessTurnStartCommand(
         string threadId,
         string prompt,
         IReadOnlyList<AttachmentReference> attachments,
         string cwd)
-    => attachmentDraftService.CreateTurnStart(new TurnRequestComposition(
-        threadId, prompt, attachments, cwd, ResolvePermissionPolicy(), ModelOverride, ReasoningEffortOverride,
+    => attachmentDraftService.CreateHarnessTurnStart(new HarnessTurnRequestComposition(
+        GetConversationAddress(threadId), prompt, attachments, cwd, ResolvePermissionPolicy(), ModelOverride, ReasoningEffortOverride,
         TaskWorkspace.ServiceTierSelection, TaskWorkspace.SelectedModel,
         TaskWorkspace.SkillSelector.ResolveSkillInputs(prompt)));
+
+    private ConversationAddress GetConversationAddress(string threadId)
+    {
+        var state = settings.ProjectThreads.FirstOrDefault(thread =>
+            string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
+        if (state is not null)
+        {
+            return state.GetConversationAddress();
+        }
+
+        var harnessId = ResolveHarnessId();
+        return new ConversationAddress(
+            new ConversationId(AppSettingsHarnessMigration.CreateDeterministicConversationId(
+                harnessId.Value,
+                threadId)),
+            harnessId,
+            threadId);
+    }
+
+    private HarnessConnectionOptions CreateHarnessConnectionOptions(string? workspacePath)
+    {
+        IReadOnlyDictionary<string, string>? harnessSettings = string.IsNullOrWhiteSpace(settings.PreferredCodexPath)
+            ? null
+            : new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["executablePath"] = settings.PreferredCodexPath
+            };
+        return new HarnessConnectionOptions(workspacePath, harnessSettings);
+    }
 
     private QueuedTurnOptionsSnapshot CaptureQueuedTurnOptions(string workspacePath) =>
         attachmentDraftService.CaptureQueuedOptions(
@@ -2600,7 +2862,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task StartQueuedFollowUpAsync(string threadId)
     {
-        async Task<CodexTurnStartRequest> PrepareStartRequestAsync(
+        async Task<PreparedHarnessTurn> PrepareStartRequestAsync(
             QueuedFollowUpSnapshot queued,
             CancellationToken cancellationToken)
         {
@@ -2624,29 +2886,26 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 effectiveConfig,
                 requirements,
                 profiles);
-            return new CodexTurnStartRequest(
-                threadId,
-                attachmentDraftService.BuildPromptInputs(
-                    queued.Text,
-                    queued.Attachments,
-                    workspacePath,
-                    resolved.Model,
-                    queued.SkillInputs),
+            var command = attachmentDraftService.CreateHarnessTurnStart(new HarnessTurnRequestComposition(
+                GetConversationAddress(threadId),
+                queued.Text,
+                queued.Attachments,
                 workspacePath,
-                resolved.Permissions.Sandbox,
+                resolved.Permissions,
                 string.IsNullOrWhiteSpace(options.Model) ? null : resolved.Model.Model,
-                options.ReasoningEffort,
+                options.ReasoningEffort?.ToProtocolValue(),
                 options.ServiceTier,
-                resolved.Permissions.ApprovalPolicy,
-                resolved.Permissions.ApprovalsReviewer,
-                resolved.Permissions.PermissionProfileId);
+                resolved.Model,
+                queued.SkillInputs));
+            return new PreparedHarnessTurn(
+                CreateHarnessConnectionOptions(workspacePath),
+                command);
         }
 
         var result = await followUpQueue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
             settings,
             threadId,
-            PrepareStartRequestAsync,
-            EnsureAppServerSessionAsync)).ConfigureAwait(true);
+            PrepareStartRequestAsync)).ConfigureAwait(true);
         var dispatch = result.Dispatch;
         if (!dispatch.Attempted) return;
         ApplyFollowUpQueueSnapshot(threadId, result.Snapshot);
@@ -2733,6 +2992,22 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private async Task EnsureAppServerSessionAsync(CancellationToken cancellationToken = default)
     {
         await appServerSessionCoordinator.EnsureConnectedAsync(currentCodex, cancellationToken).ConfigureAwait(true);
+    }
+
+    private async Task EnsureHarnessSessionAsync(
+        HarnessId harnessId,
+        string? workspacePath,
+        CancellationToken cancellationToken = default)
+    {
+        if (harnessId == HarnessId.Codex)
+        {
+            await EnsureAppServerSessionAsync(cancellationToken).ConfigureAwait(true);
+        }
+
+        await harnessRuntimeCoordinator.GetOrConnectAsync(
+            harnessId,
+            CreateHarnessConnectionOptions(workspacePath),
+            cancellationToken).ConfigureAwait(true);
     }
 
     private async Task RefreshExecutionPolicyAsync(string? cwd, CancellationToken cancellationToken)
@@ -2834,6 +3109,20 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void OnAppServerNotificationReceived(object? sender, CodexAppServerNotification notification)
     {
         DispatchAppServerNotification(notification);
+    }
+
+    private void OnHarnessEventReceived(object? sender, HarnessEvent harnessEvent)
+    {
+        void ApplyEvent() => ApplyConversationEvent(
+            conversationWorkflow.ApplyHarnessEvent(harnessEvent));
+
+        if (synchronizationContext is null || ReferenceEquals(SynchronizationContext.Current, synchronizationContext))
+        {
+            ApplyEvent();
+            return;
+        }
+
+        synchronizationContext.Post(_ => ApplyEvent(), null);
     }
 
     private void OnServerRequestReceived(object? sender, CodexServerRequest request)
@@ -2943,8 +3232,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             }
             return;
         }
+    }
 
-        var routed = conversationWorkflow.ApplyThreadNotification(notification);
+    private void ApplyConversationEvent(ConversationNotificationResult routed)
+    {
         var routedThreadId = routed.ThreadId;
         var routedSnapshot = routed.Snapshot;
 
@@ -2997,13 +3288,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
 
         if (!string.IsNullOrWhiteSpace(routedThreadId) &&
-            notification.IsArchived is not null &&
+            routed.IsArchived is not null &&
             settings.ProjectThreads.Any(thread => string.Equals(thread.ThreadId, routedThreadId, StringComparison.Ordinal)))
         {
             conversationWorkflow.SetThreadArchived(
                 settings,
                 routedThreadId,
-                archived: notification.IsArchived.Value);
+                archived: routed.IsArchived.Value);
         }
 
         TaskWorkspace.NotifyResponseChanged();
@@ -3125,6 +3416,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(SelectedThread));
         OnPropertyChanged(nameof(ActiveWorkspacePath));
         OnPropertyChanged(nameof(ActiveWorkspaceLabel));
+        OnPropertyChanged(nameof(SupportsSkills));
+        OnPropertyChanged(nameof(SupportsCodexSettings));
         NotifyCodexContextChanged();
         Terminal.RefreshContext();
         _ = Git.RefreshAsync();
@@ -3257,6 +3550,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(AuthDetail));
         OnPropertyChanged(nameof(CodexHome));
         OnPropertyChanged(nameof(SettingsPath));
+        OnPropertyChanged(nameof(SupportsSkills));
+        OnPropertyChanged(nameof(SupportsCodexSettings));
         DiagnosticsViewModel.RaiseCommandStates();
         RaiseThreadCommandStates();
     }
@@ -3484,6 +3779,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         public Task SubmitAsync() => owner.SubmitPromptAsync();
         public Task CancelAsync() => owner.CancelTurnAsync();
         public Task SteerAsync() => owner.SteerTurnAsync();
+        public bool CanSubmitTurn() => owner.CanSubmitTurn();
         public bool CanCancelTurn() => owner.CanCancelTurn();
         public bool CanSteerTurn() => owner.CanSteerTurn();
     }
@@ -3500,6 +3796,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         public Task<bool> EditPromptAsync(CodexConversationTurn turn, string editedPrompt) => owner.EditPromptAsync(turn, editedPrompt);
         public Task ForkConversationAsync(string turnId) => owner.ForkConversationFromTurnAsync(turnId);
+        public bool CanForkConversation() => owner.CanForkSelectedThread();
     }
 
     private sealed class AgentManagementActionAdapter(MainViewModel owner) : IAgentManagementActions
@@ -3512,6 +3809,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private sealed class ComposerSupportActionAdapter(MainViewModel owner) : IComposerSupportActions
     {
         public Task LoadModelsAsync() => owner.LoadModelOptionsAsync();
+        public bool CanLoadModels() => owner.CanLoadModels();
         public void ShowImagePreview(string path) => owner.userInteractionService.ShowImagePreview(path);
         public Task EditGeneratedImageAsync(string path) => owner.BeginGeneratedImageEditAsync(path);
         public Task<ComposerSkillLoadResult> LoadComposerSkillsAsync(CancellationToken cancellationToken) => owner.LoadComposerSkillsAsync(cancellationToken);
@@ -3537,6 +3835,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         public Task UnarchiveThreadAsync() => owner.UnarchiveSelectedThreadAsync();
         public Task RemoveWorktreeAsync() => owner.RemoveSelectedWorktreeAsync();
         public bool CanUseSelectedThread() => owner.CanUseSelectedThread();
+        public bool CanForkSelectedThread() => owner.CanForkSelectedThread();
         public bool CanArchiveSelectedThread() => owner.CanArchiveSelectedThread();
         public bool CanUnarchiveSelectedThread() => owner.CanUnarchiveSelectedThread();
         public bool CanRemoveSelectedWorktree() => owner.CanRemoveSelectedWorktree();

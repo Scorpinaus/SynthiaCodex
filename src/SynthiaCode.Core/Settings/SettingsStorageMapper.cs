@@ -29,6 +29,8 @@ public static class SettingsStorageMapper
             CustomPermissionProfileId = source.CustomPermissionProfileId,
             ExecutionPolicySchemaVersion = source.ExecutionPolicySchemaVersion,
             AttachmentSchemaVersion = source.AttachmentSchemaVersion,
+            HarnessSchemaVersion = source.HarnessSchemaVersion,
+            DefaultHarnessId = AppSettingsHarnessMigration.NormalizeHarnessId(source.DefaultHarnessId),
             IsProjectRailOpen = source.IsProjectRailOpen,
             IsDetailsPaneOpen = source.IsDetailsPaneOpen,
             RecentProjects = [.. source.RecentProjects],
@@ -73,6 +75,14 @@ public static class SettingsStorageMapper
         target.ScopeKind = source.ScopeKind;
         target.ProjectPath = source.ProjectPath;
         target.ThreadId = source.ThreadId;
+        target.HarnessId = AppSettingsHarnessMigration.NormalizeHarnessId(source.HarnessId);
+        target.RemoteConversationId = AppSettingsHarnessMigration.NormalizeRemoteId(source.RemoteConversationId)
+            ?? AppSettingsHarnessMigration.NormalizeRemoteId(source.ThreadId);
+        target.ConversationId = AppSettingsHarnessMigration.ResolveConversationId(
+            source.ConversationId,
+            target.HarnessId,
+            target.RemoteConversationId,
+            source.ThreadId);
         target.Title = source.Title;
         target.IsTitlePlaceholder = source.IsTitlePlaceholder;
         target.Preview = source.Preview;

@@ -1,9 +1,9 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows.Input;
-using SynthiaCode.App.Services;
 using SynthiaCode.Core.Codex.Configuration;
 using SynthiaCode.Core.Logging;
+using SynthiaCode.Harnesses.Codex;
 
 namespace SynthiaCode.App.ViewModels;
 
@@ -11,7 +11,7 @@ public sealed record EffectiveCodexSettingItem(string Label, string Value, strin
 
 public sealed class EffectiveCodexSettingsViewModel : ObservableObject
 {
-    private readonly IAppServerSessionCoordinator coordinator;
+    private readonly ICodexConfigurationFeature coordinator;
     private readonly Func<string?> activeWorkspacePath;
     private readonly Func<bool> isShuttingDown;
     private readonly IAppLogger logger;
@@ -25,7 +25,7 @@ public sealed class EffectiveCodexSettingsViewModel : ObservableObject
     private long refreshGeneration;
 
     public EffectiveCodexSettingsViewModel(
-        IAppServerSessionCoordinator coordinator,
+        ICodexConfigurationFeature coordinator,
         Func<string?> activeWorkspacePath,
         Func<bool> isShuttingDown,
         IAppLogger logger)

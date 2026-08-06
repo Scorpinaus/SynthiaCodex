@@ -1,27 +1,29 @@
+using SynthiaCode.Application.Harnesses;
 using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Harnesses;
 using SynthiaCode.Core.Settings;
 
 namespace SynthiaCode.App.Services;
 
 /// <summary>
-/// Executes Codex turns and owns the corresponding conversation state transitions.
-/// Presentation callers provide fully resolved protocol requests and project returned snapshots.
+/// Executes harness turns and owns the corresponding conversation state transitions.
+/// Presentation callers provide harness-neutral commands and project returned snapshots.
 /// </summary>
 public sealed class TurnExecutionUseCaseService
 {
-    private readonly IAppServerSessionCoordinator appServer;
+    private readonly IHarnessOperations harnesses;
     private readonly ConversationWorkflowController conversations;
     private readonly ThreadLifecycleUseCaseService threadLifecycle;
     private readonly ThreadStatePersistenceUseCaseService persistence;
 
     public TurnExecutionUseCaseService(
-        IAppServerSessionCoordinator appServer,
+        IHarnessOperations harnesses,
         ConversationWorkflowController conversations,
         ThreadLifecycleUseCaseService threadLifecycle,
         ThreadStatePersistenceUseCaseService persistence)
     {
-        this.appServer = appServer;
+        this.harnesses = harnesses;
         this.conversations = conversations;
         this.threadLifecycle = threadLifecycle;
         this.persistence = persistence;
@@ -38,13 +40,16 @@ public sealed class TurnExecutionUseCaseService
 
         try
         {
-            var started = await appServer.StartTurnAsync(request.StartRequest, cancellationToken).ConfigureAwait(false);
-            var bound = conversations.BindPendingTurn(request.ThreadId, started.TurnId);
-            conversations.RegisterTurn(request.ThreadId, started.TurnId);
-            RegisterStatus(request.ThreadId, started.TurnId, bound.Status);
+            var started = await harnesses.StartTurnAsync(
+                request.ConnectionOptions,
+                request.StartCommand,
+                cancellationToken).ConfigureAwait(false);
+            var bound = conversations.BindPendingTurn(request.ThreadId, started.RemoteTurnId);
+            conversations.RegisterTurn(request.ThreadId, started.RemoteTurnId);
+            RegisterStatus(request.ThreadId, started.RemoteTurnId, bound.Status);
             request.TurnStarted?.Invoke(new TurnExecutionResult(
                 request.ThreadId,
-                started.TurnId,
+                started.RemoteTurnId,
                 bound.Status,
                 conversations.GetSnapshot(request.ThreadId),
                 false,
@@ -57,7 +62,11 @@ public sealed class TurnExecutionUseCaseService
                 try
                 {
                     titleApplied = await threadLifecycle.RenameIfPlaceholderAsync(
-                        request.Settings, request.ThreadId, request.AutomaticTitle, cancellationToken).ConfigureAwait(false);
+                        request.Settings,
+                        request.ThreadId,
+                        request.AutomaticTitle,
+                        request.ConnectionOptions,
+                        cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -67,7 +76,7 @@ public sealed class TurnExecutionUseCaseService
 
             return new TurnExecutionResult(
                 request.ThreadId,
-                started.TurnId,
+                started.RemoteTurnId,
                 bound.Status,
                 conversations.GetSnapshot(request.ThreadId),
                 titleApplied,
@@ -89,27 +98,33 @@ public sealed class TurnExecutionUseCaseService
         var committed = false;
         try
         {
-            var rollback = await appServer.RollbackThreadAsync(
-                new CodexThreadRollbackRequest(request.ThreadId, request.RollbackCount), cancellationToken).ConfigureAwait(false);
-            if (!string.Equals(rollback.ThreadId, request.ThreadId, StringComparison.Ordinal))
+            var rollback = await harnesses.RollbackConversationAsync(
+                request.ConnectionOptions,
+                new RollbackConversationCommand(request.Address, request.RollbackCount),
+                cancellationToken).ConfigureAwait(false);
+            if (rollback.Address.LocalId != request.Address.LocalId ||
+                rollback.Address.HarnessId != request.Address.HarnessId)
             {
-                throw new InvalidOperationException("Codex returned a different thread after editing the prompt.");
+                throw new InvalidOperationException("The harness returned a different conversation after editing the prompt.");
             }
 
             conversations.SupersedeTurnsFrom(request.ThreadId, request.SourceTurnId);
-            conversations.ReconcileHistory(request.ThreadId, rollback.Turns);
+            conversations.ReconcileHistory(request.ThreadId, rollback.Turns.Select(ToLegacySnapshot));
             conversations.BeginTurn(request.ThreadId, request.Prompt, request.Attachments);
             committed = true;
             UpdatePreview(request.Settings, request.ThreadId, request.Prompt, request.Attachments);
 
-            var started = await appServer.StartTurnAsync(request.StartRequest, cancellationToken).ConfigureAwait(false);
-            var bound = conversations.BindPendingTurn(request.ThreadId, started.TurnId);
-            conversations.RegisterTurn(request.ThreadId, started.TurnId);
-            RegisterStatus(request.ThreadId, started.TurnId, bound.Status);
+            var started = await harnesses.StartTurnAsync(
+                request.ConnectionOptions,
+                request.StartCommand,
+                cancellationToken).ConfigureAwait(false);
+            var bound = conversations.BindPendingTurn(request.ThreadId, started.RemoteTurnId);
+            conversations.RegisterTurn(request.ThreadId, started.RemoteTurnId);
+            RegisterStatus(request.ThreadId, started.RemoteTurnId, bound.Status);
             return new TurnEditExecutionResult(
                 true,
                 request.ThreadId,
-                started.TurnId,
+                started.RemoteTurnId,
                 bound.Status,
                 conversations.GetSnapshot(request.ThreadId),
                 null);
@@ -148,11 +163,12 @@ public sealed class TurnExecutionUseCaseService
 
     public async Task<ConversationWorkspaceSnapshot> SteerAsync(
         string threadId,
-        CodexTurnSteerRequest request,
+        HarnessConnectionOptions connectionOptions,
+        SteerTurnCommand command,
         string guidance,
         CancellationToken cancellationToken = default)
     {
-        await appServer.SteerTurnAsync(request, cancellationToken).ConfigureAwait(false);
+        await harnesses.SteerTurnAsync(connectionOptions, command, cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(guidance))
         {
             conversations.AddGuidance(threadId, guidance);
@@ -160,8 +176,12 @@ public sealed class TurnExecutionUseCaseService
         return conversations.GetSnapshot(threadId);
     }
 
-    public Task CancelAsync(string threadId, string turnId, CancellationToken cancellationToken = default) =>
-        appServer.CancelTurnAsync(threadId, turnId, cancellationToken);
+    public Task CancelAsync(
+        HarnessConnectionOptions connectionOptions,
+        ConversationAddress address,
+        string remoteTurnId,
+        CancellationToken cancellationToken = default) =>
+        harnesses.CancelTurnAsync(connectionOptions, address, remoteTurnId, cancellationToken);
 
     private void RegisterStatus(string threadId, string turnId, CodexTurnStatus status)
     {
@@ -192,14 +212,47 @@ public sealed class TurnExecutionUseCaseService
             ? $"{attachments.Count} attachment{(attachments.Count == 1 ? string.Empty : "s")}"
             : prompt;
     }
+
+    private static CodexConversationTurnSnapshot ToLegacySnapshot(ConversationTurnSnapshot source) => new()
+    {
+        TurnId = source.RemoteTurnId ?? string.Empty,
+        UserPrompt = source.UserPrompt,
+        AssistantResponse = source.AssistantResponse,
+        Status = source.Status switch
+        {
+            ConversationTurnStatus.Idle => CodexTurnStatus.Idle,
+            ConversationTurnStatus.Running => CodexTurnStatus.Running,
+            ConversationTurnStatus.Completed => CodexTurnStatus.Completed,
+            ConversationTurnStatus.Failed => CodexTurnStatus.Failed,
+            ConversationTurnStatus.Cancelled => CodexTurnStatus.Cancelled,
+            _ => CodexTurnStatus.Failed
+        },
+        StartedAt = source.StartedAt ?? DateTimeOffset.UtcNow,
+        CompletedAt = source.CompletedAt,
+        IsSuperseded = source.IsSuperseded,
+        Activity = [.. source.Activity.Select(item => new CodexTimelineItem(
+            item.Kind == ActivityKind.Error ? CodexTimelineItemKind.Error : CodexTimelineItemKind.Raw,
+            item.Title,
+            item.Detail,
+            "harness/activity",
+            item.Timestamp)
+        {
+            ItemId = item.Id,
+            ActivityKey = item.Id
+        })],
+        UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())],
+        GeneratedImagePaths = [.. source.GeneratedImagePaths]
+    };
 }
 
 public sealed record TurnExecutionRequest(
     AppSettings Settings,
     string ThreadId,
+    ConversationAddress Address,
     string Prompt,
     IReadOnlyList<AttachmentReference> Attachments,
-    CodexTurnStartRequest StartRequest,
+    HarnessConnectionOptions ConnectionOptions,
+    StartTurnCommand StartCommand,
     string? AutomaticTitle,
     Action<ConversationWorkspaceSnapshot>? PendingStarted = null,
     Action<TurnExecutionResult>? TurnStarted = null);
@@ -215,11 +268,13 @@ public sealed record TurnExecutionResult(
 public sealed record TurnEditExecutionRequest(
     AppSettings Settings,
     string ThreadId,
+    ConversationAddress Address,
     string SourceTurnId,
     int RollbackCount,
     string Prompt,
     IReadOnlyList<AttachmentReference> Attachments,
-    CodexTurnStartRequest StartRequest);
+    HarnessConnectionOptions ConnectionOptions,
+    StartTurnCommand StartCommand);
 
 public sealed record TurnEditExecutionResult(
     bool StateCommitted,

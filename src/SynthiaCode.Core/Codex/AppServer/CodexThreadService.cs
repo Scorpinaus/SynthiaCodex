@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using SynthiaCode.Core.Attachments;
+using SynthiaCode.Core.Harnesses;
 
 namespace SynthiaCode.Core.Codex.AppServer;
 
@@ -353,6 +354,137 @@ public sealed class CodexThreadService
             return snapshot;
         }).ToList();
 
+    public void ApplyEvent(HarnessEvent harnessEvent)
+    {
+        ArgumentNullException.ThrowIfNull(harnessEvent);
+        lock (stateGate)
+        {
+            AddBounded(RawEvents, harnessEvent.GetType().Name, MaximumRawEvents);
+            switch (harnessEvent)
+            {
+                case ConversationStartedEvent started:
+                    ActiveThreadId = started.RemoteConversationId;
+                    AddSemanticTimeline(
+                        CodexTimelineItemKind.ThreadStarted,
+                        "Conversation started",
+                        started.RemoteConversationId!,
+                        started);
+                    break;
+
+                case TurnStartedEvent started:
+                    ActiveThreadId ??= started.RemoteConversationId;
+                    ActiveTurnId = started.RemoteTurnId;
+                    ActiveTurnStatus = CodexTurnStatus.Running;
+                    BindPendingTurn(started.RemoteTurnId!);
+                    AddSemanticTimeline(
+                        CodexTimelineItemKind.TurnStarted,
+                        "Turn started",
+                        started.RemoteTurnId!,
+                        started);
+                    break;
+
+                case AssistantTextDeltaEvent delta:
+                    ActiveThreadId ??= delta.RemoteConversationId;
+                    ActiveTurnId = delta.RemoteTurnId;
+                    ActiveTurnStatus = CodexTurnStatus.Running;
+                    var responseTurn = BindPendingTurn(delta.RemoteTurnId!);
+                    responseTurn.AssistantResponse += UnicodeTextNormalizer.RepairLegacyMojibake(delta.Delta);
+                    RefreshCompatibilityResponse();
+                    break;
+
+                case ActivityChangedEvent changed:
+                    var activityTurn = string.IsNullOrWhiteSpace(changed.RemoteTurnId)
+                        ? ActiveConversationTurn
+                        : BindPendingTurn(changed.RemoteTurnId);
+                    var activity = ToTimelineItem(changed.Activity, changed);
+                    if (activityTurn is not null)
+                    {
+                        var existingIndex = activityTurn.Activity
+                            .Select((item, index) => (item, index))
+                            .FirstOrDefault(pair => string.Equals(
+                                pair.item.ActivityKey,
+                                changed.Activity.Id,
+                                StringComparison.Ordinal)).index;
+                        if (existingIndex >= 0 && existingIndex < activityTurn.Activity.Count &&
+                            string.Equals(activityTurn.Activity[existingIndex].ActivityKey, changed.Activity.Id, StringComparison.Ordinal))
+                        {
+                            activityTurn.Activity[existingIndex] = activity;
+                        }
+                        else
+                        {
+                            AddBounded(activityTurn.Activity, activity, MaximumPersistedActivityItemsPerTurn);
+                        }
+                    }
+                    AddBounded(TimelineItems, activity, MaximumTimelineItems);
+                    break;
+
+                case ContextUsageChangedEvent usage:
+                    ContextWindowTokens = Math.Max(0, usage.WindowTokens);
+                    ContextTokensUsed = ContextWindowTokens > 0
+                        ? Math.Clamp(usage.UsedTokens, 0, ContextWindowTokens)
+                        : 0;
+                    break;
+
+                case ContextCompactedEvent compacted:
+                    ContextCompactionCount++;
+                    AddSemanticTimeline(
+                        CodexTimelineItemKind.ContextCompaction,
+                        "Compacted context",
+                        "Earlier conversation context was summarized.",
+                        compacted);
+                    break;
+
+                case TurnCompletedEvent completed:
+                    ActiveThreadId ??= completed.RemoteConversationId;
+                    ActiveTurnId = completed.RemoteTurnId;
+                    var completedStatus = ToCodexStatus(completed.Status);
+                    var completedTurn = BindPendingTurn(completed.RemoteTurnId!);
+                    ActiveTurnStatus = completedStatus;
+                    completedTurn.Status = completedStatus;
+                    completedTurn.CompletedAt = completed.Timestamp;
+                    if (!string.IsNullOrWhiteSpace(completed.Error))
+                    {
+                        LastErrorDetail = completed.Error;
+                        if (string.IsNullOrWhiteSpace(completedTurn.AssistantResponse))
+                        {
+                            completedTurn.AssistantResponse = completed.Error;
+                        }
+                    }
+                    AddSemanticTimeline(
+                        ActiveTurnStatus == CodexTurnStatus.Failed
+                            ? CodexTimelineItemKind.Error
+                            : CodexTimelineItemKind.TurnCompleted,
+                        "Turn completed",
+                        completed.Error ?? ActiveTurnStatus.ToString(),
+                        completed);
+                    RefreshCompatibilityResponse();
+                    break;
+
+                case AuthenticationRequiredEvent authentication:
+                    RequiresAuthentication = true;
+                    LastErrorDetail = authentication.Detail;
+                    AddSemanticTimeline(
+                        CodexTimelineItemKind.Error,
+                        "Authentication required",
+                        authentication.Detail,
+                        authentication);
+                    break;
+
+                case HarnessDiagnosticEvent diagnostic:
+                    if (diagnostic.IsError)
+                    {
+                        LastErrorDetail = diagnostic.Summary;
+                    }
+                    AddSemanticTimeline(
+                        diagnostic.IsError ? CodexTimelineItemKind.Error : CodexTimelineItemKind.Raw,
+                        diagnostic.EventName,
+                        diagnostic.Summary,
+                        diagnostic);
+                    break;
+            }
+        }
+    }
+
     public void ApplyNotification(CodexAppServerNotification notification)
     {
         lock (stateGate)
@@ -442,6 +574,57 @@ public sealed class CodexThreadService
             }
         }
     }
+
+    private void AddSemanticTimeline(
+        CodexTimelineItemKind kind,
+        string title,
+        string detail,
+        HarnessEvent harnessEvent) =>
+        AddBounded(
+            TimelineItems,
+            new CodexTimelineItem(
+                kind,
+                title,
+                UnicodeTextNormalizer.RepairLegacyMojibake(detail),
+                $"harness/{harnessEvent.GetType().Name}",
+                harnessEvent.Timestamp)
+            {
+                ActivityKey = $"harness:{harnessEvent.GetType().Name}:{harnessEvent.RemoteTurnId}:{harnessEvent.Timestamp.UtcTicks}"
+            },
+            MaximumTimelineItems);
+
+    private static CodexTimelineItem ToTimelineItem(ActivityItem activity, HarnessEvent harnessEvent) => new(
+        activity.Kind switch
+        {
+            ActivityKind.Command => activity.IsCompleted
+                ? CodexTimelineItemKind.CommandCompleted
+                : CodexTimelineItemKind.CommandStarted,
+            ActivityKind.FileChange => CodexTimelineItemKind.FileChange,
+            ActivityKind.WebSearch => CodexTimelineItemKind.WebSearch,
+            ActivityKind.Plan => CodexTimelineItemKind.PlanUpdate,
+            ActivityKind.Collaboration => CodexTimelineItemKind.Collaboration,
+            ActivityKind.Error => CodexTimelineItemKind.Error,
+            ActivityKind.Reasoning => CodexTimelineItemKind.AssistantCommentary,
+            _ => activity.IsCompleted ? CodexTimelineItemKind.Raw : CodexTimelineItemKind.ToolCall
+        },
+        activity.Title,
+        UnicodeTextNormalizer.RepairLegacyMojibake(activity.Detail),
+        $"harness/{harnessEvent.GetType().Name}",
+        activity.Timestamp)
+    {
+        ItemId = activity.Id,
+        ActivityKey = activity.Id
+    };
+
+    private static CodexTurnStatus ToCodexStatus(ConversationTurnStatus status) => status switch
+    {
+        ConversationTurnStatus.Idle => CodexTurnStatus.Idle,
+        ConversationTurnStatus.Running => CodexTurnStatus.Running,
+        ConversationTurnStatus.Completed => CodexTurnStatus.Completed,
+        ConversationTurnStatus.Failed => CodexTurnStatus.Failed,
+        ConversationTurnStatus.Cancelled => CodexTurnStatus.Cancelled,
+        _ => CodexTurnStatus.Failed
+    };
 
     private void ApplyCompletedItem(CodexAppServerNotification notification)
     {

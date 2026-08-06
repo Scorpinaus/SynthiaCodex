@@ -16,7 +16,7 @@ public sealed class WpfThemeService : IThemeService
     public void ApplyTheme(string theme)
     {
         requestedTheme = theme;
-        var resources = Application.Current?.Resources
+        var resources = System.Windows.Application.Current?.Resources
             ?? throw new InvalidOperationException("WPF application resources are not available.");
         var resolvedTheme = ResolveTheme(theme);
         var replacement = new ResourceDictionary
@@ -38,7 +38,7 @@ public sealed class WpfThemeService : IThemeService
 
     private void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
     {
-        var application = Application.Current;
+        var application = System.Windows.Application.Current;
         if (application is null || application.Dispatcher.HasShutdownStarted)
         {
             return;

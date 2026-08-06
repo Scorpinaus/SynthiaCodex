@@ -13,6 +13,7 @@ public interface ITurnExecutionActions
     Task SubmitAsync();
     Task CancelAsync();
     Task SteerAsync();
+    bool CanSubmitTurn();
     bool CanCancelTurn();
     bool CanSteerTurn();
 }
@@ -29,6 +30,7 @@ public interface IConversationHistoryActions
 {
     Task<bool> EditPromptAsync(CodexConversationTurn turn, string editedPrompt);
     Task ForkConversationAsync(string turnId);
+    bool CanForkConversation();
 }
 
 public interface IAgentManagementActions
@@ -41,6 +43,7 @@ public interface IAgentManagementActions
 public interface IComposerSupportActions
 {
     Task LoadModelsAsync();
+    bool CanLoadModels();
     void ShowImagePreview(string path);
     Task EditGeneratedImageAsync(string path);
     Task<ComposerSkillLoadResult> LoadComposerSkillsAsync(CancellationToken cancellationToken);
@@ -70,6 +73,7 @@ public interface IThreadLifecycleActions
     Task UnarchiveThreadAsync();
     Task RemoveWorktreeAsync();
     bool CanUseSelectedThread();
+    bool CanForkSelectedThread();
     bool CanArchiveSelectedThread();
     bool CanUnarchiveSelectedThread();
     bool CanRemoveSelectedWorktree();

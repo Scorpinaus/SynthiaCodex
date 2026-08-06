@@ -1,6 +1,7 @@
 using System.IO;
 using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Harnesses;
 using SynthiaCode.Infrastructure.Attachments;
 
 namespace SynthiaCode.App.Services;
@@ -22,13 +23,19 @@ public sealed class AttachmentPromptInputBuilder
     public IReadOnlyList<CodexUserInput> Build(
         string text,
         IReadOnlyList<AttachmentReference> attachments,
+        string workspacePath) =>
+        BuildHarness(text, attachments, workspacePath).Select(ToCodex).ToArray();
+
+    public IReadOnlyList<HarnessContentPart> BuildHarness(
+        string text,
+        IReadOnlyList<AttachmentReference> attachments,
         string workspacePath)
     {
         ArgumentNullException.ThrowIfNull(attachments);
-        var inputs = new List<CodexUserInput>();
+        var inputs = new List<HarnessContentPart>();
         if (!string.IsNullOrWhiteSpace(text))
         {
-            inputs.Add(new CodexTextInput(text));
+            inputs.Add(new TextContentPart(text));
         }
 
         foreach (var attachment in attachments)
@@ -37,7 +44,7 @@ public sealed class AttachmentPromptInputBuilder
             {
                 var resolved = workspaceAttachmentResolver.Revalidate(workspacePath, attachment);
                 attachment.ManagedPath = resolved.ManagedPath;
-                inputs.Add(new CodexMentionInput(resolved.WorkspaceRelativePath!, resolved.ManagedPath!));
+                inputs.Add(new WorkspaceReferenceContentPart(resolved.WorkspaceRelativePath!, resolved.ManagedPath!));
                 continue;
             }
 
@@ -58,8 +65,8 @@ public sealed class AttachmentPromptInputBuilder
 
             attachment.ManagedPath = path;
             inputs.Add(attachment.IsImage
-                ? new CodexLocalImageInput(path)
-                : new CodexMentionInput(attachment.DisplayName, path));
+                ? new LocalImageContentPart(path)
+                : new WorkspaceReferenceContentPart(attachment.DisplayName, path));
         }
 
         if (inputs.Count == 0)
@@ -68,4 +75,14 @@ public sealed class AttachmentPromptInputBuilder
         }
         return inputs;
     }
+
+    private static CodexUserInput ToCodex(HarnessContentPart input) => input switch
+    {
+        TextContentPart text => new CodexTextInput(text.Text),
+        DataImageContentPart image => new CodexImageInput(image.DataUrl),
+        LocalImageContentPart image => new CodexLocalImageInput(image.Path),
+        WorkspaceReferenceContentPart mention => new CodexMentionInput(mention.Name, mention.Path),
+        SkillReferenceContentPart skill => new CodexSkillInput(skill.Name, skill.Path),
+        _ => throw new NotSupportedException($"Unsupported attachment input {input.GetType().Name}.")
+    };
 }

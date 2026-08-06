@@ -1,7 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\SynthiaCode.Application\SynthiaCode.Application.csproj" />
     <ProjectReference Include="..\SynthiaCode.Core\SynthiaCode.Core.csproj" />
+    <ProjectReference Include="..\SynthiaCode.Harnesses.Codex\SynthiaCode.Harnesses.Codex.csproj" />
     <ProjectReference Include="..\SynthiaCode.Infrastructure\SynthiaCode.Infrastructure.csproj" />
   </ItemGroup>
 

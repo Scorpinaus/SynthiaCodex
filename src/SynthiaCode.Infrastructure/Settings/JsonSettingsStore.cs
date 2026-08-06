@@ -60,7 +60,9 @@ public sealed class JsonSettingsStore : ISettingsStore
             }
         }
 
-        return new AppSettings();
+        var settings = new AppSettings();
+        AppSettingsHarnessMigration.Apply(settings);
+        return settings;
     }
 
     private void PromoteTemporaryFile(string tempPath)
@@ -77,8 +79,13 @@ public sealed class JsonSettingsStore : ISettingsStore
         try
         {
             await using var stream = File.OpenRead(path);
-            return await JsonSerializer.DeserializeAsync<AppSettings>(stream, SerializerOptions, cancellationToken)
+            var settings = await JsonSerializer.DeserializeAsync<AppSettings>(stream, SerializerOptions, cancellationToken)
                 .ConfigureAwait(false);
+            if (settings is not null)
+            {
+                AppSettingsHarnessMigration.Apply(settings);
+            }
+            return settings;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -98,6 +105,7 @@ public sealed class JsonSettingsStore : ISettingsStore
     public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        AppSettingsHarnessMigration.Apply(settings);
 
         await saveGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try

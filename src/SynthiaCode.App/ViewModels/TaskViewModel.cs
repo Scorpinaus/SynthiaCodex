@@ -106,11 +106,16 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
                     Prompt = value;
                 }
             });
-        SubmitCommand = submitCommand = new AsyncRelayCommand(turnActions.SubmitAsync);
+        SubmitCommand = submitCommand = new AsyncRelayCommand(
+            turnActions.SubmitAsync,
+            turnActions.CanSubmitTurn);
         ComposerSendCommand = composerSendCommand = new AsyncRelayCommand(
-            () => IsTurnRunning ? turnActions.SteerAsync() : turnActions.SubmitAsync());
+            () => IsTurnRunning ? turnActions.SteerAsync() : turnActions.SubmitAsync(),
+            () => IsTurnRunning ? turnActions.CanSteerTurn() : turnActions.CanSubmitTurn());
         CancelCommand = cancelCommand = new AsyncRelayCommand(turnActions.CancelAsync, turnActions.CanCancelTurn);
-        LoadModelsCommand = loadModelsCommand = new AsyncRelayCommand(composerActions.LoadModelsAsync);
+        LoadModelsCommand = loadModelsCommand = new AsyncRelayCommand(
+            composerActions.LoadModelsAsync,
+            composerActions.CanLoadModels);
         SteerCommand = steerCommand = new AsyncRelayCommand(turnActions.SteerAsync, turnActions.CanSteerTurn);
         AlternateFollowUpCommand = alternateFollowUpCommand = new AsyncRelayCommand(
             followUpActions.SendAlternateFollowUpAsync,
@@ -134,6 +139,7 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
                 RaisePromptEditCommandStates();
             },
             parameter => parameter is CodexConversationTurn turn &&
+                historyActions.CanForkConversation() &&
                 !IsTurnRunning &&
                 turn.CanEditPrompt &&
                 !ConversationTurns.Any(item => item.IsPromptEditing));

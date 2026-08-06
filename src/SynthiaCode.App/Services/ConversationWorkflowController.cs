@@ -1,5 +1,6 @@
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Attachments;
+using SynthiaCode.Core.Harnesses;
 using SynthiaCode.Core.Settings;
 
 namespace SynthiaCode.App.Services;
@@ -222,7 +223,43 @@ public sealed class ConversationWorkflowController
             threadId,
             ConversationWorkspaceSnapshot.Create(threadId, service,
                 followUpQueues.ThreadIds.Contains(threadId) ? followUpQueues.GetRequired(threadId) : null),
-            notification.Kind == CodexAppServerNotificationKind.TurnCompleted);
+            notification.Kind == CodexAppServerNotificationKind.TurnCompleted,
+            notification.IsArchived);
+    }
+
+    public ConversationNotificationResult ApplyHarnessEvent(HarnessEvent harnessEvent)
+    {
+        ArgumentNullException.ThrowIfNull(harnessEvent);
+        var threadId = threadWorkspace.ApplyEvent(harnessEvent);
+        threadId ??= ActiveThreadId;
+        if (string.IsNullOrWhiteSpace(threadId) || !threadWorkspace.ThreadIds.Contains(threadId))
+        {
+            return ConversationNotificationResult.Unrouted;
+        }
+
+        var service = threadWorkspace.GetRequired(threadId);
+        if (!string.IsNullOrWhiteSpace(service.ActiveTurnId))
+        {
+            activeTurnIds[threadId] = service.ActiveTurnId;
+            threadWorkspace.RegisterTurn(threadId, service.ActiveTurnId);
+        }
+        if (harnessEvent is TurnStartedEvent started)
+        {
+            RegisterTurnStarted(threadId, started.RemoteTurnId!, CodexTurnStatus.Running);
+        }
+        if (harnessEvent is TurnCompletedEvent)
+        {
+            RegisterTurnFinished(threadId);
+        }
+
+        return new ConversationNotificationResult(
+            threadId,
+            ConversationWorkspaceSnapshot.Create(
+                threadId,
+                service,
+                followUpQueues.ThreadIds.Contains(threadId) ? followUpQueues.GetRequired(threadId) : null),
+            harnessEvent is TurnCompletedEvent,
+            harnessEvent is ConversationArchivedEvent archived ? archived.IsArchived : null);
     }
 
     public void RemoveRuntime(string threadId)
@@ -245,9 +282,14 @@ public sealed class ConversationWorkflowController
 public sealed record ConversationNotificationResult(
     string? ThreadId,
     ConversationWorkspaceSnapshot Snapshot,
-    bool IsTurnCompleted)
+    bool IsTurnCompleted,
+    bool? IsArchived)
 {
-    public static ConversationNotificationResult Unrouted { get; } = new(null, ConversationWorkspaceSnapshot.Empty, false);
+    public static ConversationNotificationResult Unrouted { get; } = new(
+        null,
+        ConversationWorkspaceSnapshot.Empty,
+        false,
+        null);
 }
 
 
@@ -303,6 +345,4 @@ public sealed record ConversationWorkspaceSnapshot(
         GeneratedImagePaths = [.. source.GeneratedImagePaths]
     };
 }
-
-
 

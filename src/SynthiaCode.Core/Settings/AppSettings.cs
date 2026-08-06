@@ -1,6 +1,7 @@
 using SynthiaCode.Core.Projects;
 using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Harnesses;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
@@ -40,6 +41,10 @@ public sealed class AppSettings
     public int ExecutionPolicySchemaVersion { get; set; }
 
     public int AttachmentSchemaVersion { get; set; } = 3;
+
+    public int HarnessSchemaVersion { get; set; }
+
+    public string DefaultHarnessId { get; set; } = KnownHarnessIds.Codex;
 
     public bool IsProjectRailOpen { get; set; } = true;
 
@@ -98,6 +103,9 @@ internal interface IThreadStorageState
     ThreadScopeKind ScopeKind { get; set; }
     string ProjectPath { get; set; }
     string ThreadId { get; set; }
+    Guid ConversationId { get; set; }
+    string HarnessId { get; set; }
+    string? RemoteConversationId { get; set; }
     string Title { get; set; }
     bool IsTitlePlaceholder { get; set; }
     string Preview { get; set; }
@@ -130,6 +138,9 @@ public sealed class PersistedProjectThread : IThreadStorageState
     public ThreadScopeKind ScopeKind { get; set; } = ThreadScopeKind.Project;
     public string ProjectPath { get; set; } = string.Empty;
     public string ThreadId { get; set; } = string.Empty;
+    public Guid ConversationId { get; set; }
+    public string HarnessId { get; set; } = KnownHarnessIds.Codex;
+    public string? RemoteConversationId { get; set; }
     public string Title { get; set; } = string.Empty;
     public bool IsTitlePlaceholder { get; set; }
     public string Preview { get; set; } = string.Empty;
@@ -176,6 +187,12 @@ public sealed class ProjectThreadState : INotifyPropertyChanged, IThreadStorageS
     public bool IsGeneral => ScopeKind == ThreadScopeKind.General;
 
     public string ThreadId { get; set; } = string.Empty;
+
+    public Guid ConversationId { get; set; }
+
+    public string HarnessId { get; set; } = KnownHarnessIds.Codex;
+
+    public string? RemoteConversationId { get; set; }
 
     public string Title
     {

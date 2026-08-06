@@ -1,8 +1,11 @@
 using System.Text.Json.Nodes;
 using SynthiaCode.App.Services;
+using SynthiaCode.Application.Harnesses;
 using SynthiaCode.Core.Codex;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Harnesses;
 using SynthiaCode.Core.Settings;
+using SynthiaCode.Harnesses.Codex;
 using SynthiaCode.Infrastructure.Codex;
 using Xunit;
 
@@ -25,6 +28,7 @@ public sealed class FollowUpQueueUseCaseServiceTests
 
         Assert.Equal("original", context.Queue.GetSnapshots(context.ThreadId).Single().Text);
         Assert.Equal("original", context.Settings.ProjectThreads.Single().QueuedFollowUps.Single().Text);
+        await context.HarnessRuntime.DisposeAsync();
         await context.Coordinator.DisposeAsync();
     }
 
@@ -41,26 +45,25 @@ public sealed class FollowUpQueueUseCaseServiceTests
             new QueuedTurnOptionsSnapshot { WorkspacePath = Path.GetTempPath() },
             [],
             []));
-        var ensureConnectedCalls = 0;
+        var prepareCalls = 0;
 
         var result = await context.Queue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
             context.Settings,
             context.ThreadId,
-            (item, _) => Task.FromResult(new CodexTurnStartRequest(
-                context.ThreadId, item.Text, item.Options.WorkspacePath, Sandbox: null)),
-            _ =>
+            (item, _) =>
             {
-                ensureConnectedCalls++;
-                return Task.CompletedTask;
+                prepareCalls++;
+                return Task.FromResult(CreatePreparedTurn(context.ThreadId, item));
             }));
 
         Assert.True(result.Dispatch.Attempted);
         Assert.False(result.Dispatch.RemoteTurnStarted);
-        Assert.Equal(0, ensureConnectedCalls);
+        Assert.Equal(0, prepareCalls);
         Assert.Equal(QueuedFollowUpState.NeedsAttention, context.Queue.GetSnapshots(context.ThreadId).Single().State);
         Assert.DoesNotContain(transport.ClientMessages, message =>
             string.Equals(JsonNode.Parse(message)?["method"]?.GetValue<string>(), "turn/start", StringComparison.Ordinal));
         await context.Queue.DisposeAsync();
+        await context.HarnessRuntime.DisposeAsync();
         await context.Coordinator.DisposeAsync();
     }
 
@@ -81,9 +84,7 @@ public sealed class FollowUpQueueUseCaseServiceTests
         var dispatch = context.Queue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
             context.Settings,
             context.ThreadId,
-            (item, _) => Task.FromResult(new CodexTurnStartRequest(
-                context.ThreadId, item.Text, item.Options.WorkspacePath, Sandbox: null)),
-            _ => Task.CompletedTask));
+            (item, _) => Task.FromResult(CreatePreparedTurn(context.ThreadId, item))));
         var request = await WaitForRequestAsync(transport, "turn/start");
         transport.ServerSend($"{{\"id\":{request["id"]!.ToJsonString()},\"result\":{{\"turn\":{{\"id\":\"turn-queue\"}}}}}}");
 
@@ -94,11 +95,12 @@ public sealed class FollowUpQueueUseCaseServiceTests
         Assert.Empty(context.Settings.ProjectThreads.Single().QueuedFollowUps);
         Assert.True(context.Conversations.IsRunning(context.ThreadId));
         await context.Queue.DisposeAsync();
+        await context.HarnessRuntime.DisposeAsync();
         await context.Coordinator.DisposeAsync();
     }
 
     [Fact]
-    public async Task Dispatch_awaits_preflight_after_connection_and_immediately_before_remote_start()
+    public async Task Dispatch_awaits_preflight_immediately_before_harness_start()
     {
         await using var transport = new FakeAppServerTransport();
         var context = CreateContext(transport, new FakeSettingsStore(), "queue-preflight-order");
@@ -120,28 +122,23 @@ public sealed class FollowUpQueueUseCaseServiceTests
             {
                 calls.Add("preflight");
                 await releasePreflight.Task.WaitAsync(cancellationToken);
-                return new CodexTurnStartRequest(
-                    context.ThreadId, item.Text, item.Options.WorkspacePath, Sandbox: null);
-            },
-            _ =>
-            {
-                calls.Add("connected");
-                return Task.CompletedTask;
+                return CreatePreparedTurn(context.ThreadId, item);
             }));
 
-        await WaitUntilAsync(() => calls.Count == 2);
-        Assert.Equal(["connected", "preflight"], calls);
+        await WaitUntilAsync(() => calls.Count == 1);
+        Assert.Equal(["preflight"], calls);
         Assert.DoesNotContain(transport.ClientMessages, message =>
             string.Equals(JsonNode.Parse(message)?["method"]?.GetValue<string>(), "turn/start", StringComparison.Ordinal));
 
         releasePreflight.SetResult();
         var request = await WaitForRequestAsync(transport, "turn/start");
-        Assert.Equal(["connected", "preflight"], calls);
+        Assert.Equal(["preflight"], calls);
         transport.ServerSend($"{{\"id\":{request["id"]!.ToJsonString()},\"result\":{{\"turn\":{{\"id\":\"turn-preflight\"}}}}}}");
 
         var result = await dispatch;
         Assert.True(result.Dispatch.RemoteTurnStarted);
         await context.Queue.DisposeAsync();
+        await context.HarnessRuntime.DisposeAsync();
         await context.Coordinator.DisposeAsync();
     }
 
@@ -158,8 +155,17 @@ public sealed class FollowUpQueueUseCaseServiceTests
         var workspace = new CodexThreadWorkspace();
         var queues = new CodexFollowUpQueueWorkspace();
         var conversations = new ConversationWorkflowController(store, workspace, queues);
+        var installation = new CodexInstallation(
+            true,
+            @"C:\Tools\codex.exe",
+            "codex test",
+            "Codex test",
+            "Test installation");
+        var harnessRuntime = new HarnessRuntimeCoordinator(new HarnessRegistry([
+            new CodexHarness(new FakeCodexDiscoveryService(installation), coordinator)
+        ]));
         var queue = new FollowUpQueueUseCaseService(
-            coordinator,
+            new HarnessOperations(harnessRuntime),
             conversations,
             settingsStore,
             workspace,
@@ -175,7 +181,26 @@ public sealed class FollowUpQueueUseCaseServiceTests
         };
         store.Upsert(settings, state);
         conversations.RegisterCreated(state);
-        return new QueueTestContext(coordinator, conversations, queue, settings, threadId);
+        return new QueueTestContext(coordinator, harnessRuntime, conversations, queue, settings, threadId);
+    }
+
+    private static PreparedHarnessTurn CreatePreparedTurn(
+        string threadId,
+        QueuedFollowUpSnapshot item)
+    {
+        var address = new ConversationAddress(
+            new ConversationId(AppSettingsHarnessMigration.CreateDeterministicConversationId(
+                KnownHarnessIds.Codex,
+                threadId)),
+            HarnessId.Codex,
+            threadId);
+        return new PreparedHarnessTurn(
+            new HarnessConnectionOptions(item.Options.WorkspacePath),
+            new StartTurnCommand(
+                address,
+                [new TextContentPart(item.Text)],
+                item.Options.WorkspacePath,
+                HarnessTurnOptions.Default));
     }
 
     private static async Task ConnectAsync(
@@ -224,6 +249,7 @@ public sealed class FollowUpQueueUseCaseServiceTests
 
     private sealed record QueueTestContext(
         AppServerSessionCoordinator Coordinator,
+        HarnessRuntimeCoordinator HarnessRuntime,
         ConversationWorkflowController Conversations,
         FollowUpQueueUseCaseService Queue,
         AppSettings Settings,

@@ -4,6 +4,7 @@ using System.Windows.Input;
 using SynthiaCode.App.Services;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Logging;
+using SynthiaCode.Harnesses.Codex;
 
 namespace SynthiaCode.App.ViewModels;
 
@@ -117,7 +118,7 @@ public sealed class SkillItemViewModel : ObservableObject
 public sealed class SkillsViewModel : ObservableObject, IAsyncDisposable
 {
     private static readonly StringComparer PathComparer = StringComparer.OrdinalIgnoreCase;
-    private readonly IAppServerSessionCoordinator coordinator;
+    private readonly ICodexSkillsSessionFeature coordinator;
     private readonly Func<string?> activeWorkspacePath;
     private readonly Func<string> activeContextLabel;
     private readonly Action<string> openInEditor;
@@ -149,7 +150,7 @@ public sealed class SkillsViewModel : ObservableObject, IAsyncDisposable
     private long refreshGeneration;
 
     public SkillsViewModel(
-        IAppServerSessionCoordinator coordinator,
+        ICodexSkillsSessionFeature coordinator,
         Func<string?> activeWorkspacePath,
         Func<string> activeContextLabel,
         Action<string> openInEditor,

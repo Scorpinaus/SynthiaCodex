@@ -72,7 +72,9 @@ public sealed class ProjectThreadViewModel : ObservableObject
         NewWorktreeThreadForProjectCommand = new AsyncRelayCommand(parameter =>
             CreateThreadForProjectAsync(parameter, "New worktree", navigationActions));
         ResumeThreadCommand = new AsyncRelayCommand(lifecycleActions.ResumeThreadAsync, lifecycleActions.CanUseSelectedThread);
-        ForkThreadCommand = new AsyncRelayCommand(lifecycleActions.ForkThreadAsync, lifecycleActions.CanUseSelectedThread);
+        ForkThreadCommand = new AsyncRelayCommand(
+            lifecycleActions.ForkThreadAsync,
+            lifecycleActions.CanForkSelectedThread);
         ArchiveThreadCommand = new AsyncRelayCommand(lifecycleActions.ArchiveThreadAsync, lifecycleActions.CanArchiveSelectedThread);
         UnarchiveThreadCommand = new AsyncRelayCommand(lifecycleActions.UnarchiveThreadAsync, lifecycleActions.CanUnarchiveSelectedThread);
         RemoveWorktreeCommand = new AsyncRelayCommand(lifecycleActions.RemoveWorktreeAsync, lifecycleActions.CanRemoveSelectedWorktree);

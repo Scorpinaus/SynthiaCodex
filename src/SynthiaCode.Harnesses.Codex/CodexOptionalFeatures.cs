@@ -69,6 +69,13 @@ public interface ICodexGoalFeature
         CancellationToken cancellationToken = default);
 }
 
+public interface ICodexReviewFeature
+{
+    Task<CodexReviewStartResult> StartReviewAsync(
+        CodexReviewStartRequest request,
+        CancellationToken cancellationToken = default);
+}
+
 public interface ICodexApprovalFeature
 {
     Task RespondToServerRequestAsync(

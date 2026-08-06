@@ -337,6 +337,8 @@ public sealed class CodexThreadService
             turn.StartedAt = snapshot.StartedAt;
             turn.CompletedAt = snapshot.CompletedAt;
             turn.IsSuperseded = snapshot.IsSuperseded;
+            turn.IsCodeReview = snapshot.IsCodeReview;
+            turn.ReviewScope = snapshot.ReviewScope;
         }
 
         while (ConversationTurns.Count > MaximumConversationTurns)
@@ -539,6 +541,7 @@ public sealed class CodexThreadService
 
             case CodexAppServerNotificationKind.ItemStarted:
                 RememberAgentMessagePhase(notification);
+                ApplyReviewItem(notification, completed: false);
                 AddTimeline(ReadItemStartedKind(notification.Params), "Item started", ReadItemDetail(notification.Params), notification);
                 ProjectItemActivity(notification, completed: false);
                 break;
@@ -644,6 +647,7 @@ public sealed class CodexThreadService
         {
             ApplyCompletedImageGeneration(notification);
         }
+        ApplyReviewItem(notification, completed: true);
 
         AddTimeline(kind, "Item completed", detail, notification);
         ProjectItemActivity(notification, completed: true);
@@ -740,6 +744,7 @@ public sealed class CodexThreadService
             "webSearch" => CodexTimelineItemKind.WebSearch,
             "plan" => CodexTimelineItemKind.PlanUpdate,
             "contextCompaction" => CodexTimelineItemKind.ContextCompaction,
+            "enteredReviewMode" or "exitedReviewMode" => CodexTimelineItemKind.CodeReview,
             _ => CodexTimelineItemKind.Raw
         };
     }
@@ -760,6 +765,7 @@ public sealed class CodexThreadService
             "webSearch" => CodexTimelineItemKind.WebSearch,
             "plan" => CodexTimelineItemKind.PlanUpdate,
             "contextCompaction" => CodexTimelineItemKind.ContextCompaction,
+            "enteredReviewMode" or "exitedReviewMode" => CodexTimelineItemKind.CodeReview,
             _ => CodexTimelineItemKind.Raw
         };
     }
@@ -786,6 +792,7 @@ public sealed class CodexThreadService
             ReadString(parameters, "item.text") ??
             ReadString(parameters, "item.path") ??
             ReadString(parameters, "item.name") ??
+            ReadString(parameters, "item.review") ??
             ReadString(parameters, "item.aggregatedOutput") ??
             ReadString(parameters, "error.message") ??
             ReadString(parameters, "message") ??
@@ -978,6 +985,8 @@ public sealed class CodexThreadService
             "webSearch" => CreateWebSearchActivity(notification.Params, itemId, completed),
             "plan" => CreatePlanActivity(notification.Params, itemId, completed),
             "contextCompaction" => CreateContextCompactionActivity(itemId, completed, notification.Method),
+            "enteredReviewMode" or "exitedReviewMode" =>
+                CreateReviewActivity(notification.Params, itemId, completed),
             _ => null
         };
 
@@ -985,6 +994,45 @@ public sealed class CodexThreadService
         {
             UpsertActivity(turn, activity);
         }
+    }
+
+    private void ApplyReviewItem(CodexAppServerNotification notification, bool completed)
+    {
+        var type = ReadString(notification.Params, "item.type");
+        if (type is not ("enteredReviewMode" or "exitedReviewMode") ||
+            GetNotificationTurn(notification) is not { } turn)
+        {
+            return;
+        }
+
+        turn.IsCodeReview = true;
+        var review = UnicodeTextNormalizer.RepairLegacyMojibake(
+            ReadString(notification.Params, "item.review") ?? string.Empty);
+        if (type == "enteredReviewMode" && !string.IsNullOrWhiteSpace(review))
+        {
+            turn.ReviewScope = review;
+        }
+        if (type == "exitedReviewMode" && completed && !string.IsNullOrWhiteSpace(review))
+        {
+            turn.AssistantResponse = review;
+            RefreshCompatibilityResponse();
+        }
+    }
+
+    private static CodexTimelineItem CreateReviewActivity(
+        JsonObject parameters,
+        string itemId,
+        bool completed)
+    {
+        var type = ReadString(parameters, "item.type");
+        var finished = type == "exitedReviewMode" && completed;
+        return CreateActivity(
+            CodexTimelineItemKind.CodeReview,
+            finished ? "Code review completed" : "Code review running",
+            NormalizeActivityDetail(ReadString(parameters, "item.review") ?? "Codex reviewer"),
+            "item/codeReview",
+            itemId,
+            $"review:{itemId}");
     }
 
     private void ProjectLegacyContextCompactionActivity(CodexAppServerNotification notification)
@@ -1527,7 +1575,8 @@ public sealed class CodexThreadService
         CodexTimelineItemKind.WebSearch or
         CodexTimelineItemKind.PlanUpdate or
         CodexTimelineItemKind.Collaboration or
-        CodexTimelineItemKind.ContextCompaction => true,
+        CodexTimelineItemKind.ContextCompaction or
+        CodexTimelineItemKind.CodeReview => true,
         CodexTimelineItemKind.ToolProgress => item.Method.StartsWith("item/", StringComparison.Ordinal),
         _ => false
     };
@@ -1742,6 +1791,7 @@ public sealed record CodexTimelineItem(
         CodexTimelineItemKind.PlanUpdate => "Plan",
         CodexTimelineItemKind.Collaboration => "Agent",
         CodexTimelineItemKind.ContextCompaction => "Context",
+        CodexTimelineItemKind.CodeReview => "Review",
         CodexTimelineItemKind.Error => "Error",
         CodexTimelineItemKind.UserGuidance => "Guidance",
         _ => "Details"
@@ -1767,7 +1817,8 @@ public enum CodexTimelineItemKind
     WebSearch,
     PlanUpdate,
     Collaboration,
-    ContextCompaction
+    ContextCompaction,
+    CodeReview
 }
 
 public enum CodexTurnStatus

@@ -11,6 +11,7 @@ using SynthiaCode.App.Views;
 using SynthiaCode.Core.Auth;
 using SynthiaCode.Core.Codex;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Git;
 using SynthiaCode.Core.Projects;
 using SynthiaCode.Core.Settings;
 using SynthiaCode.Infrastructure.Codex;
@@ -564,6 +565,8 @@ internal static class ThreadRenameTests
 
         public GeneratedImageEditSelection? SelectGeneratedImageEdit(string path) =>
             GeneratedImageEditSelection.EntireImage;
+
+        public CodexReviewTarget? SelectCodeReviewTarget(GitReviewCatalog catalog) => null;
 
         public ProjectFolderEditSelection? EditProjectFolders(RecentProject project) => null;
 

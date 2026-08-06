@@ -296,6 +296,20 @@
                                                     Visibility="{Binding IsSuperseded, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                 <TextBlock Text="Previous version" FontSize="10"/>
                                             </Border>
+                                            <StackPanel Margin="0,0,0,7"
+                                                        Visibility="{Binding IsCodeReview, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                        AutomationProperties.Name="Code review turn">
+                                                <Border Style="{StaticResource StatePill}"
+                                                        HorizontalAlignment="Right">
+                                                    <TextBlock Text="{Binding ReviewBadgeLabel}" FontSize="10" FontWeight="SemiBold"/>
+                                                </Border>
+                                                <TextBlock Text="{Binding ReviewScopeDisplay}"
+                                                           Style="{StaticResource ConversationMetadataText}"
+                                                           HorizontalAlignment="Right"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,4,0,0"
+                                                           Visibility="{Binding HasReviewScope, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                            </StackPanel>
                                             <TextBlock Text="{Binding UserPrompt}"
                                                        Style="{StaticResource ConversationBodyText}"
                                                        Visibility="{Binding IsPromptEditing, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
@@ -972,6 +986,16 @@
                                 <TextBlock Text=" Skills" Margin="2,0,0,0"/>
                             </StackPanel>
                         </Button>
+                        <Button x:Name="CodeReviewButton"
+                                Content="Review"
+                                Command="{Binding TaskWorkspace.StartCodeReviewCommand}"
+                                Visibility="{Binding SupportsCodeReview, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                Style="{StaticResource CompactButton}"
+                                MinHeight="32"
+                                Margin="8,0,0,0"
+                                Padding="10,4"
+                                ToolTip="Choose uncommitted changes, a base branch, a commit, or custom review instructions. You can also type /review."
+                                AutomationProperties.Name="Start code review"/>
                         <Button x:Name="AttachButton"
                                 Click="OnAttachClick"
                                 Style="{StaticResource IconButton}"

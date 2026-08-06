@@ -18,6 +18,12 @@ public interface ITurnExecutionActions
     bool CanSteerTurn();
 }
 
+public interface ICodeReviewActions
+{
+    Task StartCodeReviewAsync();
+    bool CanStartCodeReview();
+}
+
 public interface IFollowUpManagementActions
 {
     void OpenExternalUri(Uri uri);

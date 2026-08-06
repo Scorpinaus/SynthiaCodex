@@ -40,6 +40,36 @@ public sealed class GitService(IAppLogger logger) : IGitService
         return new GitRepositoryState(true, root, branch, files, null);
     }
 
+    public async Task<GitReviewCatalog> GetReviewCatalogAsync(
+        string workingDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        var state = await GetRepositoryStateAsync(workingDirectory, cancellationToken).ConfigureAwait(false);
+        if (!state.IsRepository || string.IsNullOrWhiteSpace(state.RootPath))
+        {
+            throw new InvalidOperationException(state.ErrorMessage ?? "Code review requires a Git repository.");
+        }
+
+        var root = state.RootPath;
+        var branchesResult = await RunAsync(
+            root,
+            ["for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes"],
+            [0],
+            cancellationToken).ConfigureAwait(false);
+        var branches = ParseReviewBranches(branchesResult.StandardOutput, state.Branch);
+
+        var commitsResult = await RunAsync(
+            root,
+            ["log", "-n", "50", "--format=%H%x1f%h%x1f%s%x1e"],
+            [0, 128],
+            cancellationToken).ConfigureAwait(false);
+        var commits = commitsResult.ExitCode == 0
+            ? ParseReviewCommits(commitsResult.StandardOutput)
+            : [];
+
+        return new GitReviewCatalog(root, state.Branch ?? string.Empty, branches, commits);
+    }
+
     public async Task<string> GetDiffAsync(
         string repositoryRoot,
         GitChangedFile file,
@@ -194,6 +224,33 @@ public sealed class GitService(IAppLogger logger) : IGitService
         }
 
         return files.OrderBy(file => file.Path, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    internal static IReadOnlyList<string> ParseReviewBranches(string output, string? currentBranch) =>
+        output
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(branch =>
+                !branch.EndsWith("/HEAD", StringComparison.Ordinal) &&
+                !string.Equals(branch, currentBranch, StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(branch => branch, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    internal static IReadOnlyList<GitReviewCommit> ParseReviewCommits(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return [];
+        }
+
+        return output
+            .Split('\x1e', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(record => record.Trim('\r', '\n').Split('\x1f', 3))
+            .Where(fields => fields.Length == 3 &&
+                !string.IsNullOrWhiteSpace(fields[0]) &&
+                !string.IsNullOrWhiteSpace(fields[1]))
+            .Select(fields => new GitReviewCommit(fields[0], fields[1], fields[2]))
+            .ToArray();
     }
 
     private async Task<string> GetDetachedHeadLabelAsync(string repositoryRoot, CancellationToken cancellationToken)

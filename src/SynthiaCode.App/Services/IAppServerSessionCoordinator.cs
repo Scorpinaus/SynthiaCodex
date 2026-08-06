@@ -36,6 +36,7 @@ public interface IAppServerSessionCoordinator :
     ICodexSkillsSessionFeature,
     ICodexConfigurationFeature,
     ICodexGoalFeature,
+    ICodexReviewFeature,
     ICodexApprovalFeature
 {
     event EventHandler<CodexServerRequest>? ServerRequestReceived;

@@ -8,7 +8,7 @@ The app is intended to launch and communicate with `codex app-server` while keep
 
 **Current release:** 0.1.0
 
-The current build also includes a Git-aware Changes workspace for selectable attached repositories, working and staged diffs, staging, unstaging, confirmed discard, commits, and editor/Explorer shortcuts.
+The current build also includes a Git-aware Changes workspace for selectable attached repositories, working and staged diffs, staging, unstaging, confirmed discard, commits, dedicated Codex code review, and editor/Explorer shortcuts.
 
 See the [current architecture](docs/current-architecture.md) for the release boundary and the [feature-parity audit](feature_parity.md) for the implemented matrix and prioritized gaps.
 
@@ -48,6 +48,12 @@ The goal row shows its current status, token and elapsed-time usage, and any run
 A saved local project can contain one primary folder and additional attached folders. Open a project's action menu and choose **Edit project folders** to add or remove folders or make another attached folder primary. Existing project chats and drafts migrate with the primary selection; worktree chats retain their worktree directory.
 
 The primary folder remains the Codex working directory and the automatic discovery root for `AGENTS.md`, skills, and `config.toml`. Under workspace-write permissions, every attached folder is passed to Codex as a bounded writable root. Files and subfolders from secondary roots remain durable workspace references, and the Changes inspector lets you select any distinct Git repository discovered across the attached folders.
+
+## Code review
+
+In a Git-backed Codex project chat, choose **Review** beside the composer or submit exactly `/review`. The native picker can review uncommitted changes, changes against a local or remote base branch, a recent commit, or custom instructions. SynthiaCode calls the dedicated app-server `review/start` workflow and renders its lifecycle and prioritized findings as a labeled review turn in the current chat.
+
+This release implements inline delivery. Structured severity/file-line finding objects, inline diff comments, per-hunk actions, and detached review delivery remain separate parity gaps.
 
 ## Execution permissions
 

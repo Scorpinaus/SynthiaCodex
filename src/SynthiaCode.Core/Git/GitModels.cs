@@ -49,3 +49,16 @@ public sealed record GitRepositoryState(
 }
 
 public sealed record GitCommitResult(string CommitId, string Summary);
+
+public sealed record GitReviewCommit(string Sha, string ShortSha, string Title)
+{
+    public string DisplayLabel => string.IsNullOrWhiteSpace(Title)
+        ? ShortSha
+        : $"{ShortSha}  {Title}";
+}
+
+public sealed record GitReviewCatalog(
+    string RepositoryRoot,
+    string CurrentBranch,
+    IReadOnlyList<string> BaseBranches,
+    IReadOnlyList<GitReviewCommit> Commits);

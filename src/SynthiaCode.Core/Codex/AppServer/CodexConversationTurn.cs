@@ -19,6 +19,8 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
     private bool isPromptEditing;
     private bool isFindMatch;
     private bool isCurrentFindMatch;
+    private bool isCodeReview;
+    private string reviewScope = string.Empty;
     private string editedPrompt = string.Empty;
 
     public CodexConversationTurn()
@@ -138,6 +140,41 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
 
     public bool HasUserImages => HasUserAttachments;
 
+    public bool IsCodeReview
+    {
+        get => isCodeReview;
+        set
+        {
+            if (SetProperty(ref isCodeReview, value))
+            {
+                OnPropertyChanged(nameof(CanEditPrompt));
+                OnPropertyChanged(nameof(ReviewBadgeLabel));
+            }
+        }
+    }
+
+    public string ReviewScope
+    {
+        get => reviewScope;
+        set
+        {
+            if (SetProperty(ref reviewScope, value ?? string.Empty))
+            {
+                OnPropertyChanged(nameof(HasReviewScope));
+                OnPropertyChanged(nameof(ReviewScopeDisplay));
+            }
+        }
+    }
+
+    [JsonIgnore]
+    public bool HasReviewScope => !string.IsNullOrWhiteSpace(ReviewScope);
+
+    [JsonIgnore]
+    public string ReviewBadgeLabel => "Code review";
+
+    [JsonIgnore]
+    public string ReviewScopeDisplay => HasReviewScope ? $"Scope: {ReviewScope}" : string.Empty;
+
     public bool IsSuperseded
     {
         get => isSuperseded;
@@ -197,6 +234,7 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
 
     [JsonIgnore]
     public bool CanEditPrompt =>
+        !IsCodeReview &&
         !IsSuperseded &&
         !IsPromptEditing &&
         Status != CodexTurnStatus.Running &&
@@ -263,6 +301,8 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
         StartedAt = StartedAt,
         CompletedAt = CompletedAt,
         IsSuperseded = IsSuperseded,
+        IsCodeReview = IsCodeReview,
+        ReviewScope = ReviewScope,
         Activity = [.. Activity],
         UserAttachments = [.. UserAttachments.Select(attachment => attachment.Clone())],
         GeneratedImagePaths = [.. GeneratedImagePaths]
@@ -278,7 +318,9 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
             Status = snapshot.Status,
             StartedAt = snapshot.StartedAt,
             CompletedAt = snapshot.CompletedAt,
-            IsSuperseded = snapshot.IsSuperseded
+            IsSuperseded = snapshot.IsSuperseded,
+            IsCodeReview = snapshot.IsCodeReview,
+            ReviewScope = UnicodeTextNormalizer.RepairLegacyMojibake(snapshot.ReviewScope)
         };
         foreach (var item in snapshot.Activity)
         {
@@ -396,6 +438,8 @@ public sealed class CodexConversationTurnSnapshot
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAt { get; set; }
     public bool IsSuperseded { get; set; }
+    public bool IsCodeReview { get; set; }
+    public string ReviewScope { get; set; } = string.Empty;
     public List<CodexTimelineItem> Activity { get; set; } = [];
     public List<AttachmentReference> UserAttachments { get; set; } = [];
     public List<string> GeneratedImagePaths { get; set; } = [];

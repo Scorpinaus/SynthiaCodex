@@ -132,6 +132,8 @@ public sealed class ThreadStatePersistenceUseCaseService
         StartedAt = source.StartedAt,
         CompletedAt = source.CompletedAt,
         IsSuperseded = source.IsSuperseded,
+        IsCodeReview = source.IsCodeReview,
+        ReviewScope = source.ReviewScope,
         Activity = [.. source.Activity],
         UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())],
         GeneratedImagePaths = [.. source.GeneratedImagePaths]

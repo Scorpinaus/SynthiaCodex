@@ -154,7 +154,8 @@ internal static class LegacyBehavioralTests
         .. AgentManagementTests.All,
         .. DictationTests.All,
         .. GoalModeTests.All,
-        .. MultiFolderProjectTests.All
+        .. MultiFolderProjectTests.All,
+        .. CodeReviewWorkflowTests.All
     ];
 
 static Task TestRecentProjectsAsync()
@@ -3449,6 +3450,9 @@ internal sealed class FakeGitService(string repositoryRoot) : IGitService
         return Task.FromResult(new GitRepositoryState(true, repositoryRoot, "main", [], null));
     }
 
+    public Task<GitReviewCatalog> GetReviewCatalogAsync(string workingDirectory, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new GitReviewCatalog(repositoryRoot, "main", [], []));
+
     public Task<string> GetDiffAsync(string repositoryRoot, GitChangedFile file, bool staged, CancellationToken cancellationToken = default) =>
         Task.FromResult("test diff");
 
@@ -3589,6 +3593,9 @@ internal sealed class FakeUserInteractionService : IUserInteractionService
 
     public ProjectFolderEditSelection? ProjectFolderSelection { get; set; }
 
+    public CodexReviewTarget? ReviewTargetSelection { get; set; } =
+        CodexReviewTarget.UncommittedChanges();
+
     public bool ConfirmDestructiveAction(string title, string message) => true;
 
     public string? PromptForText(string title, string message, string initialValue) => null;
@@ -3610,6 +3617,9 @@ internal sealed class FakeUserInteractionService : IUserInteractionService
         SelectedImageEditPath = path;
         return ImageEditSelection;
     }
+
+    public CodexReviewTarget? SelectCodeReviewTarget(GitReviewCatalog catalog) =>
+        ReviewTargetSelection;
 
     public ProjectFolderEditSelection? EditProjectFolders(RecentProject project) =>
         ProjectFolderSelection;

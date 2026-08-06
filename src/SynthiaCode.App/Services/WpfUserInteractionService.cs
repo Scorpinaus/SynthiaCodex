@@ -3,6 +3,8 @@ using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Git;
 using SynthiaCode.Core.Projects;
 
 namespace SynthiaCode.App.Services;
@@ -180,6 +182,22 @@ public sealed class WpfUserInteractionService : IUserInteractionService
         }
 
         return editor.ShowDialog() == true ? editor.Selection : null;
+    }
+
+    public CodexReviewTarget? SelectCodeReviewTarget(GitReviewCatalog catalog)
+    {
+        var picker = new CodeReviewWindow(catalog);
+        if (System.Windows.Application.Current?.MainWindow is { IsVisible: true } owner)
+        {
+            picker.Owner = owner;
+        }
+        else
+        {
+            picker.ShowInTaskbar = true;
+            picker.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        }
+
+        return picker.ShowDialog() == true ? picker.Selection : null;
     }
 
     public ProjectFolderEditSelection? EditProjectFolders(RecentProject project)

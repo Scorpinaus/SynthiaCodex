@@ -16,6 +16,7 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand steerCommand;
     private readonly AsyncRelayCommand alternateFollowUpCommand;
     private readonly AsyncRelayCommand toggleDictationCommand;
+    private readonly AsyncRelayCommand startCodeReviewCommand;
     private readonly RelayCommand beginPromptEditCommand;
     private readonly RelayCommand cancelPromptEditCommand;
     private readonly AsyncRelayCommand submitPromptEditCommand;
@@ -47,6 +48,7 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand stopAgentCommand;
     private readonly RelayCommand closeAgentTranscriptCommand;
     private readonly IGoalManagementActions? goalActions;
+    private readonly ICodeReviewActions? codeReviewActions;
     private readonly RelayCommand beginGoalEditCommand;
     private readonly RelayCommand cancelGoalEditCommand;
     private readonly AsyncRelayCommand saveGoalCommand;
@@ -101,10 +103,12 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
         IComposerSupportActions composerActions,
         IAgentManagementActions agentActions,
         ISpeechRecognitionService? speechRecognitionService = null,
-        IGoalManagementActions? goalActions = null)
+        IGoalManagementActions? goalActions = null,
+        ICodeReviewActions? codeReviewActions = null)
     {
         this.agentActions = agentActions;
         this.goalActions = goalActions;
+        this.codeReviewActions = codeReviewActions;
         this.speechRecognitionService = speechRecognitionService ?? UnavailableSpeechRecognitionService.Instance;
         this.speechRecognitionService.SpeechRecognized += OnSpeechRecognized;
         this.speechRecognitionService.Stopped += OnSpeechRecognitionStopped;
@@ -123,11 +127,23 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
                 }
             });
         SubmitCommand = submitCommand = new AsyncRelayCommand(
-            turnActions.SubmitAsync,
-            turnActions.CanSubmitTurn);
+            () => RoutesToCodeReview
+                ? codeReviewActions!.StartCodeReviewAsync()
+                : turnActions.SubmitAsync(),
+            () => RoutesToCodeReview
+                ? codeReviewActions!.CanStartCodeReview()
+                : turnActions.CanSubmitTurn());
         ComposerSendCommand = composerSendCommand = new AsyncRelayCommand(
-            () => IsTurnRunning ? turnActions.SteerAsync() : turnActions.SubmitAsync(),
-            () => IsTurnRunning ? turnActions.CanSteerTurn() : turnActions.CanSubmitTurn());
+            () => IsTurnRunning
+                ? turnActions.SteerAsync()
+                : RoutesToCodeReview
+                    ? codeReviewActions!.StartCodeReviewAsync()
+                    : turnActions.SubmitAsync(),
+            () => IsTurnRunning
+                ? turnActions.CanSteerTurn()
+                : RoutesToCodeReview
+                    ? codeReviewActions!.CanStartCodeReview()
+                    : turnActions.CanSubmitTurn());
         CancelCommand = cancelCommand = new AsyncRelayCommand(turnActions.CancelAsync, turnActions.CanCancelTurn);
         LoadModelsCommand = loadModelsCommand = new AsyncRelayCommand(
             composerActions.LoadModelsAsync,
@@ -139,6 +155,9 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
         ToggleDictationCommand = toggleDictationCommand = new AsyncRelayCommand(
             ToggleDictationAsync,
             () => IsDictationAvailable && !isDisposed);
+        StartCodeReviewCommand = startCodeReviewCommand = new AsyncRelayCommand(
+            () => codeReviewActions?.StartCodeReviewAsync() ?? Task.CompletedTask,
+            () => codeReviewActions?.CanStartCodeReview() == true);
         beginPromptEditCommand = new RelayCommand(
             parameter =>
             {
@@ -366,6 +385,7 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
     public ICommand SteerCommand { get; }
     public ICommand AlternateFollowUpCommand { get; }
     public ICommand ToggleDictationCommand { get; }
+    public ICommand StartCodeReviewCommand { get; }
     public ICommand BeginPromptEditCommand => beginPromptEditCommand;
     public ICommand CancelPromptEditCommand => cancelPromptEditCommand;
     public ICommand SubmitPromptEditCommand => submitPromptEditCommand;
@@ -907,6 +927,8 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
             if (SetProperty(ref prompt, value ?? string.Empty))
             {
                 SkillSelector.ReconcileText(prompt);
+                submitCommand.RaiseCanExecuteChanged();
+                composerSendCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -1654,6 +1676,7 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
         composerSendCommand.RaiseCanExecuteChanged();
         steerCommand.RaiseCanExecuteChanged();
         alternateFollowUpCommand.RaiseCanExecuteChanged();
+        startCodeReviewCommand.RaiseCanExecuteChanged();
         RaisePromptEditCommandStates();
     }
 
@@ -1854,6 +1877,10 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
         RaiseAgentCommandStates();
         RaiseGoalCommandStates();
     }
+
+    private bool RoutesToCodeReview =>
+        codeReviewActions is not null &&
+        string.Equals(Prompt.Trim(), "/review", StringComparison.OrdinalIgnoreCase);
 
     private void RaiseAgentCommandStates()
     {

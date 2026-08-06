@@ -34,7 +34,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly ThreadLifecycleUseCaseService threadLifecycle;
     private readonly ThreadStatePersistenceUseCaseService threadStatePersistence;
     private readonly TurnExecutionUseCaseService turnExecution;
+    private readonly CodeReviewUseCaseService codeReview;
     private readonly FollowUpQueueUseCaseService followUpQueue;
+    private readonly IGitService gitService;
     private readonly ProjectWorkspaceOperations projectWorkspaceOperations;
     private readonly IAppLogger logger;
     private readonly AttachmentDraftOrchestrationService attachmentDraftService;
@@ -105,7 +107,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ThreadLifecycleUseCaseService threadLifecycle,
         ThreadStatePersistenceUseCaseService threadStatePersistence,
         TurnExecutionUseCaseService turnExecution,
+        CodeReviewUseCaseService codeReview,
         FollowUpQueueUseCaseService followUpQueue,
+        IGitService gitService,
         ProjectWorkspaceOperations projectWorkspaceOperations,
         AttachmentDraftOrchestrationService attachmentDraftService,
         ISharedCodexConfigurationService sharedCodexConfigurationService,
@@ -123,7 +127,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         this.threadLifecycle = threadLifecycle;
         this.threadStatePersistence = threadStatePersistence;
         this.turnExecution = turnExecution;
+        this.codeReview = codeReview;
         this.followUpQueue = followUpQueue;
+        this.gitService = gitService;
         this.projectWorkspaceOperations = projectWorkspaceOperations;
         this.attachmentDraftService = attachmentDraftService;
         this.enableGoalMode = enableGoalMode;
@@ -189,7 +195,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             new ComposerSupportActionAdapter(this),
             new AgentManagementActionAdapter(this),
             speechRecognitionService,
-            new GoalManagementActionAdapter(this));
+            new GoalManagementActionAdapter(this),
+            new CodeReviewActionAdapter(this));
         TaskWorkspace.PropertyChanged += (_, args) => RelayTaskPropertyChanged(args.PropertyName);
 
         ApprovalQueue = new ApprovalQueueViewModel(appServerSessionCoordinator.RespondToServerRequestAsync);
@@ -835,6 +842,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ResolveHarnessId(SelectedThread) == HarnessId.Codex &&
         (Supports(HarnessCapability.Skills, SelectedThread) ||
          Supports(HarnessCapability.Configuration, SelectedThread));
+
+    public bool SupportsCodeReview =>
+        IsGitRepository &&
+        !string.IsNullOrWhiteSpace(SelectedProjectPath) &&
+        (SelectedThread is null || ResolveHarnessId(SelectedThread) == HarnessId.Codex);
 
     public string GitBranch => Git.Branch;
 
@@ -2096,6 +2108,108 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    private async Task StartCodeReviewAsync()
+    {
+        if (!CanStartCodeReview())
+        {
+            StatusMessage = IsTurnRunning
+                ? "Wait for the active Codex turn to finish before starting a review"
+                : "Code review requires an available Codex project chat";
+            return;
+        }
+
+        try
+        {
+            var workspacePath = GetActiveWorkspacePath();
+            StatusMessage = "Loading code review targets";
+            var catalog = await gitService.GetReviewCatalogAsync(workspacePath).ConfigureAwait(true);
+            var target = userInteractionService.SelectCodeReviewTarget(catalog);
+            if (target is null)
+            {
+                StatusMessage = "Code review canceled";
+                return;
+            }
+
+            StatusMessage = "Starting Codex code review";
+            await EnsureHarnessSessionAsync(HarnessId.Codex, workspacePath).ConfigureAwait(true);
+            activeThreadId = await EnsureActiveThreadAsync().ConfigureAwait(true);
+            TaskWorkspace.SubmittedPrompt = target.DisplayLabel;
+            var persistedThread = settings.ProjectThreads.FirstOrDefault(thread =>
+                string.Equals(thread.ThreadId, activeThreadId, StringComparison.Ordinal));
+            if (persistedThread is not null)
+            {
+                persistedThread.Preview = target.DisplayLabel;
+            }
+
+            var result = await codeReview.StartAsync(new CodeReviewExecutionRequest(
+                activeThreadId,
+                target,
+                snapshot => InvokeOnCapturedSynchronizationContext(
+                    () => TaskWorkspace.ApplyConversationSnapshot(snapshot)),
+                started => InvokeOnCapturedSynchronizationContext(() =>
+                {
+                    TaskWorkspace.ApplyConversationSnapshot(started.Snapshot);
+                    if (started.Status == CodexTurnStatus.Running)
+                    {
+                        UpdateThreadActivity(started.ThreadId, isRunning: true, "Reviewing");
+                        IsTurnRunning = true;
+                        activeTurnId = started.TurnId;
+                    }
+                    else
+                    {
+                        IsTurnRunning = false;
+                        activeTurnId = null;
+                    }
+                    cancelTurnCommand.RaiseCanExecuteChanged();
+                    StatusMessage = started.Status == CodexTurnStatus.Running
+                        ? "Code review running"
+                        : $"Code review {started.Status.ToString().ToLowerInvariant()}";
+                }))).ConfigureAwait(true);
+
+            TaskWorkspace.ApplyConversationSnapshot(result.Snapshot);
+            if (SelectedThread is not null)
+            {
+                SelectedThread.Preview = target.DisplayLabel;
+            }
+            if (result.Status == CodexTurnStatus.Running)
+            {
+                UpdateThreadActivity(result.ThreadId, isRunning: true, "Reviewing");
+                IsTurnRunning = true;
+                activeTurnId = result.TurnId;
+            }
+            else
+            {
+                IsTurnRunning = false;
+                activeTurnId = null;
+            }
+            if (string.Equals(TaskWorkspace.Prompt.Trim(), "/review", StringComparison.OrdinalIgnoreCase))
+            {
+                TaskWorkspace.Prompt = string.Empty;
+            }
+            cancelTurnCommand.RaiseCanExecuteChanged();
+            TaskWorkspace.RaiseCommandStates();
+            StatusMessage = result.Status == CodexTurnStatus.Running
+                ? "Code review running"
+                : $"Code review {result.Status.ToString().ToLowerInvariant()}";
+        }
+        catch (Exception ex)
+        {
+            if (!string.IsNullOrWhiteSpace(activeThreadId))
+            {
+                TaskWorkspace.ApplyConversationSnapshot(conversationWorkflow.GetSnapshot(activeThreadId));
+            }
+            IsTurnRunning = false;
+            activeTurnId = null;
+            TaskWorkspace.RaiseCommandStates();
+            StatusMessage = ex.Message;
+            logger.Log(
+                AppLogLevel.Error,
+                "codex_code_review_start_failed",
+                "Could not start the Codex code review.",
+                exception: ex);
+        }
+    }
+
 
     private static string CreateAutomaticThreadTitle(
         string submittedPrompt,
@@ -2633,6 +2747,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         Supports(HarnessCapability.StartTurn, SelectedThread) &&
         (SelectedThread is not null || Supports(HarnessCapability.CreateConversation)) &&
         TaskWorkspace.CanSubmitAttachments;
+
+    private bool CanStartCodeReview() =>
+        !IsShuttingDown &&
+        !IsTurnRunning &&
+        !string.IsNullOrWhiteSpace(SelectedProjectPath) &&
+        IsHarnessReady(SelectedThread) &&
+        (SelectedThread is not null || Supports(HarnessCapability.CreateConversation)) &&
+        (SelectedThread is null ||
+         SelectedThread is { IsArchived: false } && ResolveHarnessId(SelectedThread) == HarnessId.Codex);
 
     private bool CanCancelTurn()
     {
@@ -3531,6 +3654,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        if (IsCodeReviewLifecycleNotification(notification))
+        {
+            ApplyConversationEvent(conversationWorkflow.ApplyThreadNotification(notification));
+            return;
+        }
+
         if (Account.TryApplyNotification(notification))
         {
             if (notification.Kind is CodexAppServerNotificationKind.AccountUpdated or CodexAppServerNotificationKind.AccountLoginCompleted)
@@ -3540,6 +3669,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
     }
+
+    private static bool IsCodeReviewLifecycleNotification(CodexAppServerNotification notification) =>
+        notification.Kind is CodexAppServerNotificationKind.ItemStarted or CodexAppServerNotificationKind.ItemCompleted &&
+        notification.Params["item"] is JsonObject item &&
+        item["type"] is JsonValue typeValue &&
+        typeValue.TryGetValue<string>(out var type) &&
+        type is "enteredReviewMode" or "exitedReviewMode";
 
     private void ApplyConversationEvent(ConversationNotificationResult routed)
     {
@@ -3725,6 +3861,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(ActiveWorkspaceLabel));
         OnPropertyChanged(nameof(SupportsSkills));
         OnPropertyChanged(nameof(SupportsCodexSettings));
+        OnPropertyChanged(nameof(SupportsCodeReview));
         NotifyCodexContextChanged();
         Terminal.RefreshContext();
         _ = Git.RefreshAsync();
@@ -3882,6 +4019,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         StartedAt = source.StartedAt,
         CompletedAt = source.CompletedAt,
         IsSuperseded = source.IsSuperseded,
+        IsCodeReview = source.IsCodeReview,
+        ReviewScope = source.ReviewScope,
         Activity = [.. source.Activity],
         UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())],
         GeneratedImagePaths = [.. source.GeneratedImagePaths]
@@ -3964,6 +4103,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (mainProperty is not null)
         {
             OnPropertyChanged(mainProperty);
+            if (propertyName == nameof(GitViewModel.IsRepository))
+            {
+                OnPropertyChanged(nameof(SupportsCodeReview));
+                TaskWorkspace.RaiseCommandStates();
+            }
         }
     }
 
@@ -3982,6 +4126,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (mainProperty is not null)
         {
             OnPropertyChanged(mainProperty);
+            if (propertyName is nameof(ProjectThreadViewModel.SelectedProjectPath) or
+                nameof(ProjectThreadViewModel.SelectedThread))
+            {
+                OnPropertyChanged(nameof(SupportsCodeReview));
+                TaskWorkspace.RaiseCommandStates();
+            }
             if (propertyName is nameof(ProjectThreadViewModel.SelectedProjectPath) or
                 nameof(ProjectThreadViewModel.ActiveWorkspacePath) or
                 nameof(ProjectThreadViewModel.ActiveWorkspaceLabel))
@@ -4096,6 +4246,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         public bool CanSubmitTurn() => owner.CanSubmitTurn();
         public bool CanCancelTurn() => owner.CanCancelTurn();
         public bool CanSteerTurn() => owner.CanSteerTurn();
+    }
+
+    private sealed class CodeReviewActionAdapter(MainViewModel owner) : ICodeReviewActions
+    {
+        public Task StartCodeReviewAsync() => owner.StartCodeReviewAsync();
+        public bool CanStartCodeReview() => owner.CanStartCodeReview();
     }
 
     private sealed class FollowUpManagementActionAdapter(MainViewModel owner) : IFollowUpManagementActions

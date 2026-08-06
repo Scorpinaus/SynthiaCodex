@@ -1,3 +1,5 @@
+using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Git;
 using SynthiaCode.Core.Projects;
 
 namespace SynthiaCode.App.Services;
@@ -19,6 +21,8 @@ public interface IUserInteractionService
     void ShowImagePreview(string path);
 
     GeneratedImageEditSelection? SelectGeneratedImageEdit(string path);
+
+    CodexReviewTarget? SelectCodeReviewTarget(GitReviewCatalog catalog);
 
     ProjectFolderEditSelection? EditProjectFolders(RecentProject project);
 

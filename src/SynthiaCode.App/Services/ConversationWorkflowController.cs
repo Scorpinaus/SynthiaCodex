@@ -340,9 +340,10 @@ public sealed record ConversationWorkspaceSnapshot(
         StartedAt = source.StartedAt,
         CompletedAt = source.CompletedAt,
         IsSuperseded = source.IsSuperseded,
+        IsCodeReview = source.IsCodeReview,
+        ReviewScope = source.ReviewScope,
         Activity = [.. source.Activity.Select(item => item with { })],
         UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())],
         GeneratedImagePaths = [.. source.GeneratedImagePaths]
     };
 }
-

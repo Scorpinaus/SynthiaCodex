@@ -100,6 +100,13 @@ public static class CodexHarnessEventTranslator
         DateTimeOffset timestamp)
     {
         var itemType = ReadString(notification.Params, "item.type") ?? notification.Method;
+        if (itemType is "enteredReviewMode" or "exitedReviewMode")
+        {
+            // These carry protocol-specific review scope/findings and are projected
+            // directly by the application instead of as generic tool activity.
+            return [];
+        }
+
         var detail = ReadString(notification.Params, "item.text") ??
             ReadString(notification.Params, "item.command") ??
             ReadString(notification.Params, "item.query") ??

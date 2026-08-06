@@ -330,6 +330,12 @@ internal static class MultiFolderProjectTests
             return Task.FromResult(new GitRepositoryState(true, root, PathsEqual(root, secondary) ? "docs" : "main", [file], null));
         }
 
+        public Task<GitReviewCatalog> GetReviewCatalogAsync(string workingDirectory, CancellationToken cancellationToken = default)
+        {
+            var root = PathsEqual(workingDirectory, secondary) ? secondary : primary;
+            return Task.FromResult(new GitReviewCatalog(root, PathsEqual(root, secondary) ? "docs" : "main", [], []));
+        }
+
         public Task<string> GetDiffAsync(string repositoryRoot, GitChangedFile file, bool staged, CancellationToken cancellationToken = default) =>
             Task.FromResult($"{repositoryRoot}:{file.Path}");
 

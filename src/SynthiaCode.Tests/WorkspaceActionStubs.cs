@@ -177,6 +177,7 @@ internal static class WorkspaceActionStubs
         var workflow = new ConversationWorkflowController(threadStore, threadWorkspace, queues);
         var turns = new TurnExecutionUseCaseService(
             harnessOperations, workflow, lifecycle, persistence);
+        var reviews = new CodeReviewUseCaseService(appServerSessionCoordinator, workflow);
         var queue = new FollowUpQueueUseCaseService(
             harnessOperations, workflow, settingsStore, threadWorkspace, queues);
         var attachments = new AttachmentDraftOrchestrationService(
@@ -188,7 +189,7 @@ internal static class WorkspaceActionStubs
             settingsStore, codexDiscoveryService, appServerSessionCoordinator, harnessRuntime,
             authService, folderPicker,
             userInteractionService, themeService, codexCliUtilityRunner, terminalService, logger,
-            workflow, lifecycle, persistence, turns, queue,
+            workflow, lifecycle, persistence, turns, reviews, queue, gitService,
             new ProjectWorkspaceOperations(gitService, worktreeService, recentProjectService, generalWorkspaceService),
             attachments,
             new SharedCodexConfigurationService(Path.Combine(Path.GetTempPath(), "synthiacode-tests-codex-home")),

@@ -56,6 +56,7 @@ public sealed class AppServices
         ThreadLifecycleUseCaseService threadLifecycleService,
         ThreadStatePersistenceUseCaseService threadStatePersistenceService,
         TurnExecutionUseCaseService turnExecutionService,
+        CodeReviewUseCaseService codeReviewService,
         FollowUpQueueUseCaseService followUpQueueService,
         ProjectWorkspaceOperations projectWorkspaceOperations,
         AttachmentDraftOrchestrationService attachmentDraftService,
@@ -84,6 +85,7 @@ public sealed class AppServices
         ThreadLifecycleService = threadLifecycleService;
         ThreadStatePersistenceService = threadStatePersistenceService;
         TurnExecutionService = turnExecutionService;
+        CodeReviewService = codeReviewService;
         FollowUpQueueService = followUpQueueService;
         ProjectWorkspaceOperations = projectWorkspaceOperations;
         AttachmentDraftService = attachmentDraftService;
@@ -134,6 +136,7 @@ public sealed class AppServices
     public ThreadStatePersistenceUseCaseService ThreadStatePersistenceService { get; }
 
     public TurnExecutionUseCaseService TurnExecutionService { get; }
+    public CodeReviewUseCaseService CodeReviewService { get; }
     public FollowUpQueueUseCaseService FollowUpQueueService { get; }
 
     public ProjectWorkspaceOperations ProjectWorkspaceOperations { get; }
@@ -195,6 +198,9 @@ public sealed class AppServices
             conversationWorkflow,
             threadLifecycleService,
             threadStatePersistenceService);
+        var codeReviewService = new CodeReviewUseCaseService(
+            appServerSessionCoordinator,
+            conversationWorkflow);
         var followUpQueueService = new FollowUpQueueUseCaseService(
             harnessOperations,
             conversationWorkflow,
@@ -236,6 +242,7 @@ public sealed class AppServices
             threadLifecycleService,
             threadStatePersistenceService,
             turnExecutionService,
+            codeReviewService,
             followUpQueueService,
             projectWorkspaceOperations,
             attachmentDraftService,

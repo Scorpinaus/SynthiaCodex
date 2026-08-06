@@ -157,6 +157,11 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
     public Task<CodexTurnStartResult> StartTurnAsync(CodexTurnStartRequest request, CancellationToken cancellationToken = default) =>
         GetConnectedClient().StartTurnAsync(request, cancellationToken);
 
+    public Task<CodexReviewStartResult> StartReviewAsync(
+        CodexReviewStartRequest request,
+        CancellationToken cancellationToken = default) =>
+        GetConnectedClient().StartReviewAsync(request, cancellationToken);
+
     public Task CancelTurnAsync(string threadId, string turnId, CancellationToken cancellationToken = default) =>
         GetConnectedClient().CancelTurnAsync(threadId, turnId, cancellationToken);
 

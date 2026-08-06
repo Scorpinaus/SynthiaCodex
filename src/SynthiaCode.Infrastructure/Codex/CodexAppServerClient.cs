@@ -899,6 +899,44 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         return new CodexTurnStartResult(turnId);
     }
 
+    public async Task<CodexReviewStartResult> StartReviewAsync(
+        CodexReviewStartRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.ThreadId))
+        {
+            throw new ArgumentException("Thread ID is required.", nameof(request));
+        }
+        ArgumentNullException.ThrowIfNull(request.Target);
+
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var parameters = new JsonObject
+        {
+            ["threadId"] = request.ThreadId,
+            ["delivery"] = request.Delivery switch
+            {
+                CodexReviewDelivery.Inline => "inline",
+                CodexReviewDelivery.Detached => "detached",
+                _ => throw new ArgumentOutOfRangeException(nameof(request), request.Delivery, "Unknown review delivery.")
+            },
+            ["target"] = WriteReviewTarget(request.Target)
+        };
+        var result = await SendRequestAsync("review/start", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
+        var turnId = ReadString(result, "turn.id");
+        var reviewThreadId = ReadString(result, "reviewThreadId");
+        if (string.IsNullOrWhiteSpace(turnId))
+        {
+            throw new CodexAppServerProtocolException("review/start response did not include result.turn.id.");
+        }
+        if (string.IsNullOrWhiteSpace(reviewThreadId))
+        {
+            throw new CodexAppServerProtocolException("review/start response did not include result.reviewThreadId.");
+        }
+
+        return new CodexReviewStartResult(turnId, reviewThreadId);
+    }
+
     public async Task CancelTurnAsync(string threadId, string turnId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(threadId))
@@ -921,6 +959,31 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             },
             cancellationToken).ConfigureAwait(false);
     }
+
+    private static JsonObject WriteReviewTarget(CodexReviewTarget target) => target.Kind switch
+    {
+        CodexReviewTargetKind.UncommittedChanges => new JsonObject
+        {
+            ["type"] = "uncommittedChanges"
+        },
+        CodexReviewTargetKind.BaseBranch => new JsonObject
+        {
+            ["type"] = "baseBranch",
+            ["branch"] = target.Branch
+        },
+        CodexReviewTargetKind.Commit => new JsonObject
+        {
+            ["type"] = "commit",
+            ["sha"] = target.Sha,
+            ["title"] = target.Title
+        },
+        CodexReviewTargetKind.Custom => new JsonObject
+        {
+            ["type"] = "custom",
+            ["instructions"] = target.Instructions
+        },
+        _ => throw new ArgumentOutOfRangeException(nameof(target), target.Kind, "Unknown review target.")
+    };
 
     public Task RespondToServerRequestAsync(
         CodexServerRequest request,
@@ -2018,6 +2081,8 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             var assistantMessages = new List<string>();
             var generatedImagePaths = new List<string>();
             var activity = new List<CodexTimelineItem>();
+            var isCodeReview = false;
+            var reviewScope = string.Empty;
             if (turn["items"] is JsonArray items)
             {
                 foreach (var item in items.OfType<JsonObject>())
@@ -2050,6 +2115,20 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                         case "collabAgentToolCall":
                             activity.Add(ParseCollaborationActivity(item));
                             break;
+                        case "enteredReviewMode":
+                            isCodeReview = true;
+                            reviewScope = ReadString(item, "review") ?? reviewScope;
+                            activity.Add(ParseReviewActivity(item, completed: false));
+                            break;
+                        case "exitedReviewMode":
+                            isCodeReview = true;
+                            var review = ReadString(item, "review");
+                            if (!string.IsNullOrWhiteSpace(review))
+                            {
+                                assistantMessages.Add(UnicodeTextNormalizer.RepairLegacyMojibake(review));
+                            }
+                            activity.Add(ParseReviewActivity(item, completed: true));
+                            break;
                     }
                 }
             }
@@ -2063,11 +2142,29 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                 StartedAt = ReadUnixTimestamp(turn, "startedAt") ?? DateTimeOffset.UtcNow,
                 CompletedAt = ReadUnixTimestamp(turn, "completedAt"),
                 Activity = activity,
-                GeneratedImagePaths = generatedImagePaths
+                GeneratedImagePaths = generatedImagePaths,
+                IsCodeReview = isCodeReview,
+                ReviewScope = reviewScope
             });
         }
 
         return parsed;
+    }
+
+    private static CodexTimelineItem ParseReviewActivity(JsonObject item, bool completed)
+    {
+        var itemId = ReadString(item, "id") ?? $"review:{Guid.NewGuid():N}";
+        var detail = UnicodeTextNormalizer.RepairLegacyMojibake(ReadString(item, "review") ?? string.Empty);
+        return new CodexTimelineItem(
+            CodexTimelineItemKind.CodeReview,
+            completed ? "Code review completed" : "Code review started",
+            detail,
+            "item/codeReview",
+            DateTimeOffset.UtcNow)
+        {
+            ItemId = itemId,
+            ActivityKey = $"review:{itemId}"
+        };
     }
 
     private static CodexTimelineItem ParseCollaborationActivity(JsonObject item)

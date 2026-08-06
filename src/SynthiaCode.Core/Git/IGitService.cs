@@ -4,6 +4,10 @@ public interface IGitService
 {
     Task<GitRepositoryState> GetRepositoryStateAsync(string workingDirectory, CancellationToken cancellationToken = default);
 
+    Task<GitReviewCatalog> GetReviewCatalogAsync(
+        string workingDirectory,
+        CancellationToken cancellationToken = default);
+
     Task<string> GetDiffAsync(
         string repositoryRoot,
         GitChangedFile file,

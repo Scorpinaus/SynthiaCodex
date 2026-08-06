@@ -151,7 +151,8 @@ internal static class LegacyBehavioralTests
         .. SkillsSettingsTests.All,
         .. NativeSkillInvocationTests.All,
         .. AgentManagementTests.All,
-        .. DictationTests.All
+        .. DictationTests.All,
+        .. GoalModeTests.All
     ];
 
 static Task TestRecentProjectsAsync()

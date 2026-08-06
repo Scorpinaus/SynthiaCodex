@@ -590,10 +590,178 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
+                <Border x:Name="GoalProgressRow"
+                        Grid.Row="0"
+                        Margin="0,0,0,10"
+                        Padding="10"
+                        Background="{DynamicResource FieldBrush}"
+                        BorderBrush="{DynamicResource LineBrush}"
+                        BorderThickness="1"
+                        CornerRadius="7"
+                        Visibility="{Binding TaskWorkspace.IsGoalFeatureAvailable, Converter={StaticResource BooleanToVisibilityConverter}}"
+                        AutomationProperties.Name="Goal progress">
+                    <StackPanel>
+                        <TextBlock Text="Loading goal..."
+                                   Foreground="{DynamicResource MutedInkBrush}"
+                                   Visibility="{Binding TaskWorkspace.IsGoalLoading, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                   AutomationProperties.LiveSetting="Polite"/>
+
+                        <Grid>
+                            <Grid.Style>
+                                <Style TargetType="{x:Type Grid}">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding TaskWorkspace.HasGoal}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding TaskWorkspace.IsGoalEditing}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding TaskWorkspace.IsGoalLoading}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Style>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Goal mode" FontWeight="SemiBold"/>
+                                <TextBlock Text="Give Codex a persistent outcome for long-running work."
+                                           Foreground="{DynamicResource MutedInkBrush}"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           Margin="0,2,8,0"/>
+                            </StackPanel>
+                            <Button x:Name="SetGoalButton"
+                                    Grid.Column="1"
+                                    Content="Set goal"
+                                    Command="{Binding TaskWorkspace.BeginGoalEditCommand}"
+                                    Style="{StaticResource CompactButton}"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.Name="Set chat goal"/>
+                        </Grid>
+
+                        <Grid>
+                            <Grid.Style>
+                                <Style TargetType="{x:Type Grid}">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding TaskWorkspace.HasGoal}" Value="True"/>
+                                                <Condition Binding="{Binding TaskWorkspace.IsGoalEditing}" Value="False"/>
+                                            </MultiDataTrigger.Conditions>
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </MultiDataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Style>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Goal" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    <Border Style="{StaticResource StatePill}"
+                                            Margin="8,0,0,0"
+                                            AutomationProperties.Name="{Binding TaskWorkspace.GoalStatusAutomationName}">
+                                        <TextBlock Text="{Binding TaskWorkspace.GoalStatusLabel}" FontSize="11"/>
+                                    </Border>
+                                </StackPanel>
+                                <TextBlock x:Name="GoalObjectiveText"
+                                           Text="{Binding TaskWorkspace.GoalObjective}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,6,12,0"
+                                           AutomationProperties.Name="Goal objective"/>
+                                <TextBlock Text="{Binding TaskWorkspace.GoalUsageSummary}"
+                                           Foreground="{DynamicResource MutedInkBrush}"
+                                           FontSize="11"
+                                           Margin="0,4,0,0"/>
+                            </StackPanel>
+                            <WrapPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Top">
+                                <Button x:Name="GoalToggleButton"
+                                        Content="{Binding TaskWorkspace.GoalToggleActionLabel}"
+                                        Command="{Binding TaskWorkspace.ToggleGoalStatusCommand}"
+                                        Style="{StaticResource CompactButton}"
+                                        AutomationProperties.Name="Pause or resume goal"/>
+                                <Button x:Name="GoalEditButton"
+                                        Content="Edit"
+                                        Command="{Binding TaskWorkspace.BeginGoalEditCommand}"
+                                        Style="{StaticResource CompactButton}"
+                                        Margin="4,0,0,0"
+                                        AutomationProperties.Name="Edit goal"/>
+                                <Button x:Name="GoalClearButton"
+                                        Content="Clear"
+                                        Command="{Binding TaskWorkspace.ClearGoalCommand}"
+                                        Style="{StaticResource CompactButton}"
+                                        Margin="4,0,0,0"
+                                        AutomationProperties.Name="Clear goal"/>
+                            </WrapPanel>
+                        </Grid>
+
+                        <StackPanel Visibility="{Binding TaskWorkspace.IsGoalEditing, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <TextBlock Text="Goal objective" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                            <TextBox x:Name="GoalObjectiveEditor"
+                                     Text="{Binding TaskWorkspace.GoalDraft, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     AcceptsReturn="True"
+                                     MinHeight="64"
+                                     MaxHeight="130"
+                                     MaxLength="4000"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     Padding="8"
+                                     AutomationProperties.Name="Goal objective editor"/>
+                            <Grid Margin="0,5,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding TaskWorkspace.GoalEditorValidationMessage}"
+                                           Foreground="{DynamicResource DangerBrush}"
+                                           TextWrapping="Wrap"
+                                           AutomationProperties.LiveSetting="Polite"/>
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding TaskWorkspace.GoalCharacterCount}"
+                                           Foreground="{DynamicResource MutedInkBrush}"
+                                           FontSize="11"/>
+                            </Grid>
+                            <WrapPanel HorizontalAlignment="Right" Margin="0,7,0,0">
+                                <Button Content="Cancel"
+                                        Command="{Binding TaskWorkspace.CancelGoalEditCommand}"
+                                        Style="{StaticResource CompactButton}"
+                                        AutomationProperties.Name="Cancel goal edit"/>
+                                <Button x:Name="SaveGoalButton"
+                                        Content="Save goal"
+                                        Command="{Binding TaskWorkspace.SaveGoalCommand}"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Margin="6,0,0,0"
+                                        AutomationProperties.Name="Save chat goal"/>
+                            </WrapPanel>
+                        </StackPanel>
+
+                        <TextBlock Text="{Binding TaskWorkspace.GoalError}"
+                                   Foreground="{DynamicResource DangerBrush}"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"
+                                   Margin="0,6,0,0"
+                                   Visibility="{Binding TaskWorkspace.HasGoalError, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                   AutomationProperties.LiveSetting="Polite"/>
+                    </StackPanel>
+                </Border>
+
                 <ItemsControl x:Name="SelectedSkillsList"
-                              Grid.Row="0"
+                              Grid.Row="1"
                               ItemsSource="{Binding TaskWorkspace.SkillSelector.SelectedSkills}"
                               Margin="0,0,0,8"
                               Visibility="{Binding TaskWorkspace.SkillSelector.HasSelectedSkills, Converter={StaticResource BooleanToVisibilityConverter}}"
@@ -632,7 +800,7 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <Grid x:Name="PromptInputPanel" Grid.Row="2">
+                <Grid x:Name="PromptInputPanel" Grid.Row="3">
                     <TextBox x:Name="PromptBox"
                              Text="{Binding TaskWorkspace.Prompt, UpdateSourceTrigger=PropertyChanged}"
                              AcceptsReturn="True"
@@ -662,7 +830,7 @@
                 </Grid>
 
                 <StackPanel x:Name="AttachmentPreviewPanel"
-                            Grid.Row="1"
+                            Grid.Row="2"
                             Margin="0,0,0,8"
                             Visibility="{Binding TaskWorkspace.HasAttachments, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
@@ -704,7 +872,7 @@
                                AutomationProperties.LiveSetting="Polite"/>
                 </StackPanel>
 
-                <Grid Grid.Row="3" Margin="0,10,0,0">
+                <Grid Grid.Row="4" Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>

@@ -92,6 +92,109 @@ public sealed record CodexThreadForkResult(
     string ThreadId,
     CodexActivePermissionProfile? ActivePermissionProfile = null);
 
+public enum CodexThreadGoalStatus
+{
+    Active,
+    Paused,
+    Blocked,
+    UsageLimited,
+    BudgetLimited,
+    Complete
+}
+
+public static class CodexThreadGoalStatusExtensions
+{
+    public static string ToProtocolValue(this CodexThreadGoalStatus status) => status switch
+    {
+        CodexThreadGoalStatus.Active => "active",
+        CodexThreadGoalStatus.Paused => "paused",
+        CodexThreadGoalStatus.Blocked => "blocked",
+        CodexThreadGoalStatus.UsageLimited => "usageLimited",
+        CodexThreadGoalStatus.BudgetLimited => "budgetLimited",
+        CodexThreadGoalStatus.Complete => "complete",
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown goal status.")
+    };
+
+    public static CodexThreadGoalStatus ParseThreadGoalStatus(this string value) => value switch
+    {
+        "active" => CodexThreadGoalStatus.Active,
+        "paused" => CodexThreadGoalStatus.Paused,
+        "blocked" => CodexThreadGoalStatus.Blocked,
+        "usageLimited" => CodexThreadGoalStatus.UsageLimited,
+        "budgetLimited" => CodexThreadGoalStatus.BudgetLimited,
+        "complete" => CodexThreadGoalStatus.Complete,
+        _ => throw new InvalidDataException($"Codex returned an unknown goal status: {value}.")
+    };
+
+    public static string ToDisplayName(this CodexThreadGoalStatus status) => status switch
+    {
+        CodexThreadGoalStatus.Active => "Active",
+        CodexThreadGoalStatus.Paused => "Paused",
+        CodexThreadGoalStatus.Blocked => "Blocked",
+        CodexThreadGoalStatus.UsageLimited => "Usage limited",
+        CodexThreadGoalStatus.BudgetLimited => "Budget limited",
+        CodexThreadGoalStatus.Complete => "Complete",
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown goal status.")
+    };
+}
+
+public sealed record CodexThreadGoal(
+    string ThreadId,
+    string Objective,
+    CodexThreadGoalStatus Status,
+    long TokensUsed,
+    long TimeUsedSeconds,
+    long CreatedAt,
+    long UpdatedAt,
+    long? TokenBudget = null);
+
+public sealed record CodexThreadGoalSetRequest(
+    string ThreadId,
+    string? Objective = null,
+    CodexThreadGoalStatus? Status = null,
+    long? TokenBudget = null,
+    bool IncludeTokenBudget = false);
+
+public static class CodexThreadGoalJson
+{
+    public static CodexThreadGoal Parse(JsonObject value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        var threadId = ReadRequiredString(value, "threadId");
+        var objective = ReadRequiredString(value, "objective");
+        if (objective.Length > 4_000)
+        {
+            throw new InvalidDataException("Codex returned a goal objective longer than 4,000 characters.");
+        }
+
+        var tokenBudget = value["tokenBudget"] is JsonValue budgetValue &&
+            budgetValue.TryGetValue<long>(out var parsedBudget)
+                ? parsedBudget
+                : (long?)null;
+        return new CodexThreadGoal(
+            threadId,
+            objective,
+            ReadRequiredString(value, "status").ParseThreadGoalStatus(),
+            ReadRequiredLong(value, "tokensUsed"),
+            ReadRequiredLong(value, "timeUsedSeconds"),
+            ReadRequiredLong(value, "createdAt"),
+            ReadRequiredLong(value, "updatedAt"),
+            tokenBudget);
+    }
+
+    private static string ReadRequiredString(JsonObject value, string propertyName) =>
+        value[propertyName] is JsonValue property &&
+        property.TryGetValue<string>(out var text) &&
+        !string.IsNullOrWhiteSpace(text)
+            ? text
+            : throw new InvalidDataException($"Codex goal response is missing {propertyName}.");
+
+    private static long ReadRequiredLong(JsonObject value, string propertyName) =>
+        value[propertyName] is JsonValue property && property.TryGetValue<long>(out var number)
+            ? number
+            : throw new InvalidDataException($"Codex goal response is missing {propertyName}.");
+}
+
 public abstract record CodexUserInput;
 
 public sealed record CodexTextInput(string Text) : CodexUserInput;
@@ -219,6 +322,8 @@ public enum CodexAppServerNotificationKind
     ThreadStarted,
     ThreadArchived,
     ThreadUnarchived,
+    ThreadGoalUpdated,
+    ThreadGoalCleared,
     ThreadTokenUsageUpdated,
     ThreadCompacted,
     TurnStarted,
@@ -241,6 +346,8 @@ public static class CodexAppServerNotificationMethods
     public const string ThreadStarted = "thread/started";
     public const string ThreadArchived = "thread/archived";
     public const string ThreadUnarchived = "thread/unarchived";
+    public const string ThreadGoalUpdated = "thread/goal/updated";
+    public const string ThreadGoalCleared = "thread/goal/cleared";
     public const string ThreadTokenUsageUpdated = "thread/tokenUsage/updated";
     public const string ThreadCompacted = "thread/compacted";
     public const string TurnStarted = "turn/started";
@@ -315,6 +422,8 @@ public sealed record CodexAppServerNotification(
         CodexAppServerNotificationMethods.ThreadStarted => CodexAppServerNotificationKind.ThreadStarted,
         CodexAppServerNotificationMethods.ThreadArchived => CodexAppServerNotificationKind.ThreadArchived,
         CodexAppServerNotificationMethods.ThreadUnarchived => CodexAppServerNotificationKind.ThreadUnarchived,
+        CodexAppServerNotificationMethods.ThreadGoalUpdated => CodexAppServerNotificationKind.ThreadGoalUpdated,
+        CodexAppServerNotificationMethods.ThreadGoalCleared => CodexAppServerNotificationKind.ThreadGoalCleared,
         CodexAppServerNotificationMethods.ThreadTokenUsageUpdated => CodexAppServerNotificationKind.ThreadTokenUsageUpdated,
         CodexAppServerNotificationMethods.ThreadCompacted => CodexAppServerNotificationKind.ThreadCompacted,
         CodexAppServerNotificationMethods.TurnStarted => CodexAppServerNotificationKind.TurnStarted,

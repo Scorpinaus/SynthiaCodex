@@ -136,6 +136,21 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
     public Task SetThreadNameAsync(string threadId, string name, CancellationToken cancellationToken = default) =>
         GetConnectedClient().SetThreadNameAsync(threadId, name, cancellationToken);
 
+    public Task<CodexThreadGoal> SetThreadGoalAsync(
+        CodexThreadGoalSetRequest request,
+        CancellationToken cancellationToken = default) =>
+        GetConnectedClient().SetThreadGoalAsync(request, cancellationToken);
+
+    public Task<CodexThreadGoal?> GetThreadGoalAsync(
+        string threadId,
+        CancellationToken cancellationToken = default) =>
+        GetConnectedClient().GetThreadGoalAsync(threadId, cancellationToken);
+
+    public Task<bool> ClearThreadGoalAsync(
+        string threadId,
+        CancellationToken cancellationToken = default) =>
+        GetConnectedClient().ClearThreadGoalAsync(threadId, cancellationToken);
+
     public Task<CodexTurnSteerResult> SteerTurnAsync(CodexTurnSteerRequest request, CancellationToken cancellationToken = default) =>
         GetConnectedClient().SteerTurnAsync(request, cancellationToken);
 

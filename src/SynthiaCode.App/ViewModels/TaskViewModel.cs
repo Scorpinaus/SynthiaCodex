@@ -46,6 +46,12 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand steerAgentCommand;
     private readonly AsyncRelayCommand stopAgentCommand;
     private readonly RelayCommand closeAgentTranscriptCommand;
+    private readonly IGoalManagementActions? goalActions;
+    private readonly RelayCommand beginGoalEditCommand;
+    private readonly RelayCommand cancelGoalEditCommand;
+    private readonly AsyncRelayCommand saveGoalCommand;
+    private readonly AsyncRelayCommand toggleGoalStatusCommand;
+    private readonly AsyncRelayCommand clearGoalCommand;
     private readonly List<CodexConversationTurn> findMatches = [];
     private readonly Dictionary<string, AgentThreadViewModel> agentsByThread = new(StringComparer.Ordinal);
     private ConversationWorkspaceSnapshot conversation = ConversationWorkspaceSnapshot.Empty;
@@ -79,6 +85,14 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
     private bool isDictating;
     private bool isDisposed;
     private string dictationStatusText = string.Empty;
+    private CodexThreadGoal? goal;
+    private string goalDraft = string.Empty;
+    private string goalError = string.Empty;
+    private bool isGoalFeatureAvailable;
+    private bool isGoalSupported;
+    private bool isGoalLoading;
+    private bool isGoalEditing;
+    private bool isGoalBusy;
 
     public TaskViewModel(
         ITurnExecutionActions turnActions,
@@ -86,9 +100,11 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
         IConversationHistoryActions historyActions,
         IComposerSupportActions composerActions,
         IAgentManagementActions agentActions,
-        ISpeechRecognitionService? speechRecognitionService = null)
+        ISpeechRecognitionService? speechRecognitionService = null,
+        IGoalManagementActions? goalActions = null)
     {
         this.agentActions = agentActions;
+        this.goalActions = goalActions;
         this.speechRecognitionService = speechRecognitionService ?? UnavailableSpeechRecognitionService.Instance;
         this.speechRecognitionService.SpeechRecognized += OnSpeechRecognized;
         this.speechRecognitionService.Stopped += OnSpeechRecognitionStopped;
@@ -289,6 +305,11 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
         SteerAgentCommand = steerAgentCommand = new AsyncRelayCommand(SteerAgentAsync, CanSteerAgent);
         StopAgentCommand = stopAgentCommand = new AsyncRelayCommand(StopAgentAsync, CanStopAgent);
         CloseAgentTranscriptCommand = closeAgentTranscriptCommand = new RelayCommand(CloseAgentTranscript);
+        BeginGoalEditCommand = beginGoalEditCommand = new RelayCommand(BeginGoalEdit, CanBeginGoalEdit);
+        CancelGoalEditCommand = cancelGoalEditCommand = new RelayCommand(CancelGoalEdit, () => IsGoalEditing && !IsGoalBusy);
+        SaveGoalCommand = saveGoalCommand = new AsyncRelayCommand(SaveGoalAsync, CanSaveGoal);
+        ToggleGoalStatusCommand = toggleGoalStatusCommand = new AsyncRelayCommand(ToggleGoalStatusAsync, CanToggleGoalStatus);
+        ClearGoalCommand = clearGoalCommand = new AsyncRelayCommand(ClearGoalAsync, CanClearGoal);
     }
 
     public ObservableCollection<CodexTimelineItem> TimelineItems => timelineItems;
@@ -373,6 +394,11 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
     public ICommand SteerAgentCommand { get; }
     public ICommand StopAgentCommand { get; }
     public ICommand CloseAgentTranscriptCommand { get; }
+    public ICommand BeginGoalEditCommand { get; }
+    public ICommand CancelGoalEditCommand { get; }
+    public ICommand SaveGoalCommand { get; }
+    public ICommand ToggleGoalStatusCommand { get; }
+    public ICommand ClearGoalCommand { get; }
 
     public bool IsDictationAvailable => speechRecognitionService.Availability.IsAvailable;
 
@@ -410,6 +436,395 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
                 : "Start dictation";
 
     public string DictationAutomationName => IsDictating ? "Stop dictation" : "Start dictation";
+
+    public CodexThreadGoal? Goal => goal;
+
+    public bool IsGoalFeatureAvailable
+    {
+        get => isGoalFeatureAvailable;
+        private set => SetProperty(ref isGoalFeatureAvailable, value);
+    }
+
+    public bool IsGoalSupported
+    {
+        get => isGoalSupported;
+        private set
+        {
+            if (SetProperty(ref isGoalSupported, value))
+            {
+                RaiseGoalCommandStates();
+            }
+        }
+    }
+
+    public bool IsGoalLoading
+    {
+        get => isGoalLoading;
+        private set
+        {
+            if (SetProperty(ref isGoalLoading, value))
+            {
+                RaiseGoalCommandStates();
+            }
+        }
+    }
+
+    public bool IsGoalEditing
+    {
+        get => isGoalEditing;
+        private set
+        {
+            if (SetProperty(ref isGoalEditing, value))
+            {
+                OnPropertyChanged(nameof(GoalEditorValidationMessage));
+                RaiseGoalCommandStates();
+            }
+        }
+    }
+
+    public bool IsGoalBusy
+    {
+        get => isGoalBusy;
+        private set
+        {
+            if (SetProperty(ref isGoalBusy, value))
+            {
+                RaiseGoalCommandStates();
+            }
+        }
+    }
+
+    public string GoalDraft
+    {
+        get => goalDraft;
+        set
+        {
+            if (SetProperty(ref goalDraft, value ?? string.Empty))
+            {
+                OnPropertyChanged(nameof(GoalEditorValidationMessage));
+                OnPropertyChanged(nameof(GoalCharacterCount));
+                saveGoalCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string GoalError
+    {
+        get => goalError;
+        private set
+        {
+            if (SetProperty(ref goalError, value ?? string.Empty))
+            {
+                OnPropertyChanged(nameof(HasGoalError));
+            }
+        }
+    }
+
+    public bool HasGoal => Goal is not null;
+
+    public bool HasGoalError => !string.IsNullOrWhiteSpace(GoalError);
+
+    public string GoalObjective => Goal?.Objective ?? string.Empty;
+
+    public string GoalStatusLabel => Goal?.Status.ToDisplayName() ?? string.Empty;
+
+    public string GoalStatusAutomationName => HasGoal ? $"Goal status: {GoalStatusLabel}" : "No goal set";
+
+    public string GoalToggleActionLabel => Goal?.Status == CodexThreadGoalStatus.Active ? "Pause" : "Resume";
+
+    public string GoalUsageSummary
+    {
+        get
+        {
+            if (Goal is null)
+            {
+                return string.Empty;
+            }
+
+            var tokens = Goal.TokenBudget is > 0
+                ? $"{FormatCompactTokenCount(Goal.TokensUsed)}/{FormatCompactTokenCount(Goal.TokenBudget.Value)} tokens"
+                : $"{FormatCompactTokenCount(Goal.TokensUsed)} tokens";
+            return $"{tokens} | {FormatGoalDuration(Goal.TimeUsedSeconds)}";
+        }
+    }
+
+    public string GoalCharacterCount => $"{GoalDraft.Length:N0}/4,000";
+
+    public string GoalEditorValidationMessage => !IsGoalEditing
+        ? string.Empty
+        : string.IsNullOrWhiteSpace(GoalDraft)
+            ? "Enter a goal objective."
+            : GoalDraft.Length > 4_000
+                ? "Goal objectives must be 4,000 characters or fewer."
+                : string.Empty;
+
+    public void ResetGoalContext(bool isCodexThread)
+    {
+        goal = null;
+        goalDraft = string.Empty;
+        goalError = string.Empty;
+        isGoalLoading = false;
+        isGoalEditing = false;
+        isGoalBusy = false;
+        isGoalFeatureAvailable = isCodexThread;
+        isGoalSupported = isCodexThread;
+        RaiseGoalPropertiesChanged();
+    }
+
+    public void SetGoalLoading()
+    {
+        if (!IsGoalFeatureAvailable)
+        {
+            return;
+        }
+
+        GoalError = string.Empty;
+        IsGoalLoading = true;
+    }
+
+    public void ApplyGoal(CodexThreadGoal? value)
+    {
+        goal = value;
+        isGoalSupported = true;
+        if (!IsGoalEditing)
+        {
+            goalDraft = value?.Objective ?? string.Empty;
+        }
+        GoalError = string.Empty;
+        IsGoalLoading = false;
+        RaiseGoalPropertiesChanged();
+    }
+
+    public void SetGoalLoadError(string message)
+    {
+        IsGoalLoading = false;
+        GoalError = message;
+        RaiseGoalCommandStates();
+    }
+
+    public void SetGoalUnsupported(string message)
+    {
+        IsGoalLoading = false;
+        IsGoalSupported = false;
+        GoalError = message;
+    }
+
+    private void BeginGoalEdit()
+    {
+        GoalDraft = Goal?.Objective ?? string.Empty;
+        GoalError = string.Empty;
+        IsGoalEditing = true;
+    }
+
+    private bool CanBeginGoalEdit() =>
+        IsGoalFeatureAvailable &&
+        IsGoalSupported &&
+        goalActions?.CanManageGoal() == true &&
+        !IsGoalLoading &&
+        !IsGoalBusy &&
+        !IsGoalEditing;
+
+    private void CancelGoalEdit()
+    {
+        GoalDraft = Goal?.Objective ?? string.Empty;
+        GoalError = string.Empty;
+        IsGoalEditing = false;
+    }
+
+    private bool CanSaveGoal() =>
+        IsGoalEditing &&
+        IsGoalSupported &&
+        goalActions?.CanManageGoal() == true &&
+        !IsGoalLoading &&
+        !IsGoalBusy &&
+        string.IsNullOrEmpty(GoalEditorValidationMessage) &&
+        !string.Equals(GoalDraft.Trim(), Goal?.Objective, StringComparison.Ordinal);
+
+    private async Task SaveGoalAsync()
+    {
+        if (!CanSaveGoal() || goalActions is null)
+        {
+            return;
+        }
+
+        var objective = GoalDraft.Trim();
+        var isNewGoal = Goal is null;
+        var contextThreadId = ConversationThreadId;
+        IsGoalBusy = true;
+        GoalError = string.Empty;
+        try
+        {
+            var saved = await goalActions.SetGoalAsync(objective).ConfigureAwait(true);
+            if (!string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
+            {
+                return;
+            }
+            ApplyGoal(saved);
+            IsGoalEditing = false;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            if (string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
+            {
+                GoalError = $"Could not save the goal: {exception.Message}";
+            }
+            return;
+        }
+        finally
+        {
+            if (string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
+            {
+                IsGoalBusy = false;
+            }
+        }
+
+        if (!isNewGoal ||
+            string.IsNullOrWhiteSpace(contextThreadId) ||
+            !string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            await goalActions.StartGoalWorkAsync(contextThreadId, objective).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            GoalError = $"The goal was saved, but work could not start: {exception.Message}";
+        }
+    }
+
+    private bool CanToggleGoalStatus() =>
+        goalActions?.CanManageGoal() == true &&
+        IsGoalSupported &&
+        !IsGoalLoading &&
+        !IsGoalBusy &&
+        Goal?.Status is CodexThreadGoalStatus.Active or CodexThreadGoalStatus.Paused;
+
+    private async Task ToggleGoalStatusAsync()
+    {
+        if (!CanToggleGoalStatus() || goalActions is null || Goal is null)
+        {
+            return;
+        }
+
+        var status = Goal.Status == CodexThreadGoalStatus.Active
+            ? CodexThreadGoalStatus.Paused
+            : CodexThreadGoalStatus.Active;
+        var contextThreadId = ConversationThreadId;
+        IsGoalBusy = true;
+        GoalError = string.Empty;
+        try
+        {
+            var updated = await goalActions.SetGoalStatusAsync(status).ConfigureAwait(true);
+            if (!string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
+            {
+                return;
+            }
+            ApplyGoal(updated);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            if (string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
+            {
+                GoalError = $"Could not {GoalToggleActionLabel.ToLowerInvariant()} the goal: {exception.Message}";
+            }
+        }
+        finally
+        {
+            if (string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
+            {
+                IsGoalBusy = false;
+            }
+        }
+    }
+
+    private bool CanClearGoal() =>
+        goalActions?.CanManageGoal() == true &&
+        IsGoalSupported &&
+        !IsGoalLoading &&
+        !IsGoalBusy &&
+        HasGoal;
+
+    private async Task ClearGoalAsync()
+    {
+        if (!CanClearGoal() || goalActions is null)
+        {
+            return;
+        }
+
+        var contextThreadId = ConversationThreadId;
+        IsGoalBusy = true;
+        GoalError = string.Empty;
+        try
+        {
+            await goalActions.ClearGoalAsync().ConfigureAwait(true);
+            if (!string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
+            {
+                return;
+            }
+            ApplyGoal(null);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            if (string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
+            {
+                GoalError = $"Could not clear the goal: {exception.Message}";
+            }
+        }
+        finally
+        {
+            if (string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
+            {
+                IsGoalBusy = false;
+            }
+        }
+    }
+
+    private void RaiseGoalPropertiesChanged()
+    {
+        OnPropertyChanged(nameof(Goal));
+        OnPropertyChanged(nameof(IsGoalFeatureAvailable));
+        OnPropertyChanged(nameof(IsGoalSupported));
+        OnPropertyChanged(nameof(IsGoalLoading));
+        OnPropertyChanged(nameof(IsGoalEditing));
+        OnPropertyChanged(nameof(IsGoalBusy));
+        OnPropertyChanged(nameof(GoalDraft));
+        OnPropertyChanged(nameof(GoalCharacterCount));
+        OnPropertyChanged(nameof(GoalEditorValidationMessage));
+        OnPropertyChanged(nameof(GoalError));
+        OnPropertyChanged(nameof(HasGoalError));
+        OnPropertyChanged(nameof(HasGoal));
+        OnPropertyChanged(nameof(GoalObjective));
+        OnPropertyChanged(nameof(GoalStatusLabel));
+        OnPropertyChanged(nameof(GoalStatusAutomationName));
+        OnPropertyChanged(nameof(GoalToggleActionLabel));
+        OnPropertyChanged(nameof(GoalUsageSummary));
+        RaiseGoalCommandStates();
+    }
+
+    private void RaiseGoalCommandStates()
+    {
+        beginGoalEditCommand.RaiseCanExecuteChanged();
+        cancelGoalEditCommand.RaiseCanExecuteChanged();
+        saveGoalCommand.RaiseCanExecuteChanged();
+        toggleGoalStatusCommand.RaiseCanExecuteChanged();
+        clearGoalCommand.RaiseCanExecuteChanged();
+    }
+
+    private static string FormatGoalDuration(long totalSeconds)
+    {
+        var duration = TimeSpan.FromSeconds(Math.Max(0, totalSeconds));
+        if (duration.TotalHours >= 1)
+        {
+            return $"{(long)duration.TotalHours}h {duration.Minutes}m";
+        }
+
+        return duration.TotalMinutes >= 1
+            ? $"{(long)duration.TotalMinutes}m"
+            : $"{duration.Seconds}s";
+    }
 
     public bool HasAttachments => Attachments.Count > 0;
 
@@ -1437,6 +1852,7 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
         showModelsCommand.RaiseCanExecuteChanged();
         showReasoningCommand.RaiseCanExecuteChanged();
         RaiseAgentCommandStates();
+        RaiseGoalCommandStates();
     }
 
     private void RaiseAgentCommandStates()

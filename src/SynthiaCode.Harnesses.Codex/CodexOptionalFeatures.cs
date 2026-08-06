@@ -54,6 +54,21 @@ public interface ICodexConfigurationFeature
         CancellationToken cancellationToken = default);
 }
 
+public interface ICodexGoalFeature
+{
+    Task<CodexThreadGoal> SetThreadGoalAsync(
+        CodexThreadGoalSetRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<CodexThreadGoal?> GetThreadGoalAsync(
+        string threadId,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> ClearThreadGoalAsync(
+        string threadId,
+        CancellationToken cancellationToken = default);
+}
+
 public interface ICodexApprovalFeature
 {
     Task RespondToServerRequestAsync(

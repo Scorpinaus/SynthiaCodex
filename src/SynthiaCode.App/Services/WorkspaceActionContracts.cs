@@ -40,6 +40,15 @@ public interface IAgentManagementActions
     Task StopAgentAsync(string threadId, string turnId);
 }
 
+public interface IGoalManagementActions
+{
+    Task<CodexThreadGoal> SetGoalAsync(string objective);
+    Task<CodexThreadGoal> SetGoalStatusAsync(CodexThreadGoalStatus status);
+    Task<bool> ClearGoalAsync();
+    Task StartGoalWorkAsync(string threadId, string objective);
+    bool CanManageGoal();
+}
+
 public interface IComposerSupportActions
 {
     Task LoadModelsAsync();

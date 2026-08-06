@@ -19,7 +19,7 @@ using SynthiaCode.Harnesses.Codex;
 
 /// <summary>Small contract stubs used by presentation tests; production has no delegate adapters.</summary>
 internal sealed class TaskConversationActionStub : ITurnExecutionActions, IFollowUpManagementActions,
-    IConversationHistoryActions, IComposerSupportActions, IAgentManagementActions
+    IConversationHistoryActions, IComposerSupportActions, IAgentManagementActions, IGoalManagementActions
 {
     public Func<Task> Submit { get; init; } = () => Task.CompletedTask;
     public Func<Task> Cancel { get; init; } = () => Task.CompletedTask;
@@ -40,6 +40,13 @@ internal sealed class TaskConversationActionStub : ITurnExecutionActions, IFollo
     public Func<string, Task> Fork { get; init; } = _ => Task.CompletedTask;
     public Func<CancellationToken, Task<ComposerSkillLoadResult>> LoadSkills { get; init; } =
         _ => Task.FromResult(new ComposerSkillLoadResult([], false, null));
+    public Func<string, Task<CodexThreadGoal>> SetGoal { get; init; } = objective =>
+        Task.FromResult(Goal("thread-stub", objective, CodexThreadGoalStatus.Active));
+    public Func<CodexThreadGoalStatus, Task<CodexThreadGoal>> SetGoalStatus { get; init; } = status =>
+        Task.FromResult(Goal("thread-stub", "Stub goal", status));
+    public Func<Task<bool>> ClearGoal { get; init; } = () => Task.FromResult(true);
+    public Func<string, string, Task> StartGoal { get; init; } = (_, _) => Task.CompletedTask;
+    public Func<bool> CanGoal { get; init; } = () => true;
 
     public Task SubmitAsync() => Submit();
     public Task CancelAsync() => Cancel();
@@ -63,6 +70,14 @@ internal sealed class TaskConversationActionStub : ITurnExecutionActions, IFollo
         Task.FromResult(new CodexThreadReadResult(threadId, []));
     public Task SteerAgentAsync(string threadId, string turnId, string message) => Task.CompletedTask;
     public Task StopAgentAsync(string threadId, string turnId) => Task.CompletedTask;
+    public Task<CodexThreadGoal> SetGoalAsync(string objective) => SetGoal(objective);
+    public Task<CodexThreadGoal> SetGoalStatusAsync(CodexThreadGoalStatus status) => SetGoalStatus(status);
+    public Task<bool> ClearGoalAsync() => ClearGoal();
+    public Task StartGoalWorkAsync(string threadId, string objective) => StartGoal(threadId, objective);
+    public bool CanManageGoal() => CanGoal();
+
+    private static CodexThreadGoal Goal(string threadId, string objective, CodexThreadGoalStatus status) =>
+        new(threadId, objective, status, 0, 0, 1, 1);
 
     private static QueuedFollowUp CreateQueuedFollowUp(string followUpId)
     {
@@ -109,7 +124,7 @@ internal sealed class ProjectThreadActionStub : IProjectNavigationActions, IThre
 internal static class WorkspaceActionStubs
 {
     public static TaskViewModel CreateTaskViewModel(TaskConversationActionStub actions) =>
-        new(actions, actions, actions, actions, actions);
+        new(actions, actions, actions, actions, actions, goalActions: actions);
 
     public static ProjectThreadViewModel CreateProjectThreadViewModel(ProjectThreadActionStub actions) =>
         new(actions, actions);
@@ -145,7 +160,8 @@ internal static class WorkspaceActionStubs
         ITerminalService terminalService,
         IAppLogger logger,
         IGeneralWorkspaceService generalWorkspaceService,
-        IAttachmentStore? attachmentStore = null)
+        IAttachmentStore? attachmentStore = null,
+        bool enableGoalMode = false)
     {
         var resolver = new WorkspaceAttachmentResolver();
         var harnessRuntime = new HarnessRuntimeCoordinator(new HarnessRegistry([
@@ -173,7 +189,8 @@ internal static class WorkspaceActionStubs
             workflow, lifecycle, persistence, turns, queue,
             new ProjectWorkspaceOperations(gitService, worktreeService, recentProjectService, generalWorkspaceService),
             attachments,
-            new SharedCodexConfigurationService(Path.Combine(Path.GetTempPath(), "synthiacode-tests-codex-home")));
+            new SharedCodexConfigurationService(Path.Combine(Path.GetTempPath(), "synthiacode-tests-codex-home")),
+            enableGoalMode: enableGoalMode);
     }
 
     public static TaskConversationActionStub Task(

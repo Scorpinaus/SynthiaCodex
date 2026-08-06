@@ -712,6 +712,102 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<CodexThreadGoal> SetThreadGoalAsync(
+        CodexThreadGoalSetRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.ThreadId))
+        {
+            throw new ArgumentException("Thread ID is required.", nameof(request));
+        }
+        if (request.Objective is not null &&
+            (string.IsNullOrWhiteSpace(request.Objective) || request.Objective.Length > 4_000))
+        {
+            throw new ArgumentException("A goal objective must contain 1 through 4,000 characters.", nameof(request));
+        }
+        if (request.IncludeTokenBudget && request.TokenBudget is <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "A goal token budget must be positive or null.");
+        }
+        if (request.Objective is null && request.Status is null && !request.IncludeTokenBudget)
+        {
+            throw new ArgumentException("A goal update must change the objective, status, or token budget.", nameof(request));
+        }
+
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var parameters = new JsonObject { ["threadId"] = request.ThreadId };
+        if (request.Objective is not null)
+        {
+            parameters["objective"] = request.Objective;
+        }
+        if (request.Status is not null)
+        {
+            parameters["status"] = request.Status.Value.ToProtocolValue();
+        }
+        if (request.IncludeTokenBudget)
+        {
+            parameters["tokenBudget"] = request.TokenBudget is null
+                ? null
+                : JsonValue.Create(request.TokenBudget.Value);
+        }
+
+        var result = await SendRequestAsync("thread/goal/set", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
+        if (result?["goal"] is not JsonObject goal)
+        {
+            throw new CodexAppServerProtocolException("thread/goal/set response did not include result.goal.");
+        }
+
+        var saved = CodexThreadGoalJson.Parse(goal);
+        return string.Equals(saved.ThreadId, request.ThreadId, StringComparison.Ordinal)
+            ? saved
+            : throw new CodexAppServerProtocolException("thread/goal/set returned a goal for a different thread.");
+    }
+
+    public async Task<CodexThreadGoal?> GetThreadGoalAsync(
+        string threadId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            throw new ArgumentException("Thread ID is required.", nameof(threadId));
+        }
+
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var result = await SendRequestAsync(
+            "thread/goal/get",
+            new JsonObject { ["threadId"] = threadId },
+            cancellationToken).ConfigureAwait(false) as JsonObject;
+        if (result?["goal"] is not JsonObject goal)
+        {
+            return null;
+        }
+
+        var loaded = CodexThreadGoalJson.Parse(goal);
+        return string.Equals(loaded.ThreadId, threadId, StringComparison.Ordinal)
+            ? loaded
+            : throw new CodexAppServerProtocolException("thread/goal/get returned a goal for a different thread.");
+    }
+
+    public async Task<bool> ClearThreadGoalAsync(
+        string threadId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(threadId))
+        {
+            throw new ArgumentException("Thread ID is required.", nameof(threadId));
+        }
+
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var result = await SendRequestAsync(
+            "thread/goal/clear",
+            new JsonObject { ["threadId"] = threadId },
+            cancellationToken).ConfigureAwait(false) as JsonObject;
+        return result?["cleared"] is JsonValue clearedValue && clearedValue.TryGetValue<bool>(out var cleared)
+            ? cleared
+            : throw new CodexAppServerProtocolException("thread/goal/clear response did not include result.cleared.");
+    }
+
     public async Task<CodexTurnSteerResult> SteerTurnAsync(
         CodexTurnSteerRequest request,
         CancellationToken cancellationToken = default)

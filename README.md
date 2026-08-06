@@ -37,6 +37,12 @@ Queued messages belong to their Codex thread and appear above the composer. They
 - `Ctrl+Enter` uses the configured follow-up behavior.
 - `Ctrl+Shift+Enter` uses the other behavior once without changing the preference.
 
+## Goal mode
+
+Each Codex chat can own a persistent goal for work that spans many turns. Use **Set goal** above the composer to enter an objective; the objective becomes the first prompt for a new goal and remains visible as its completion criterion.
+
+The goal row shows its current status, token and elapsed-time usage, and any runtime-provided token budget. You can pause or resume active work, edit the objective without starting another prompt, and clear the goal. Goal state is owned by `codex app-server`, isolated per chat, restored after reconnect, and updated from server notifications.
+
 ## Execution permissions
 
 SynthiaCode handles Codex app-server approval requests for command execution, file changes, and additional permissions. Requests appear in a global modal queue and can be allowed once, allowed for the current session, declined, or cancelled. Permission requests expose the requested permission groups so the response grants only the selected subset.

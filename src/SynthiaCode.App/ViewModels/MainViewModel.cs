@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Reflection;
+using System.Text.Json.Nodes;
 using System.Windows.Input;
 using SynthiaCode.Application.Harnesses;
 using SynthiaCode.App.Services;
@@ -16,6 +17,7 @@ using SynthiaCode.Core.Projects;
 using SynthiaCode.Core.Settings;
 using SynthiaCode.Core.Terminal;
 using SynthiaCode.Core.Workspaces;
+using SynthiaCode.Infrastructure.Codex;
 
 namespace SynthiaCode.App.ViewModels;
 
@@ -36,6 +38,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly ProjectWorkspaceOperations projectWorkspaceOperations;
     private readonly IAppLogger logger;
     private readonly AttachmentDraftOrchestrationService attachmentDraftService;
+    private readonly bool enableGoalMode;
     private readonly CancellationTokenSource appServerWarmUpCancellation = new();
     private readonly SynchronizationContext? synchronizationContext;
     private readonly AsyncRelayCommand submitPromptCommand;
@@ -106,7 +109,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ProjectWorkspaceOperations projectWorkspaceOperations,
         AttachmentDraftOrchestrationService attachmentDraftService,
         ISharedCodexConfigurationService sharedCodexConfigurationService,
-        ISpeechRecognitionService? speechRecognitionService = null)
+        ISpeechRecognitionService? speechRecognitionService = null,
+        bool enableGoalMode = true)
     {
         this.settingsStore = settingsStore;
         this.appServerSessionCoordinator = appServerSessionCoordinator;
@@ -122,6 +126,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         this.followUpQueue = followUpQueue;
         this.projectWorkspaceOperations = projectWorkspaceOperations;
         this.attachmentDraftService = attachmentDraftService;
+        this.enableGoalMode = enableGoalMode;
         CodexConfiguration = new CodexConfigurationViewModel(
             sharedCodexConfigurationService,
             GetActiveWorkspacePathIfAvailable,
@@ -183,7 +188,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             new ConversationHistoryActionAdapter(this),
             new ComposerSupportActionAdapter(this),
             new AgentManagementActionAdapter(this),
-            speechRecognitionService);
+            speechRecognitionService,
+            new GoalManagementActionAdapter(this));
         TaskWorkspace.PropertyChanged += (_, args) => RelayTaskPropertyChanged(args.PropertyName);
 
         ApprovalQueue = new ApprovalQueueViewModel(appServerSessionCoordinator.RespondToServerRequestAsync);
@@ -3010,6 +3016,118 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             cancellationToken).ConfigureAwait(true);
     }
 
+    private async Task LoadSelectedGoalAsync(string threadId, CancellationToken cancellationToken)
+    {
+        if (!string.Equals(SelectedThread?.ThreadId, threadId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        TaskWorkspace.SetGoalLoading();
+        try
+        {
+            var workspacePath = SelectedThread?.WorkspacePath ?? SelectedThread?.ProjectPath;
+            await EnsureHarnessSessionAsync(HarnessId.Codex, workspacePath, cancellationToken).ConfigureAwait(true);
+            var loaded = await appServerSessionCoordinator
+                .GetThreadGoalAsync(threadId, cancellationToken)
+                .ConfigureAwait(true);
+            if (string.Equals(SelectedThread?.ThreadId, threadId, StringComparison.Ordinal))
+            {
+                TaskWorkspace.ApplyGoal(loaded);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (CodexAppServerProtocolException exception) when (exception.Code == -32601)
+        {
+            if (string.Equals(SelectedThread?.ThreadId, threadId, StringComparison.Ordinal))
+            {
+                TaskWorkspace.SetGoalUnsupported("Goal mode requires a newer Codex runtime.");
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.Log(
+                AppLogLevel.Warning,
+                "goal_load_failed",
+                "The selected Codex goal could not be loaded.",
+                exception: exception);
+            if (string.Equals(SelectedThread?.ThreadId, threadId, StringComparison.Ordinal))
+            {
+                TaskWorkspace.SetGoalLoadError($"Could not load the goal: {exception.Message}");
+            }
+        }
+    }
+
+    private async Task<CodexThreadGoal> SetSelectedGoalAsync(string objective)
+    {
+        var thread = GetSelectedGoalThread();
+        await EnsureHarnessSessionAsync(
+            HarnessId.Codex,
+            thread.WorkspacePath ?? thread.ProjectPath,
+            appServerWarmUpCancellation.Token).ConfigureAwait(true);
+        return await appServerSessionCoordinator.SetThreadGoalAsync(
+            new CodexThreadGoalSetRequest(
+                thread.ThreadId,
+                objective,
+                CodexThreadGoalStatus.Active),
+            appServerWarmUpCancellation.Token).ConfigureAwait(true);
+    }
+
+    private async Task<CodexThreadGoal> SetSelectedGoalStatusAsync(CodexThreadGoalStatus status)
+    {
+        var thread = GetSelectedGoalThread();
+        await EnsureHarnessSessionAsync(
+            HarnessId.Codex,
+            thread.WorkspacePath ?? thread.ProjectPath,
+            appServerWarmUpCancellation.Token).ConfigureAwait(true);
+        return await appServerSessionCoordinator.SetThreadGoalAsync(
+            new CodexThreadGoalSetRequest(thread.ThreadId, Status: status),
+            appServerWarmUpCancellation.Token).ConfigureAwait(true);
+    }
+
+    private async Task<bool> ClearSelectedGoalAsync()
+    {
+        var thread = GetSelectedGoalThread();
+        await EnsureHarnessSessionAsync(
+            HarnessId.Codex,
+            thread.WorkspacePath ?? thread.ProjectPath,
+            appServerWarmUpCancellation.Token).ConfigureAwait(true);
+        return await appServerSessionCoordinator
+            .ClearThreadGoalAsync(thread.ThreadId, appServerWarmUpCancellation.Token)
+            .ConfigureAwait(true);
+    }
+
+    private async Task StartSelectedGoalWorkAsync(string threadId, string objective)
+    {
+        _ = GetSelectedGoalThread();
+        if (IsTurnRunning || !string.Equals(SelectedThread?.ThreadId, threadId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        TaskWorkspace.Prompt = objective;
+        await SubmitPromptAsync().ConfigureAwait(true);
+    }
+
+    private ProjectThreadState GetSelectedGoalThread()
+    {
+        if (!CanManageSelectedGoal() || SelectedThread is null)
+        {
+            throw new InvalidOperationException("Select an active Codex chat to manage its goal.");
+        }
+
+        return SelectedThread;
+    }
+
+    private bool CanManageSelectedGoal() =>
+        enableGoalMode &&
+        !IsShuttingDown &&
+        SelectedThread is { IsArchived: false } &&
+        ResolveHarnessId(SelectedThread) == HarnessId.Codex &&
+        IsHarnessReady(SelectedThread);
+
     private async Task RefreshExecutionPolicyAsync(string? cwd, CancellationToken cancellationToken)
     {
         try
@@ -3182,6 +3300,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 {
                     _ = EffectiveCodexSettings.RefreshIfStaleAsync(appServerWarmUpCancellation.Token);
                 }
+                if (enableGoalMode &&
+                    SelectedThread is { IsArchived: false } selected &&
+                    ResolveHarnessId(selected) == HarnessId.Codex)
+                {
+                    _ = LoadSelectedGoalAsync(selected.ThreadId, appServerWarmUpCancellation.Token);
+                }
             }
         }
 
@@ -3210,6 +3334,47 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (notification.Kind == CodexAppServerNotificationKind.SkillsChanged)
         {
+            return;
+        }
+
+        if (notification.Kind is CodexAppServerNotificationKind.ThreadGoalUpdated or
+            CodexAppServerNotificationKind.ThreadGoalCleared)
+        {
+            if (!enableGoalMode)
+            {
+                return;
+            }
+
+            if (!string.Equals(notification.ThreadId, SelectedThread?.ThreadId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            try
+            {
+                CodexThreadGoal? updatedGoal = null;
+                if (notification.Kind == CodexAppServerNotificationKind.ThreadGoalUpdated)
+                {
+                    updatedGoal = notification.Params["goal"] is JsonObject goalValue
+                        ? CodexThreadGoalJson.Parse(goalValue)
+                        : throw new InvalidDataException("The goal update did not include a goal.");
+                    if (!string.Equals(updatedGoal.ThreadId, notification.ThreadId, StringComparison.Ordinal))
+                    {
+                        throw new InvalidDataException("The goal update belongs to a different thread.");
+                    }
+                }
+
+                TaskWorkspace.ApplyGoal(updatedGoal);
+            }
+            catch (Exception exception) when (exception is InvalidDataException or InvalidOperationException)
+            {
+                logger.Log(
+                    AppLogLevel.Warning,
+                    "goal_notification_invalid",
+                    "Codex sent an invalid goal notification.",
+                    exception: exception);
+                TaskWorkspace.SetGoalLoadError("Codex sent an invalid goal update. Refresh the chat to retry.");
+            }
             return;
         }
 
@@ -3467,6 +3632,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 conversationWorkflow.SetActiveThread(settings, state.ScopeKey, state.ThreadId);
             }
+        }
+
+        var hasCodexGoalSurface = enableGoalMode && state is not null && ResolveHarnessId(state) == HarnessId.Codex;
+        TaskWorkspace.ResetGoalContext(hasCodexGoalSurface);
+        if (hasCodexGoalSurface && state is not null && !state.IsArchived)
+        {
+            _ = LoadSelectedGoalAsync(state.ThreadId, appServerWarmUpCancellation.Token);
         }
 
         RestoreAttachmentDraft(SelectedProjectPath, activeThreadId);
@@ -3804,6 +3976,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         public Task<CodexThreadReadResult> ReadAgentThreadAsync(string threadId) => owner.ReadAgentThreadAsync(threadId);
         public Task SteerAgentAsync(string threadId, string turnId, string message) => owner.SteerAgentAsync(threadId, turnId, message);
         public Task StopAgentAsync(string threadId, string turnId) => owner.StopAgentAsync(threadId, turnId);
+    }
+
+    private sealed class GoalManagementActionAdapter(MainViewModel owner) : IGoalManagementActions
+    {
+        public Task<CodexThreadGoal> SetGoalAsync(string objective) => owner.SetSelectedGoalAsync(objective);
+        public Task<CodexThreadGoal> SetGoalStatusAsync(CodexThreadGoalStatus status) => owner.SetSelectedGoalStatusAsync(status);
+        public Task<bool> ClearGoalAsync() => owner.ClearSelectedGoalAsync();
+        public Task StartGoalWorkAsync(string threadId, string objective) => owner.StartSelectedGoalWorkAsync(threadId, objective);
+        public bool CanManageGoal() => owner.CanManageSelectedGoal();
     }
 
     private sealed class ComposerSupportActionAdapter(MainViewModel owner) : IComposerSupportActions

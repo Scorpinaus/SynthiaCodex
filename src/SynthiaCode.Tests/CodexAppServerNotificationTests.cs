@@ -20,6 +20,8 @@ internal static class CodexAppServerNotificationTests
             ("thread/started", CodexAppServerNotificationKind.ThreadStarted),
             ("thread/archived", CodexAppServerNotificationKind.ThreadArchived),
             ("thread/unarchived", CodexAppServerNotificationKind.ThreadUnarchived),
+            ("thread/goal/updated", CodexAppServerNotificationKind.ThreadGoalUpdated),
+            ("thread/goal/cleared", CodexAppServerNotificationKind.ThreadGoalCleared),
             ("thread/tokenUsage/updated", CodexAppServerNotificationKind.ThreadTokenUsageUpdated),
             ("thread/compacted", CodexAppServerNotificationKind.ThreadCompacted),
             ("turn/started", CodexAppServerNotificationKind.TurnStarted),

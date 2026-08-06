@@ -1,7 +1,7 @@
 # SynthiaCode and ChatGPT Desktop Feature Parity
 
-- **Audit date:** 2 August 2026
-- **SynthiaCode baseline:** working tree based on commit `9b5a8bc`, including automatic first-message naming, manual thread rename, hover-visible sidebar chat actions, sidebar chat management, cross-chat search, find-in-chat, and the completed parity work recorded below
+- **Audit date:** 6 August 2026
+- **SynthiaCode baseline:** working tree based on commit `bab45a5`, including the Goal mode slice and the completed parity work recorded below
 - **Comparison surface:** ChatGPT desktop app with Codex/local-project capabilities
 - **Scope:** User-visible desktop functionality, local Codex workflows, and capabilities inherited through `codex app-server`
 
@@ -104,6 +104,14 @@
 | Phase 6C.4 - Runtime investigation and legacy recovery | Inspection of real app-server state confirmed that completed image events contain valid `savedPath` values but older local conversation snapshots have no generated-image field. Restore now recovers those existing images from bounded raw completion events. Live and legacy image diagnostics retain identifiers, status, and path while dropping multi-megabyte encoded `result` data; layout coverage now verifies a portrait image receives visible dimensions inside the actual virtualized transcript. | **Complete** |
 | Phase 6C.5 - Follow-up verification | Focused legacy recovery, payload redaction, protocol, and full-transcript portrait-layout tests pass. All 218 behavioral tests pass in Debug and Release. Clean non-incremental executable rebuilds and final repository checks are complete. | **Complete** |
 
+## Goal mode implementation parity
+
+| Phase | Implemented outcome | Status |
+| --- | --- | --- |
+| Phase 1 - Protocol and ownership | Added strict typed models plus `thread/goal/set`, `thread/goal/get`, and `thread/goal/clear` operations, status parsing, optional budget and usage accounting, and typed updated/cleared notification routing. Goal durability remains owned by Codex app-server. | **Complete** |
+| Phase 2 - Selected-chat workflow | Added per-chat load and reconnect refresh, stale-result rejection after chat switches, matching-thread notification handling, unsupported-runtime fallback, and set/edit/pause/resume/clear commands. Creating a goal starts its objective as the first ordinary prompt; later edits update only the goal. | **Complete** |
+| Phase 3 - Native surface and verification | Added an accessible, responsive progress row above the composer with objective, status, usage, validation, and management controls. All 5 Goal cases, 15 notification cases, and 3 responsive-layout cases pass; the Release solution build completes with zero warnings and errors. The complete Debug suite is 282/288, and all six unrelated failures reproduce in the untouched `bab45a5` snapshot. | **Complete** |
+
 ## Status legend
 
 | Status | Meaning |
@@ -117,13 +125,13 @@
 
 | Area | Current parity | Assessment |
 | --- | --- | --- |
-| Local coding loop | **Strong** | General and project chats, multi-turn work, queued follow-ups, streaming, models, permissions, terminal, Git changes, and worktrees are usable end to end. |
+| Local coding loop | **Strong** | General and project chats, multi-turn work, persistent goals, queued follow-ups, streaming, models, permissions, terminal, Git changes, and worktrees are usable end to end. |
 | Safety and approvals | **Near full** | The three composer permission modes and server-request approvals now map closely to ChatGPT desktop. |
 | Git and worktree lifecycle | **Moderate** | Core isolation and file-level Git operations exist; chunk review, handoff, push, PR, snapshots, and setup actions do not. |
 | Agent orchestration | **Near** | Parallel chats plus Active/Done subagent inspection, transcripts, steering, and stopping are usable; nicknames, live open-transcript refresh, and custom-agent management remain absent. |
 | Context and multimodal input | **Near** | Per-chat context-window visibility plus image/file/folder picker, paste/drop, previews, queued lifecycle persistence, workspace mentions, and managed external snapshots are implemented; rich artifact viewing and remaining hardening are out of scope. |
 | Tools and integrations | **Moderate** | Skills discovery and enablement are now native Settings surfaces, and configured MCP/web activity can flow through app-server. Browser, Chrome, plugin/connector management, MCP administration, and Scheduled remain absent. |
-| Desktop convenience | **Moderate** | Native Windows shell, themes, diagnostics, local dictation, custom Codex instruction defaults, shared-configuration source links, cross-chat search, find-in-chat, and core shortcuts exist; notifications, quick chat, general task deep links, and broader personalization do not. |
+| Desktop convenience | **Moderate** | Native Windows shell, themes, diagnostics, local dictation, custom Codex instruction defaults, shared-configuration source links, cross-chat search, find-in-chat, and core shortcuts exist; Activity view, notifications, full Voice coordination, quick chat, general task deep links, and broader personalization do not. |
 
 ## Detailed parity matrix
 
@@ -133,16 +141,19 @@
 | --- | --- | --- | --- |
 | Start a chat without a project | First-class General scope with a managed app-data workspace, explicit and implicit creation, persistence, resume/fork/archive, attachments, queues, permissions, and per-thread terminal context | **Full** | General intentionally has no Git or assistant-worktree operations until a project is attached. |
 | Open a local project/folder | Folder picker, recent projects, project grouping, and project-scoped app-server work | **Full** | None material for the local coding loop. |
+| Multiple folders in one local project | Projects own one root folder | **Missing** | ChatGPT supports a primary folder plus secondary folders available for search, reading, and editing; SynthiaCode needs multi-root persistence, permissions, context discovery, Git/review, terminal, and attachment routing. |
 | Multiple local chats per project | Collapsible Chats and Projects groups, per-project disclosure, independently persisted chats, and pinned-first ordering | **Full** | ChatGPT has broader bulk chat-management controls. |
 | Multi-turn conversations | Restored history, follow-up turns, per-turn transcript/activity, cancellation, and recovery | **Full** | None material for normal local follow-ups. |
 | Edit and resubmit user prompts | Completed prompts have an inline editor; resubmission uses `thread/rollback`, keeps the selected and later prompts/responses visible as Previous versions, reuses attachments, and continues the same thread from the edited prompt | **Full** | Conversation history rewinds while existing workspace file changes are intentionally kept and clearly disclosed, matching app-server rollback semantics. |
 | Resume, fork, archive, unarchive | Typed app-server lifecycle flows and UI actions | **Full** | None material. |
+| Ephemeral side chats | Per-response forks create durable chats and preserve the selected history point | **Missing** | Add in-memory `thread/fork` with `ephemeral: true` for focused side questions that do not enter stored chat listings. |
 | Rename chats | New General and project chats replace their placeholder title from the normalized first message after `turn/start` succeeds; manual chat menus also open a validated rename dialog. Both flows call typed `thread/name/set` and persist the acknowledged title locally | **Full** | Automatic titles are deterministic first-message names rather than a later model-generated summary. Project folder names remain filesystem-derived. |
 | Pin, delete, and search chats | Hover- and selection-visible contextual actions; persisted sidebar pin/unpin with pinned-first ordering; confirmed delete; content search across General, project, and archived chats; current-chat occurrence search with next/previous wraparound and highlighting | **Full** | Because app-server has no permanent-delete method, delete first archives an active Codex thread and then removes SynthiaCode's local record; associated worktrees and branches are intentionally preserved. |
 | Steer an active run | Active-turn guidance uses `turn/steer` | **Full** | None for steering itself. |
 | Queue and manage follow-up messages | Per-thread persisted queues support Queue/Steer defaults, one-shot inversion, inline edit, reorder, manual send/steer, delete, completion-driven FIFO dispatch, and dispatch-time catalog/policy revalidation | **Full** | Live real-runtime disconnect/reconnect smoke coverage remains validation hardening rather than a functional parity gap. |
-| Parallel top-level chats | Multiple project threads can run and route notifications independently | **Near** | No dedicated global running-task manager or completion notification center. |
-| Long-running/background work | Runs continue while SynthiaCode remains open; reconnect and shutdown are handled | **Partial** | No prevent-sleep setting, background inbox, OS completion notifications, or cloud continuation. |
+| Parallel top-level chats | Multiple project threads can run and route notifications independently | **Near** | No Activity view or dedicated global running-task manager and completion notification center. |
+| Persistent Goal mode | A server-owned per-chat objective loads above the composer and supports set, edit, pause, resume, clear, status, usage, reconnect refresh, and matching push updates | **Full** | SynthiaCode displays a runtime-provided token budget but does not expose budget editing in this first slice. |
+| Long-running/background work | Runs continue while SynthiaCode remains open; persistent Goal mode, reconnect, and shutdown handling are implemented | **Partial** | No prevent-sleep setting, Activity inbox, OS completion notifications, or cloud continuation. |
 | Local worktrees | Assistant-owned Git worktrees can be created, used per chat, listed, and safely removed | **Partial** | No branch picker, Local/Worktree handoff, managed snapshots/restore, permanent worktrees, `.worktreeinclude`, setup scripts, or configurable retention/root. |
 
 ### Models, permissions, and account
@@ -209,13 +220,23 @@
 | Keyboard shortcuts | Core project, submit, navigation, terminal, settings, refresh, cross-chat search (`Ctrl+K`), and find-in-chat (`Ctrl+F`) shortcuts | **Partial** | No command palette, searchable/customizable shortcut editor, or next/previous chat navigation. |
 | Account and settings pane | Custom Codex instructions, shared configuration editors/provenance, active-workspace skills, a redacted origin-aware effective Codex settings summary, account, appearance, runtime, doctor, diagnostics, and about information | **Near** | ChatGPT still has substantially broader plugin, connector, automation, personalization, and application settings. |
 | Notifications | Status bar and in-app state only | **Missing** | No OS completion notifications or notification preferences. |
-| Dictation/voice input | A composer microphone toggles continuous local Windows recognition, appends finalized phrases to the prompt or active-turn guidance, announces state accessibly, and surfaces recognizer/device/privacy failures without persisting audio or transcript data | **Near** | Recognition depends on an installed Windows speech recognizer for the current UI language rather than ChatGPT's cloud transcription and automatic language handling. |
+| Activity view | Chats remain distributed across General/project/sidebar groups | **Missing** | Add a bell/inbox surface for unread, running, blocked, ready, and needs-input work with filters and mark-read state. |
+| Local dictation | A composer microphone toggles continuous local Windows recognition, appends finalized phrases to the prompt or active-turn guidance, announces state accessibly, and surfaces recognizer/device/privacy failures without persisting audio or transcript data | **Near** | Recognition depends on an installed Windows speech recognizer for the current UI language rather than ChatGPT's cloud transcription and automatic language handling. |
+| ChatGPT Voice coordination | No live bidirectional voice session or cross-thread voice control | **Missing** | ChatGPT Voice can start, check, and steer work in other Chat, Work, and Codex threads; local dictation is not equivalent. |
 | Quick chat, pop-out, always-on-top | No compact or detached chat window | **Missing** | ChatGPT can keep a chat beside another app. |
 | Deep links | No registered SynthiaCode URL scheme | **Missing** | ChatGPT supports links to chats, settings, skills, Scheduled, plugins, and connections. |
 | Personalization and memories | Custom developer instructions and an advanced base-instruction override are editable and persisted; no personality, suggested prompts, or cross-chat memories | **Partial** | Instruction defaults are Codex-specific and apply to future chats rather than providing the broader ChatGPT personalization surface. |
 | Chat profile, usage insights, and pets | Basic account/rate-limit view only | **Partial** | Profile analytics/cards and pets are non-core gaps. |
 
 ## What changed in this recheck
+
+The 6 August current-feature recheck found and classified newly documented Codex surfaces:
+
+1. **Goal mode moved from Missing to Full** for the local-chat outcome: server-owned goals now load per chat, render above the composer, and support set/edit/pause/resume/clear, usage, reconnect, and push updates.
+2. **Multi-folder local projects remain Missing.** SynthiaCode's project, workspace, terminal, Git, settings-discovery, and attachment contracts still assume one root.
+3. **Activity view remains Missing.** Parallel execution exists, but there is no combined unread/running/blocked/needs-input inbox or completion notification center.
+4. **ChatGPT Voice coordination remains Missing.** The implemented Windows recognizer is useful local dictation, not a GPT-Live conversation that can coordinate other threads.
+5. **Ephemeral side chats remain Missing.** Current forks are durable; app-server now supports in-memory forks that do not enter stored thread lists.
 
 Phase 6A skills and effective settings moved from backend-only behavior to **Near** desktop parity:
 
@@ -356,17 +377,19 @@ P0 attachments and image input moved from **Missing** to **Near**:
 ### P0 — Complete the core local coding experience
 
 1. **Attachments and image input (managed external core implemented):** add installed-runtime managed file/folder mention smoke coverage, attachment-specific permission preflight/narrowing, interactive folder review/exclusions, bounded thumbnail decoding, and app-server history attachment materialization. Optional live external roots remain deferred.
-2. **Structured Git review:** add hunk staging/revert, inline diff comments, and a dedicated review target flow.
-3. **Push and pull requests:** add native branch push and GitHub PR creation/status.
-4. **Worktree lifecycle:** add starting-branch selection, setup scripts/actions, Local/Worktree handoff, snapshots/restore, and retention settings.
+2. **Multi-folder local projects:** add primary/secondary roots and make permissions, context discovery, mentions, terminal ownership, Git status, and multi-repository review root-aware.
+3. **Structured Git review:** add hunk staging/revert, inline diff comments, multi-repository selection, and a dedicated review target flow.
+4. **Push and pull requests:** add native branch push and GitHub PR creation/status.
+5. **Worktree lifecycle:** add starting-branch selection, setup scripts/actions, Local/Worktree handoff, snapshots/restore, and retention settings.
 
 ### P1 — Make parallel and long-running work first class
 
 1. **Subagent management (core implemented):** add nicknames, live open-transcript refresh, explicit resume, and custom-agent management on top of the Active/Done inspect/open/steer/stop panel.
 2. **Chat management (core implemented):** add running-task filtering and optional bulk chat-management actions.
-3. **Notifications/background reliability:** completion notifications, prevent-sleep, a task inbox, and live real-runtime queued-dispatch disconnect/reconnect smoke coverage.
-4. **Terminal integration:** expose current terminal output to Codex and add reusable project actions.
-5. **MCP visibility:** show configured servers, health, authentication state, and provenance without owning their configuration semantics unnecessarily; add optional skill invocation UX only after the composer contract is defined.
+3. **Activity and notifications:** add unread/running/blocked/needs-input filters, mark-read state, completion alerts, prevent-sleep, and live real-runtime queued-dispatch disconnect/reconnect smoke coverage.
+4. **Ephemeral side chats:** use in-memory forks for focused questions without creating durable sidebar entries.
+5. **Terminal integration:** expose current terminal output to Codex and add reusable project actions.
+6. **MCP visibility:** show configured servers, health, authentication state, and provenance without owning their configuration semantics unnecessarily; add optional skill invocation UX only after the composer contract is defined.
 
 ### P2 — Expand into the ChatGPT ecosystem
 
@@ -375,11 +398,12 @@ P0 attachments and image input moved from **Missing** to **Near**:
 3. Scheduled tasks and run history.
 4. Remote connections and cloud chats.
 5. Artifact viewer, visualizations, Sites, and richer native image-generation controls.
-6. Rich appearance, shortcut customization, quick chat, deep links, personalization, and memories.
+6. Full ChatGPT Voice coordination across threads.
+7. Rich appearance, shortcut customization, quick chat, deep links, personalization, and memories.
 
 ## Product recommendation
 
-Keep SynthiaCode's parity target focused on the **local coding loop**, not every ChatGPT feature. With queued follow-ups at Full functional parity, the best next release is the remaining P0 set: attachments, structured review/PR workflows, and complete worktree lifecycle. Those close the largest everyday workflow gaps without requiring SynthiaCode to become a browser, connector marketplace, automation platform, or general artifact suite.
+Keep SynthiaCode's parity target focused on the **local coding loop**, not every ChatGPT feature. With queued follow-ups and persistent Goal mode at Full functional parity, the best next release is multi-folder local projects, followed by structured review/PR workflows and complete worktree lifecycle. Those close the largest everyday workflow gaps without requiring SynthiaCode to become a browser, connector marketplace, automation platform, or general artifact suite.
 
 ## Audit sources
 
@@ -389,6 +413,9 @@ Current ChatGPT/Codex behavior was checked against the official OpenAI manual an
 
 - [ChatGPT desktop app commands](https://learn.chatgpt.com/docs/reference/commands)
 - [ChatGPT desktop app settings](https://learn.chatgpt.com/docs/reference/settings)
+- [What's new](https://learn.chatgpt.com/docs/whats-new)
+- [Long-running work and Goal mode](https://learn.chatgpt.com/docs/long-running-work)
+- [Notifications and Activity view](https://learn.chatgpt.com/docs/notifications)
 - [Permissions modes](https://learn.chatgpt.com/docs/permission-modes)
 - [Named permission profiles](https://learn.chatgpt.com/docs/permissions)
 - [Integrated terminal](https://learn.chatgpt.com/docs/integrated-terminal)
@@ -400,4 +427,4 @@ Current ChatGPT/Codex behavior was checked against the official OpenAI manual an
 - [Projects and chats](https://learn.chatgpt.com/docs/projects)
 - [Image inputs](https://learn.chatgpt.com/docs/image-inputs)
 - [Code review](https://learn.chatgpt.com/docs/code-review)
-- [Codex app-server protocol](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)
+- [Codex app-server protocol](https://learn.chatgpt.com/docs/app-server)

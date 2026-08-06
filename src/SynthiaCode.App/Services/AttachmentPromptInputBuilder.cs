@@ -23,15 +23,18 @@ public sealed class AttachmentPromptInputBuilder
     public IReadOnlyList<CodexUserInput> Build(
         string text,
         IReadOnlyList<AttachmentReference> attachments,
-        string workspacePath) =>
-        BuildHarness(text, attachments, workspacePath).Select(ToCodex).ToArray();
+        string workspacePath,
+        IReadOnlyList<string>? workspaceRoots = null) =>
+        BuildHarness(text, attachments, workspacePath, workspaceRoots).Select(ToCodex).ToArray();
 
     public IReadOnlyList<HarnessContentPart> BuildHarness(
         string text,
         IReadOnlyList<AttachmentReference> attachments,
-        string workspacePath)
+        string workspacePath,
+        IReadOnlyList<string>? workspaceRoots = null)
     {
         ArgumentNullException.ThrowIfNull(attachments);
+        var roots = workspaceRoots is { Count: > 0 } ? workspaceRoots : [workspacePath];
         var inputs = new List<HarnessContentPart>();
         if (!string.IsNullOrWhiteSpace(text))
         {
@@ -42,7 +45,7 @@ public sealed class AttachmentPromptInputBuilder
         {
             if (attachment.SourceKind == AttachmentSourceKind.WorkspaceReference)
             {
-                var resolved = workspaceAttachmentResolver.Revalidate(workspacePath, attachment);
+                var resolved = workspaceAttachmentResolver.Revalidate(roots, attachment);
                 attachment.ManagedPath = resolved.ManagedPath;
                 inputs.Add(new WorkspaceReferenceContentPart(resolved.WorkspaceRelativePath!, resolved.ManagedPath!));
                 continue;

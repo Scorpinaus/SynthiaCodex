@@ -29,12 +29,14 @@ public sealed class HarnessTurnRequestFactory
         string? model,
         string workspacePath,
         string? developerInstructions,
-        string? baseInstructions) => new(
+        string? baseInstructions,
+        IReadOnlyList<string>? workspaceRoots = null) => new(
             conversationId,
             workspacePath,
             CreateOptions(permissions, model, null, CodexServiceTierSelection.Inherit),
             developerInstructions,
-            baseInstructions);
+            baseInstructions,
+            workspaceRoots);
 
     public ResumeConversationCommand CreateConversationResume(
         ConversationAddress address,
@@ -42,12 +44,14 @@ public sealed class HarnessTurnRequestFactory
         string? model,
         string workspacePath,
         string? developerInstructions,
-        string? baseInstructions) => new(
+        string? baseInstructions,
+        IReadOnlyList<string>? workspaceRoots = null) => new(
             address,
             workspacePath,
             CreateOptions(permissions, model, null, CodexServiceTierSelection.Inherit),
             developerInstructions,
-            baseInstructions);
+            baseInstructions,
+            workspaceRoots);
 
     public ForkConversationCommand CreateConversationFork(
         ConversationId conversationId,
@@ -56,13 +60,15 @@ public sealed class HarnessTurnRequestFactory
         string? model,
         string workspacePath,
         string? developerInstructions,
-        string? baseInstructions) => new(
+        string? baseInstructions,
+        IReadOnlyList<string>? workspaceRoots = null) => new(
             conversationId,
             source,
             workspacePath,
             CreateOptions(permissions, model, null, CodexServiceTierSelection.Inherit),
             developerInstructions,
-            baseInstructions);
+            baseInstructions,
+            workspaceRoots);
 
     public StartTurnCommand CreateTurnStart(HarnessTurnRequestComposition composition)
     {
@@ -72,7 +78,8 @@ public sealed class HarnessTurnRequestFactory
             composition.Attachments,
             composition.WorkspacePath,
             composition.SelectedModel,
-            composition.SkillInputs);
+            composition.SkillInputs,
+            composition.WorkspaceRoots);
         return new StartTurnCommand(
             composition.Address,
             inputs,
@@ -81,7 +88,8 @@ public sealed class HarnessTurnRequestFactory
                 composition.Permissions,
                 composition.Model,
                 composition.ReasoningEffort,
-                composition.ServiceTier));
+                composition.ServiceTier),
+            composition.WorkspaceRoots);
     }
 
     public IReadOnlyList<HarnessContentPart> BuildInputs(
@@ -89,11 +97,12 @@ public sealed class HarnessTurnRequestFactory
         IReadOnlyList<AttachmentReference> attachments,
         string workspacePath,
         CodexModelOption? selectedModel,
-        IReadOnlyList<CodexSkillInput> skillInputs)
+        IReadOnlyList<CodexSkillInput> skillInputs,
+        IReadOnlyList<string>? workspaceRoots = null)
     {
         ValidateImageSupport(attachments, selectedModel);
         var inputs = new AttachmentPromptInputBuilder(attachmentStore, workspaceAttachmentResolver)
-            .BuildHarness(prompt, attachments, workspacePath)
+            .BuildHarness(prompt, attachments, workspacePath, workspaceRoots)
             .ToList();
         inputs.AddRange(skillInputs.Select(skill => new SkillReferenceContentPart(skill.Name, skill.Path)));
         return inputs;
@@ -148,4 +157,5 @@ public sealed record HarnessTurnRequestComposition(
     string? ReasoningEffort,
     CodexServiceTierSelection ServiceTier,
     CodexModelOption? SelectedModel,
-    IReadOnlyList<CodexSkillInput> SkillInputs);
+    IReadOnlyList<CodexSkillInput> SkillInputs,
+    IReadOnlyList<string>? WorkspaceRoots = null);

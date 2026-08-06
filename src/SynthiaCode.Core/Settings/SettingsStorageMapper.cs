@@ -1,5 +1,6 @@
 using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Projects;
 
 namespace SynthiaCode.Core.Settings;
 
@@ -33,7 +34,7 @@ public static class SettingsStorageMapper
             DefaultHarnessId = AppSettingsHarnessMigration.NormalizeHarnessId(source.DefaultHarnessId),
             IsProjectRailOpen = source.IsProjectRailOpen,
             IsDetailsPaneOpen = source.IsDetailsPaneOpen,
-            RecentProjects = [.. source.RecentProjects],
+            RecentProjects = [.. source.RecentProjects.Select(CloneRecentProject)],
             ProjectThreads = [.. source.ProjectThreads.Select(CloneThread)],
             ComposerAttachmentDrafts = [.. source.ComposerAttachmentDrafts.Select(CloneDraft)]
         };
@@ -142,6 +143,7 @@ public static class SettingsStorageMapper
         Options = new QueuedTurnOptionsSnapshot
         {
             WorkspacePath = source.Options.WorkspacePath,
+            WorkspaceRoots = [.. (source.Options.WorkspaceRoots ?? [])],
             Model = source.Options.Model,
             ReasoningEffort = source.Options.ReasoningEffort,
             ServiceTier = source.Options.ServiceTier,
@@ -162,6 +164,7 @@ public static class SettingsStorageMapper
         SourceKind = source.SourceKind,
         StorageKey = source.StorageKey,
         WorkspaceRelativePath = source.WorkspaceRelativePath,
+        WorkspaceRootPath = source.WorkspaceRootPath,
         DisplayName = source.DisplayName,
         MediaType = source.MediaType,
         ByteLength = source.ByteLength,
@@ -171,5 +174,12 @@ public static class SettingsStorageMapper
         SnapshotByteLength = source.SnapshotByteLength,
         ContentSha256 = source.ContentSha256,
         ManagedPath = source.ManagedPath
+    };
+
+    private static RecentProject CloneRecentProject(RecentProject source) => source with
+    {
+        AdditionalFolderPaths = source.AdditionalFolderPaths is null
+            ? null
+            : [.. source.AdditionalFolderPaths]
     };
 }

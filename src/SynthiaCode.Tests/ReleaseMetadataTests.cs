@@ -34,10 +34,11 @@ public sealed class ReleaseMetadataTests
         var architecture = File.ReadAllText(Path.Combine(repositoryRoot, "docs", "current-architecture.md"));
 
         Assert.Contains("# SynthiaCode: Current Architecture", architecture, StringComparison.Ordinal);
-        Assert.Contains("**Recorded:** 2 August 2026", architecture, StringComparison.Ordinal);
+        Assert.Contains("**Recorded:** 6 August 2026", architecture, StringComparison.Ordinal);
         Assert.Contains($"**Release:** {expectedReleaseVersion}", architecture, StringComparison.Ordinal);
         Assert.Contains("**Phase:** Modern WPF redesign through Phase 21", architecture, StringComparison.Ordinal);
         Assert.Contains("xUnit-discovered behavioral and integration-style test suite", architecture, StringComparison.Ordinal);
+        Assert.Contains("### Multi-folder project roots", architecture, StringComparison.Ordinal);
         Assert.Contains("262 passing tests", architecture, StringComparison.Ordinal);
         Assert.DoesNotContain("Console-based behavioral and integration-style assertion runner", architecture, StringComparison.Ordinal);
         Assert.DoesNotContain("Phase 6A completes", architecture, StringComparison.Ordinal);

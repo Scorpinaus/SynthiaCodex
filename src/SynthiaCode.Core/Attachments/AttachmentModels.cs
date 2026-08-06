@@ -39,6 +39,7 @@ public sealed class AttachmentReference
     public AttachmentSourceKind SourceKind { get; set; }
     public string StorageKey { get; set; } = string.Empty;
     public string? WorkspaceRelativePath { get; set; }
+    public string? WorkspaceRootPath { get; set; }
     public string DisplayName { get; set; } = string.Empty;
     public string MediaType { get; set; } = string.Empty;
     public long ByteLength { get; set; }
@@ -89,6 +90,7 @@ public sealed class AttachmentReference
         SourceKind = SourceKind,
         StorageKey = StorageKey,
         WorkspaceRelativePath = WorkspaceRelativePath,
+        WorkspaceRootPath = WorkspaceRootPath,
         DisplayName = DisplayName,
         MediaType = MediaType,
         ByteLength = ByteLength,

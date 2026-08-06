@@ -365,7 +365,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             StatusMessage = ex.Message;
             return;
         }
-        var result = await attachmentDraftService.ImportPathsAsync(paths, workspacePath, cancellationToken).ConfigureAwait(true);
+        var result = await attachmentDraftService
+            .ImportPathsAsync(paths, GetActiveWorkspaceRoots(), cancellationToken)
+            .ConfigureAwait(true);
         foreach (var attachment in result.Attachments)
         {
             TaskWorkspace.AddAttachment(attachment);
@@ -398,7 +400,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public void OpenAttachment(AttachmentReference attachment)
     {
         ArgumentNullException.ThrowIfNull(attachment);
-        var path = attachmentDraftService.ResolveOpenPath(GetActiveWorkspacePath(), attachment);
+        var path = attachmentDraftService.ResolveOpenPath(
+            GetActiveWorkspacePath(),
+            attachment,
+            GetActiveWorkspaceRoots());
         var exists = attachment.IsFolder ? Directory.Exists(path) : File.Exists(path);
         if (string.IsNullOrWhiteSpace(path) || !exists)
         {
@@ -422,7 +427,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void RestoreAttachmentDraft(string? projectPath, string? threadId)
     {
         isRestoringAttachmentDraft = true;
-        try { TaskWorkspace.ReplaceAttachments(attachmentDraftService.RestoreDraft(settings, projectPath, threadId, GetActiveWorkspacePath())); }
+        try
+        {
+            TaskWorkspace.ReplaceAttachments(attachmentDraftService.RestoreDraft(
+                settings,
+                projectPath,
+                threadId,
+                GetActiveWorkspacePath(),
+                GetActiveWorkspaceRoots()));
+        }
         finally
         {
             isRestoringAttachmentDraft = false;
@@ -1013,6 +1026,85 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         await SelectProjectAsync(path).ConfigureAwait(true);
     }
 
+    private bool CanEditProject(object? parameter)
+    {
+        if (IsShuttingDown || parameter is not string path || string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        var project = settings.RecentProjects.FirstOrDefault(item =>
+            ProjectFolderSet.PathsEqual(item.Path, path));
+        return project is not null && !settings.ProjectThreads.Any(thread =>
+            thread.ScopeKind == ThreadScopeKind.Project &&
+            ProjectFolderSet.PathsEqual(thread.ProjectPath, project.Path) &&
+            (thread.IsRunning || conversationWorkflow.IsRunning(thread.ThreadId)));
+    }
+
+    private async Task EditProjectAsync(object? parameter)
+    {
+        if (!CanEditProject(parameter) || parameter is not string path)
+        {
+            StatusMessage = "Wait for project tasks to finish before editing its folders";
+            return;
+        }
+
+        var project = settings.RecentProjects.First(item =>
+            ProjectFolderSet.PathsEqual(item.Path, path));
+        var selection = userInteractionService.EditProjectFolders(project);
+        if (selection is null)
+        {
+            return;
+        }
+
+        var snapshot = SettingsStorageMapper.Clone(settings);
+        var wasSelected = ProjectFolderSet.PathsEqual(SelectedProjectPath, project.Path);
+        try
+        {
+            var result = projectWorkspaceOperations.UpdateProjectFolders(
+                settings,
+                new ProjectFolderUpdateRequest(
+                    project.Path,
+                    selection.PrimaryPath,
+                    selection.FolderPaths));
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+
+            if (wasSelected)
+            {
+                SelectedProjectPath = result.Project.Path;
+                RestorePersistedThreadState();
+                Terminal.RefreshContext();
+                NotifyCodexContextChanged();
+            }
+            else
+            {
+                RefreshRecentProjects();
+            }
+
+            await Git.RefreshAsync().ConfigureAwait(true);
+            StatusMessage = result.Project.FolderPaths.Count == 1
+                ? $"Updated {result.Project.Name}"
+                : $"Updated {result.Project.Name} with {result.Project.FolderPaths.Count} folders";
+        }
+        catch (Exception ex)
+        {
+            settings.RecentProjects = snapshot.RecentProjects;
+            settings.ProjectThreads = snapshot.ProjectThreads;
+            settings.ComposerAttachmentDrafts = snapshot.ComposerAttachmentDrafts;
+            if (wasSelected)
+            {
+                SelectedProjectPath = project.Path;
+                RestorePersistedThreadState();
+            }
+            else
+            {
+                RefreshRecentProjects();
+            }
+            StatusMessage = $"Could not update project folders: {ex.Message}";
+            logger.Log(AppLogLevel.Error, "project_folders_update_failed", "Could not update project folders.", exception: ex);
+        }
+    }
+
     private async Task SelectProjectAsync(string path)
     {
         CaptureAttachmentDraft(SelectedProjectPath, activeThreadId);
@@ -1104,7 +1196,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 workspacePath,
                 ResolveHarnessId(),
                 CreateHarnessConnectionOptions(workspacePath),
-                CreateConversationStartCommand(workspacePath, instructionSnapshot),
+                CreateConversationStartCommand(workspacePath, instructionSnapshot, scope.ProjectPath),
                 new ThreadInstructionSnapshot(instructionSnapshot.DeveloperInstructions, instructionSnapshot.BaseInstructions),
                 IsTitlePlaceholder: true,
                 CreateWorktree: scope.Kind == ThreadScopeKind.Project &&
@@ -1182,7 +1274,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 sourceThread,
                 sourceWorkspace,
                 CreateHarnessConnectionOptions(sourceWorkspace),
-                CreateThreadForkRequest(sourceThread.ThreadId, sourceWorkspace, instructionSnapshot),
+                CreateThreadForkRequest(sourceThread, sourceWorkspace, instructionSnapshot),
                 new ThreadInstructionSnapshot(instructionSnapshot.DeveloperInstructions, instructionSnapshot.BaseInstructions),
                 forkPointTurnId,
                 sourceThread.ScopeKind == ThreadScopeKind.Project &&
@@ -1412,7 +1504,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 settings,
                 threadId,
                 guidance,
-                CaptureQueuedTurnOptions(GetWorkspacePathForThread(threadId)),
+                CaptureQueuedTurnOptions(threadId, GetWorkspacePathForThread(threadId)),
                 attachments,
                 skillInputs)).ConfigureAwait(true);
             ApplyFollowUpQueueMutation(threadId, mutation);
@@ -1478,7 +1570,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                         turnId,
                         attachmentDraftService.BuildHarnessPromptInputs(
                             item.Text, item.Attachments, item.Options.WorkspacePath,
-                            ResolveModel(item.Options.Model), item.SkillInputs))).ConfigureAwait(true);
+                            ResolveModel(item.Options.Model), item.SkillInputs,
+                            GetQueuedWorkspaceRoots(threadId, item.Options)))).ConfigureAwait(true);
                 ApplyFollowUpQueueMutation(threadId, mutation);
                 TaskWorkspace.NotifyQueuedFollowUpsChanged();
                 TaskWorkspace.NotifyResponseChanged();
@@ -1529,7 +1622,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                     turnId,
                     attachmentDraftService.BuildHarnessPromptInputs(
                         guidance, attachments, GetActiveWorkspacePath(), TaskWorkspace.SelectedModel,
-                        TaskWorkspace.SkillSelector.ResolveSkillInputs(guidance))),
+                        TaskWorkspace.SkillSelector.ResolveSkillInputs(guidance),
+                        GetActiveWorkspaceRoots())),
                 guidance).ConfigureAwait(true);
             TaskWorkspace.NotifyResponseChanged();
             TaskWorkspace.SkillSelector.ClearSelectedSkills();
@@ -1729,6 +1823,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private GitContext CreateGitContext() => new(
         SelectedProjectPath,
         GetActiveWorkspacePathIfAvailable(),
+        settings.RecentProjects.FirstOrDefault(project =>
+            ProjectFolderSet.PathsEqual(project.Path, SelectedProjectPath))?.FolderPaths,
         IsGeneral: string.IsNullOrWhiteSpace(SelectedProjectPath));
 
     private void LoadInstructionSettings()
@@ -2155,7 +2251,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 workspacePath,
                 ResolveHarnessId(),
                 CreateHarnessConnectionOptions(workspacePath),
-                CreateConversationStartCommand(workspacePath, instructionSnapshot),
+                CreateConversationStartCommand(workspacePath, instructionSnapshot, scope.ProjectPath),
                 new ThreadInstructionSnapshot(instructionSnapshot.DeveloperInstructions, instructionSnapshot.BaseInstructions),
                 IsTitlePlaceholder: true,
                 CreateWorktree: scope.Kind == ThreadScopeKind.Project &&
@@ -2181,7 +2277,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             ResolveHarnessId(FindThread(previousThreadId)),
             CreateHarnessConnectionOptions(workspacePath),
             CreateThreadResumeRequest(previousThreadId, GetActiveWorkspacePath()),
-            CreateConversationStartCommand(workspacePath, existingInstructionSnapshot),
+            CreateConversationStartCommand(workspacePath, existingInstructionSnapshot, scope.ProjectPath),
             new ThreadInstructionSnapshot(
                 existingInstructionSnapshot.DeveloperInstructions,
                 existingInstructionSnapshot.BaseInstructions),
@@ -2698,6 +2794,45 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         return path;
     }
 
+    private IReadOnlyList<string> GetActiveWorkspaceRoots()
+    {
+        var workspacePath = GetActiveWorkspacePath();
+        var projectPath = SelectedThread?.ScopeKind == ThreadScopeKind.Project
+            ? SelectedThread.ProjectPath
+            : SelectedProjectPath;
+        return GetWorkspaceRoots(workspacePath, projectPath);
+    }
+
+    private IReadOnlyList<string> GetWorkspaceRootsForThread(string threadId, string workspacePath)
+    {
+        var thread = settings.ProjectThreads.FirstOrDefault(item =>
+            string.Equals(item.ThreadId, threadId, StringComparison.Ordinal));
+        return GetWorkspaceRoots(workspacePath, thread?.ScopeKind == ThreadScopeKind.Project ? thread.ProjectPath : null);
+    }
+
+    private IReadOnlyList<string> GetQueuedWorkspaceRoots(
+        string threadId,
+        QueuedTurnOptionsSnapshot options) =>
+        options.WorkspaceRoots is { Count: > 0 }
+            ? ProjectFolderSet.NormalizePersisted(options.WorkspacePath, options.WorkspaceRoots)
+            : GetWorkspaceRootsForThread(threadId, options.WorkspacePath);
+
+    private IReadOnlyList<string> GetWorkspaceRoots(string workspacePath, string? projectPath)
+    {
+        var workspace = Path.GetFullPath(workspacePath);
+        if (string.IsNullOrWhiteSpace(projectPath))
+        {
+            return [workspace];
+        }
+
+        var project = settings.RecentProjects.FirstOrDefault(item =>
+            ProjectFolderSet.PathsEqual(item.Path, projectPath));
+        var attached = (project?.FolderPaths ?? [Path.GetFullPath(projectPath)])
+            .Where(Directory.Exists)
+            .ToList();
+        return ProjectFolderSet.NormalizePersisted(workspace, attached);
+    }
+
     private CodexResolvedPermissionMode ResolvePermissionPolicy()
     {
         var resolved = ExecutionPolicy.ResolvedPolicy;
@@ -2739,14 +2874,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private StartConversationCommand CreateConversationStartCommand(
         string cwd,
-        CodexInstructionSnapshot instructionSnapshot) =>
+        CodexInstructionSnapshot instructionSnapshot,
+        string? projectPath) =>
         attachmentDraftService.CreateHarnessConversationStart(
             ConversationId.New(),
             ResolvePermissionPolicy(),
             ModelOverride,
             cwd,
             instructionSnapshot.DeveloperInstructions,
-            instructionSnapshot.BaseInstructions);
+            instructionSnapshot.BaseInstructions,
+            GetWorkspaceRoots(cwd, projectPath));
 
     private ThreadResumeUseCaseRequest CreateThreadResumeRequest(string threadId, string cwd) => new(
         threadId,
@@ -2757,18 +2894,20 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             ModelOverride,
             cwd,
             ResolveInstructionSnapshot(threadId).DeveloperInstructions,
-            ResolveInstructionSnapshot(threadId).BaseInstructions));
+            ResolveInstructionSnapshot(threadId).BaseInstructions,
+            GetWorkspaceRootsForThread(threadId, cwd)));
 
     private ForkConversationCommand CreateThreadForkRequest(
-        string threadId, string cwd, CodexInstructionSnapshot instructionSnapshot) =>
+        ProjectThreadState thread, string cwd, CodexInstructionSnapshot instructionSnapshot) =>
         attachmentDraftService.CreateHarnessConversationFork(
             ConversationId.New(),
-            GetConversationAddress(threadId),
+            GetConversationAddress(thread.ThreadId),
             ResolvePermissionPolicy(),
             ModelOverride,
             cwd,
             instructionSnapshot.DeveloperInstructions,
-            instructionSnapshot.BaseInstructions);
+            instructionSnapshot.BaseInstructions,
+            GetWorkspaceRoots(cwd, thread.ScopeKind == ThreadScopeKind.Project ? thread.ProjectPath : null));
 
     private CodexInstructionSnapshot ResolveDefaultInstructionSnapshot() => new(
         settings.CustomDeveloperInstructionsEnabled
@@ -2800,7 +2939,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     => attachmentDraftService.CreateHarnessTurnStart(new HarnessTurnRequestComposition(
         GetConversationAddress(threadId), prompt, attachments, cwd, ResolvePermissionPolicy(), ModelOverride, ReasoningEffortOverride,
         TaskWorkspace.ServiceTierSelection, TaskWorkspace.SelectedModel,
-        TaskWorkspace.SkillSelector.ResolveSkillInputs(prompt)));
+        TaskWorkspace.SkillSelector.ResolveSkillInputs(prompt),
+        GetWorkspaceRootsForThread(threadId, cwd)));
 
     private ConversationAddress GetConversationAddress(string threadId)
     {
@@ -2831,10 +2971,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         return new HarnessConnectionOptions(workspacePath, harnessSettings);
     }
 
-    private QueuedTurnOptionsSnapshot CaptureQueuedTurnOptions(string workspacePath) =>
+    private QueuedTurnOptionsSnapshot CaptureQueuedTurnOptions(string threadId, string workspacePath) =>
         attachmentDraftService.CaptureQueuedOptions(
             ResolvePermissionPolicy(), ExecutionPolicy.PermissionMode, workspacePath,
-            ModelOverride, ReasoningEffortOverride, TaskWorkspace.ServiceTierSelection);
+            ModelOverride, ReasoningEffortOverride, TaskWorkspace.ServiceTierSelection,
+            GetWorkspaceRootsForThread(threadId, workspacePath));
 
     private string GetWorkspacePathForThread(string threadId)
     {
@@ -2902,7 +3043,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 options.ReasoningEffort?.ToProtocolValue(),
                 options.ServiceTier,
                 resolved.Model,
-                queued.SkillInputs));
+                queued.SkillInputs,
+                GetQueuedWorkspaceRoots(threadId, options)));
             return new PreparedHarnessTurn(
                 CreateHarnessConnectionOptions(workspacePath),
                 command);
@@ -4000,11 +4142,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         public Task BrowseProjectAsync() => owner.BrowseProjectAsync();
         public Task OpenRecentProjectAsync(object? parameter) => owner.OpenRecentProjectAsync(parameter);
+        public Task EditProjectAsync(object? parameter) => owner.EditProjectAsync(parameter);
         public Task CreateThreadAsync() => owner.NewThreadForCurrentScopeAsync();
         public Task CreateGeneralThreadAsync() => owner.NewGeneralThreadAsync();
         public Task CreateProjectThreadAsync() => owner.NewProjectThreadAsync();
         public bool CanCreateThread() => owner.CanCreateThreadInCurrentScope();
         public bool CanCreateGeneralThread() => owner.CanCreateGeneralThread();
+        public bool CanEditProject(object? parameter) => owner.CanEditProject(parameter);
         public void SelectedThreadChanged(ProjectThreadState? state) => owner.HandleSelectedThreadChanged(state);
     }
 

@@ -66,11 +66,13 @@ public interface IProjectNavigationActions
 {
     Task BrowseProjectAsync();
     Task OpenRecentProjectAsync(object? parameter);
+    Task EditProjectAsync(object? parameter);
     Task CreateThreadAsync();
     Task CreateGeneralThreadAsync();
     Task CreateProjectThreadAsync();
     bool CanCreateThread();
     bool CanCreateGeneralThread();
+    bool CanEditProject(object? parameter);
     void SelectedThreadChanged(ProjectThreadState? state);
 }
 

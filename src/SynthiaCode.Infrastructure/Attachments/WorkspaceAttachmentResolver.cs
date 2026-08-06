@@ -6,16 +6,23 @@ namespace SynthiaCode.Infrastructure.Attachments;
 public sealed class WorkspaceAttachmentResolver
 {
     public bool IsWithinWorkspace(string workspaceRoot, string candidatePath)
+        => IsWithinWorkspace([workspaceRoot], candidatePath);
+
+    public bool IsWithinWorkspace(IReadOnlyList<string> workspaceRoots, string candidatePath)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceRoot);
+        ArgumentNullException.ThrowIfNull(workspaceRoots);
         ArgumentException.ThrowIfNullOrWhiteSpace(candidatePath);
-        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workspaceRoot));
         var candidate = Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidatePath));
-        return string.Equals(root, candidate, StringComparison.OrdinalIgnoreCase) || IsContained(root, candidate);
+        return FindOwningRoot(workspaceRoots, candidate) is not null;
     }
 
     public AttachmentReference Resolve(
         string workspaceRoot,
+        string candidatePath,
+        AttachmentKind expectedKind) => Resolve([workspaceRoot], candidatePath, expectedKind);
+
+    public AttachmentReference Resolve(
+        IReadOnlyList<string> workspaceRoots,
         string candidatePath,
         AttachmentKind expectedKind)
     {
@@ -23,15 +30,16 @@ public sealed class WorkspaceAttachmentResolver
         {
             throw new ArgumentException("Workspace references must be files or folders.", nameof(expectedKind));
         }
-        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceRoot);
+        ArgumentNullException.ThrowIfNull(workspaceRoots);
         ArgumentException.ThrowIfNullOrWhiteSpace(candidatePath);
         if (candidatePath.IndexOfAny(['*', '?']) >= 0)
         {
             throw new InvalidDataException("Workspace attachment paths cannot contain wildcards.");
         }
 
-        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workspaceRoot));
         var candidate = Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidatePath));
+        var root = FindOwningRoot(workspaceRoots, candidate)
+            ?? throw new InvalidDataException("Files and folders must be inside an attached project folder.");
         if (!Directory.Exists(root))
         {
             throw new DirectoryNotFoundException($"The active workspace is unavailable: {root}");
@@ -42,7 +50,7 @@ public sealed class WorkspaceAttachmentResolver
         }
         if (!IsContained(root, candidate))
         {
-            throw new InvalidDataException("Files and folders must be inside the active workspace.");
+            throw new InvalidDataException("Files and folders must be inside an attached project folder.");
         }
         if (HasAlternateDataStream(candidate))
         {
@@ -78,13 +86,20 @@ public sealed class WorkspaceAttachmentResolver
             MediaType = expectedKind == AttachmentKind.Folder ? "inode/directory" : InferMediaType(info.Extension),
             ByteLength = info is FileInfo file ? file.Length : 0,
             WorkspaceRelativePath = relativePath,
+            WorkspaceRootPath = root,
             ManagedPath = candidate
         };
     }
 
     public AttachmentReference Revalidate(string workspaceRoot, AttachmentReference attachment)
+        => Revalidate([workspaceRoot], attachment);
+
+    public AttachmentReference Revalidate(
+        IReadOnlyList<string> workspaceRoots,
+        AttachmentReference attachment)
     {
         ArgumentNullException.ThrowIfNull(attachment);
+        ArgumentNullException.ThrowIfNull(workspaceRoots);
         if (attachment.SourceKind != AttachmentSourceKind.WorkspaceReference ||
             attachment.Kind is not (AttachmentKind.File or AttachmentKind.Folder) ||
             string.IsNullOrWhiteSpace(attachment.WorkspaceRelativePath) ||
@@ -92,12 +107,49 @@ public sealed class WorkspaceAttachmentResolver
         {
             throw new InvalidDataException("The workspace attachment reference is invalid.");
         }
+        var normalizedRoots = NormalizeRoots(workspaceRoots);
+        var root = string.IsNullOrWhiteSpace(attachment.WorkspaceRootPath)
+            ? normalizedRoots[0]
+            : normalizedRoots.FirstOrDefault(candidate =>
+                string.Equals(candidate, Path.TrimEndingDirectorySeparator(Path.GetFullPath(attachment.WorkspaceRootPath)), StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidDataException("The attachment's workspace folder is no longer attached to this project.");
         var candidate = Path.Combine(
-            Path.GetFullPath(workspaceRoot),
+            root,
             attachment.WorkspaceRelativePath.Replace('/', Path.DirectorySeparatorChar));
-        var resolved = Resolve(workspaceRoot, candidate, attachment.Kind);
+        var resolved = Resolve(normalizedRoots, candidate, attachment.Kind);
         resolved.Id = attachment.Id;
         return resolved;
+    }
+
+    private static string? FindOwningRoot(IReadOnlyList<string> workspaceRoots, string candidate)
+    {
+        var normalized = NormalizeRoots(workspaceRoots);
+        return normalized
+            .Where(root =>
+                string.Equals(root, candidate, StringComparison.OrdinalIgnoreCase) ||
+                IsContained(root, candidate))
+            .OrderByDescending(root => root.Length)
+            .FirstOrDefault();
+    }
+
+    private static IReadOnlyList<string> NormalizeRoots(IReadOnlyList<string> workspaceRoots)
+    {
+        if (workspaceRoots.Count == 0)
+        {
+            throw new ArgumentException("At least one workspace root is required.", nameof(workspaceRoots));
+        }
+
+        var result = new List<string>(workspaceRoots.Count);
+        foreach (var value in workspaceRoots)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(value);
+            var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(value));
+            if (!result.Contains(root, StringComparer.OrdinalIgnoreCase))
+            {
+                result.Add(root);
+            }
+        }
+        return result;
     }
 
     private static bool IsContained(string root, string candidate)

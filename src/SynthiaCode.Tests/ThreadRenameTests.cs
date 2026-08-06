@@ -565,6 +565,8 @@ internal static class ThreadRenameTests
         public GeneratedImageEditSelection? SelectGeneratedImageEdit(string path) =>
             GeneratedImageEditSelection.EntireImage;
 
+        public ProjectFolderEditSelection? EditProjectFolders(RecentProject project) => null;
+
         public void RevealInExplorer(string path)
         {
         }

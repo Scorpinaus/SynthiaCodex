@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using SynthiaCode.Core.Projects;
 
 namespace SynthiaCode.App.Services;
 
@@ -168,6 +169,22 @@ public sealed class WpfUserInteractionService : IUserInteractionService
     public GeneratedImageEditSelection? SelectGeneratedImageEdit(string path)
     {
         var editor = new GeneratedImageEditWindow(path);
+        if (System.Windows.Application.Current?.MainWindow is { IsVisible: true } owner)
+        {
+            editor.Owner = owner;
+        }
+        else
+        {
+            editor.ShowInTaskbar = true;
+            editor.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        }
+
+        return editor.ShowDialog() == true ? editor.Selection : null;
+    }
+
+    public ProjectFolderEditSelection? EditProjectFolders(RecentProject project)
+    {
+        var editor = new ProjectFoldersWindow(project, new WpfFolderPicker());
         if (System.Windows.Application.Current?.MainWindow is { IsVisible: true } owner)
         {
             editor.Owner = owner;

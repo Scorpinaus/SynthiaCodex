@@ -858,7 +858,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
         if (request.Sandbox is not null)
         {
-            parameters["sandboxPolicy"] = request.Sandbox.Value.ToTurnSandboxPolicy();
+            parameters["sandboxPolicy"] = request.Sandbox.Value.ToTurnSandboxPolicy(request.WorkspaceRoots);
         }
 
         AddPermissionProfile(parameters, request.PermissionProfileId);

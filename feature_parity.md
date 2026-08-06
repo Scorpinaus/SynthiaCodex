@@ -1,7 +1,7 @@
 # SynthiaCode and ChatGPT Desktop Feature Parity
 
 - **Audit date:** 6 August 2026
-- **SynthiaCode baseline:** working tree based on commit `bab45a5`, including the Goal mode slice and the completed parity work recorded below
+- **SynthiaCode baseline:** working tree based on commit `1e68742` (`Goal Mode implementation`), plus the completed multi-folder project slice recorded below
 - **Comparison surface:** ChatGPT desktop app with Codex/local-project capabilities
 - **Scope:** User-visible desktop functionality, local Codex workflows, and capabilities inherited through `codex app-server`
 
@@ -112,6 +112,15 @@
 | Phase 2 - Selected-chat workflow | Added per-chat load and reconnect refresh, stale-result rejection after chat switches, matching-thread notification handling, unsupported-runtime fallback, and set/edit/pause/resume/clear commands. Creating a goal starts its objective as the first ordinary prompt; later edits update only the goal. | **Complete** |
 | Phase 3 - Native surface and verification | Added an accessible, responsive progress row above the composer with objective, status, usage, validation, and management controls. All 5 Goal cases, 15 notification cases, and 3 responsive-layout cases pass; the Release solution build completes with zero warnings and errors. The complete Debug suite is 282/288, and all six unrelated failures reproduce in the untouched `bab45a5` snapshot. | **Complete** |
 
+## Multi-folder local project implementation parity
+
+| Phase | Implemented outcome | Status |
+| --- | --- | --- |
+| Phase 1 - Durable project roots and migration | Added backward-compatible primary-plus-secondary project persistence, normalized primary-first paths, deep-copy support, validation, and atomic primary migration for project scopes, local chat workspaces, worktree associations, composer drafts, queued turns, and legacy attachment ownership. | **Complete** |
+| Phase 2 - Codex and attachment routing | Added harness-neutral workspace-root context for start/resume/fork/turn commands, bounded `workspaceWrite` `writableRoots`, primary-only automatic configuration-discovery guidance, durable queued roots, and root-owned file/folder references that revalidate only while their folder remains attached. | **Complete** |
+| Phase 3 - Native project and Git surfaces | Added an accessible Edit project folders dialog with Add, Remove, Make primary, Save, and validation actions. The Changes inspector now discovers distinct repositories across attached folders and worktrees, keeps the effective primary first, and routes diff, stage, unstage, discard, commit, Editor, and Explorer actions through an accessible repository selector. | **Complete** |
+| Phase 4 - Verification | All 41 focused multi-folder cases pass, including migration, protocol, attachments, navigation, Git routing, and rendered-WPF accessibility. The complete Debug suite is 288/294; its same six legacy failures match the protected `1e68742` baseline, so this slice introduces no regression. The app build completes with zero warnings and errors. | **Complete** |
+
 ## Status legend
 
 | Status | Meaning |
@@ -125,7 +134,7 @@
 
 | Area | Current parity | Assessment |
 | --- | --- | --- |
-| Local coding loop | **Strong** | General and project chats, multi-turn work, persistent goals, queued follow-ups, streaming, models, permissions, terminal, Git changes, and worktrees are usable end to end. |
+| Local coding loop | **Strong** | General and multi-folder project chats, multi-turn work, persistent goals, queued follow-ups, streaming, models, permissions, terminal, multi-repository Git changes, and worktrees are usable end to end. |
 | Safety and approvals | **Near full** | The three composer permission modes and server-request approvals now map closely to ChatGPT desktop. |
 | Git and worktree lifecycle | **Moderate** | Core isolation and file-level Git operations exist; chunk review, handoff, push, PR, snapshots, and setup actions do not. |
 | Agent orchestration | **Near** | Parallel chats plus Active/Done subagent inspection, transcripts, steering, and stopping are usable; nicknames, live open-transcript refresh, and custom-agent management remain absent. |
@@ -141,7 +150,7 @@
 | --- | --- | --- | --- |
 | Start a chat without a project | First-class General scope with a managed app-data workspace, explicit and implicit creation, persistence, resume/fork/archive, attachments, queues, permissions, and per-thread terminal context | **Full** | General intentionally has no Git or assistant-worktree operations until a project is attached. |
 | Open a local project/folder | Folder picker, recent projects, project grouping, and project-scoped app-server work | **Full** | None material for the local coding loop. |
-| Multiple folders in one local project | Projects own one root folder | **Missing** | ChatGPT supports a primary folder plus secondary folders available for search, reading, and editing; SynthiaCode needs multi-root persistence, permissions, context discovery, Git/review, terminal, and attachment routing. |
+| Multiple folders in one local project | Edit project folders supports durable primary/secondary roots, primary changes, bounded Codex access, root-owned attachments, and selectable Git repositories | **Full** | Automatic `AGENTS.md`, skills, and `config.toml` discovery intentionally remains primary-only, matching Codex. The integrated terminal remains chat/worktree-owned rather than opening one terminal per attached folder. |
 | Multiple local chats per project | Collapsible Chats and Projects groups, per-project disclosure, independently persisted chats, and pinned-first ordering | **Full** | ChatGPT has broader bulk chat-management controls. |
 | Multi-turn conversations | Restored history, follow-up turns, per-turn transcript/activity, cancellation, and recovery | **Full** | None material for normal local follow-ups. |
 | Edit and resubmit user prompts | Completed prompts have an inline editor; resubmission uses `thread/rollback`, keeps the selected and later prompts/responses visible as Previous versions, reuses attachments, and continues the same thread from the edited prompt | **Full** | Conversation history rewinds while existing workspace file changes are intentionally kept and clearly disclosed, matching app-server rollback semantics. |
@@ -181,8 +190,8 @@
 | Assistant Markdown rendering | Headings, emphasis, strikethrough, inline/fenced code, hierarchical ordered/unordered/task lists, quotes, rules, aligned tables, safe links/autolinks, local and remote images, safe native HTML, footnotes, definition lists, themed syntax highlighting, per-block copy, escapes, and literal unsafe/malformed fallback | **Full** | Arbitrary executable, embedded, form, media, and browser-DOM HTML intentionally remains visible and inert. |
 | Rich activity rows | Commands, complete file changes, tools, MCP calls, structured web-search actions, plans, collaboration, guidance, and errors are projected without client-side text truncation | **Near** | Some newer item families may appear only in raw diagnostics until allowlisted. |
 | Integrated terminal | Per-thread ConPTY PowerShell sessions with start, input, clear, kill, working directory, and bounded output | **Partial** | ChatGPT can directly consume current terminal output and exposes reusable project actions; SynthiaCode does not wire terminal output into agent context or environment actions. |
-| Git status and file diff | Working/staged views, changed-file selection, and refresh | **Near** | Diff is plain text rather than a structured hunk/code-review surface. |
-| Stage, unstage, discard, commit | File-level actions with destructive confirmation and commit message UI | **Near** | No individual-hunk operations. |
+| Git status and file diff | Working/staged views, changed-file selection, refresh, and repository selection across attached project folders and active worktrees | **Near** | Diff is plain text rather than a structured hunk/code-review surface. |
+| Stage, unstage, discard, commit | Repository-scoped file actions with destructive confirmation and commit message UI | **Near** | No individual-hunk operations. |
 | Push and pull request | Terminal can run Git commands, but no native push/PR flow | **Missing** | Add branch push and GitHub pull-request creation/status. |
 | Inline review comments | No diff-row comments that become next-turn context | **Missing** | ChatGPT supports inline comments in its review pane. |
 | Dedicated code review flow | General prompts can request review; no `/review` target picker or first-class findings UI | **Partial** | Add uncommitted/base-branch/commit targets and severity/file-line findings. |
@@ -233,7 +242,7 @@
 The 6 August current-feature recheck found and classified newly documented Codex surfaces:
 
 1. **Goal mode moved from Missing to Full** for the local-chat outcome: server-owned goals now load per chat, render above the composer, and support set/edit/pause/resume/clear, usage, reconnect, and push updates.
-2. **Multi-folder local projects remain Missing.** SynthiaCode's project, workspace, terminal, Git, settings-discovery, and attachment contracts still assume one root.
+2. **Multi-folder local projects moved from Missing to Full** for the local-project outcome: projects now retain one primary plus secondary roots, migrate existing scoped state, authorize bounded multi-root turns, preserve attachment ownership, and select among attached Git repositories.
 3. **Activity view remains Missing.** Parallel execution exists, but there is no combined unread/running/blocked/needs-input inbox or completion notification center.
 4. **ChatGPT Voice coordination remains Missing.** The implemented Windows recognizer is useful local dictation, not a GPT-Live conversation that can coordinate other threads.
 5. **Ephemeral side chats remain Missing.** Current forks are durable; app-server now supports in-memory forks that do not enter stored thread lists.
@@ -377,10 +386,9 @@ P0 attachments and image input moved from **Missing** to **Near**:
 ### P0 — Complete the core local coding experience
 
 1. **Attachments and image input (managed external core implemented):** add installed-runtime managed file/folder mention smoke coverage, attachment-specific permission preflight/narrowing, interactive folder review/exclusions, bounded thumbnail decoding, and app-server history attachment materialization. Optional live external roots remain deferred.
-2. **Multi-folder local projects:** add primary/secondary roots and make permissions, context discovery, mentions, terminal ownership, Git status, and multi-repository review root-aware.
-3. **Structured Git review:** add hunk staging/revert, inline diff comments, multi-repository selection, and a dedicated review target flow.
-4. **Push and pull requests:** add native branch push and GitHub PR creation/status.
-5. **Worktree lifecycle:** add starting-branch selection, setup scripts/actions, Local/Worktree handoff, snapshots/restore, and retention settings.
+2. **Structured Git review:** add hunk staging/revert, inline diff comments, and a dedicated review target flow on top of the implemented multi-repository selector.
+3. **Push and pull requests:** add native branch push and GitHub PR creation/status.
+4. **Worktree lifecycle:** add starting-branch selection, setup scripts/actions, Local/Worktree handoff, snapshots/restore, and retention settings.
 
 ### P1 — Make parallel and long-running work first class
 
@@ -403,7 +411,7 @@ P0 attachments and image input moved from **Missing** to **Near**:
 
 ## Product recommendation
 
-Keep SynthiaCode's parity target focused on the **local coding loop**, not every ChatGPT feature. With queued follow-ups and persistent Goal mode at Full functional parity, the best next release is multi-folder local projects, followed by structured review/PR workflows and complete worktree lifecycle. Those close the largest everyday workflow gaps without requiring SynthiaCode to become a browser, connector marketplace, automation platform, or general artifact suite.
+Keep SynthiaCode's parity target focused on the **local coding loop**, not every ChatGPT feature. With queued follow-ups, persistent Goal mode, and multi-folder local projects at Full functional parity, the best next release is structured review/PR workflows, followed by complete worktree lifecycle. Those close the largest everyday workflow gaps without requiring SynthiaCode to become a browser, connector marketplace, automation platform, or general artifact suite.
 
 ## Audit sources
 

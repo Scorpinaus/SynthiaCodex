@@ -43,6 +43,11 @@ public sealed class ProjectWorkspaceOperations
     public void AddRecentProject(AppSettings settings, string projectPath) =>
         recentProjectService.AddRecentProject(settings, projectPath);
 
+    public ProjectFolderUpdateResult UpdateProjectFolders(
+        AppSettings settings,
+        ProjectFolderUpdateRequest request) =>
+        recentProjectService.UpdateProjectFolders(settings, request);
+
     public GitViewModel CreateGitViewModel(
         IUserInteractionService userInteractionService,
         IAppLogger logger,

@@ -39,6 +39,7 @@ public enum QueuedFollowUpState
 public sealed class QueuedTurnOptionsSnapshot
 {
     public string WorkspacePath { get; set; } = string.Empty;
+    public List<string> WorkspaceRoots { get; set; } = [];
     public string? Model { get; set; }
     public CodexReasoningEffort? ReasoningEffort { get; set; }
     public CodexServiceTierSelection ServiceTier { get; set; }
@@ -51,6 +52,7 @@ public sealed class QueuedTurnOptionsSnapshot
     public QueuedTurnOptionsSnapshot Clone() => new()
     {
         WorkspacePath = WorkspacePath,
+        WorkspaceRoots = [.. (WorkspaceRoots ?? [])],
         Model = Model,
         ReasoningEffort = ReasoningEffort,
         ServiceTier = ServiceTier,

@@ -217,7 +217,8 @@ public sealed record CodexTurnStartRequest(
     CodexServiceTierSelection ServiceTier = CodexServiceTierSelection.Inherit,
     CodexApprovalPolicy? ApprovalPolicy = null,
     CodexApprovalsReviewer? ApprovalsReviewer = null,
-    string? PermissionProfileId = null)
+    string? PermissionProfileId = null,
+    IReadOnlyList<string>? WorkspaceRoots = null)
 {
     public CodexTurnStartRequest(
         string ThreadId,
@@ -229,7 +230,8 @@ public sealed record CodexTurnStartRequest(
         CodexServiceTierSelection ServiceTier = CodexServiceTierSelection.Inherit,
         CodexApprovalPolicy? ApprovalPolicy = null,
         CodexApprovalsReviewer? ApprovalsReviewer = null,
-        string? PermissionProfileId = null)
+        string? PermissionProfileId = null,
+        IReadOnlyList<string>? WorkspaceRoots = null)
         : this(
             ThreadId,
             [new CodexTextInput(Prompt)],
@@ -240,7 +242,8 @@ public sealed record CodexTurnStartRequest(
             ServiceTier,
             ApprovalPolicy,
             ApprovalsReviewer,
-            PermissionProfileId)
+            PermissionProfileId,
+            WorkspaceRoots)
     {
     }
 
@@ -517,9 +520,11 @@ public static class CodexSandboxExtensions
         };
     }
 
-    public static JsonObject ToTurnSandboxPolicy(this CodexSandbox sandbox)
+    public static JsonObject ToTurnSandboxPolicy(
+        this CodexSandbox sandbox,
+        IReadOnlyList<string>? writableRoots = null)
     {
-        return new JsonObject
+        var policy = new JsonObject
         {
             ["type"] = sandbox switch
             {
@@ -529,6 +534,23 @@ public static class CodexSandboxExtensions
                 _ => throw new ArgumentOutOfRangeException(nameof(sandbox), sandbox, "Unknown sandbox value.")
             }
         };
+
+        if (sandbox == CodexSandbox.WorkspaceWrite && writableRoots is { Count: > 0 })
+        {
+            var comparer = OperatingSystem.IsWindows()
+                ? StringComparer.OrdinalIgnoreCase
+                : StringComparer.Ordinal;
+            var roots = writableRoots
+                .Select(path => string.IsNullOrWhiteSpace(path)
+                    ? throw new ArgumentException("Workspace roots cannot be empty.", nameof(writableRoots))
+                    : Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)))
+                .Distinct(comparer)
+                .ToArray();
+            policy["writableRoots"] = new JsonArray(
+                roots.Select(path => JsonValue.Create(path)).ToArray());
+        }
+
+        return policy;
     }
 }
 

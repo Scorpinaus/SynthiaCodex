@@ -8,7 +8,7 @@ The app is intended to launch and communicate with `codex app-server` while keep
 
 **Current release:** 0.1.0
 
-The current build also includes a Git-aware Changes workspace for repository status, working and staged diffs, staging, unstaging, confirmed discard, commits, and editor/Explorer shortcuts.
+The current build also includes a Git-aware Changes workspace for selectable attached repositories, working and staged diffs, staging, unstaging, confirmed discard, commits, and editor/Explorer shortcuts.
 
 See the [current architecture](docs/current-architecture.md) for the release boundary and the [feature-parity audit](feature_parity.md) for the implemented matrix and prioritized gaps.
 
@@ -42,6 +42,12 @@ Queued messages belong to their Codex thread and appear above the composer. They
 Each Codex chat can own a persistent goal for work that spans many turns. Use **Set goal** above the composer to enter an objective; the objective becomes the first prompt for a new goal and remains visible as its completion criterion.
 
 The goal row shows its current status, token and elapsed-time usage, and any runtime-provided token budget. You can pause or resume active work, edit the objective without starting another prompt, and clear the goal. Goal state is owned by `codex app-server`, isolated per chat, restored after reconnect, and updated from server notifications.
+
+## Multi-folder projects
+
+A saved local project can contain one primary folder and additional attached folders. Open a project's action menu and choose **Edit project folders** to add or remove folders or make another attached folder primary. Existing project chats and drafts migrate with the primary selection; worktree chats retain their worktree directory.
+
+The primary folder remains the Codex working directory and the automatic discovery root for `AGENTS.md`, skills, and `config.toml`. Under workspace-write permissions, every attached folder is passed to Codex as a bounded writable root. Files and subfolders from secondary roots remain durable workspace references, and the Changes inspector lets you select any distinct Git repository discovered across the attached folders.
 
 ## Execution permissions
 

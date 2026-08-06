@@ -47,21 +47,22 @@ public sealed class CodexTurnRequestFactory
     {
         var inputs = BuildInputs(
             composition.Prompt, composition.Attachments, composition.WorkspacePath,
-            composition.SelectedModel, composition.SkillInputs);
+            composition.SelectedModel, composition.SkillInputs, composition.WorkspaceRoots);
         return new CodexTurnStartRequest(
             composition.ThreadId, inputs, composition.WorkspacePath, composition.Permissions.Sandbox,
             NormalizeOverride(composition.Model), ParseReasoningEffort(composition.ReasoningEffort), composition.ServiceTier,
             composition.Permissions.ApprovalPolicy, composition.Permissions.ApprovalsReviewer,
-            composition.Permissions.PermissionProfileId);
+            composition.Permissions.PermissionProfileId, composition.WorkspaceRoots);
     }
 
     public IReadOnlyList<CodexUserInput> BuildInputs(
         string prompt, IReadOnlyList<AttachmentReference> attachments, string workspacePath,
-        CodexModelOption? selectedModel, IReadOnlyList<CodexSkillInput> skillInputs)
+        CodexModelOption? selectedModel, IReadOnlyList<CodexSkillInput> skillInputs,
+        IReadOnlyList<string>? workspaceRoots = null)
     {
         ValidateImageSupport(attachments, selectedModel);
         var inputs = new AttachmentPromptInputBuilder(attachmentStore, workspaceAttachmentResolver)
-            .Build(prompt, attachments, workspacePath)
+            .Build(prompt, attachments, workspacePath, workspaceRoots)
             .ToList();
         inputs.AddRange(skillInputs);
         return inputs;
@@ -69,9 +70,11 @@ public sealed class CodexTurnRequestFactory
 
     public QueuedTurnOptionsSnapshot CaptureQueuedOptions(
         CodexResolvedPermissionMode permissions, CodexPermissionMode permissionMode,
-        string workspacePath, string? model, string? reasoningEffort, CodexServiceTierSelection serviceTier) => new()
+        string workspacePath, string? model, string? reasoningEffort, CodexServiceTierSelection serviceTier,
+        IReadOnlyList<string>? workspaceRoots = null) => new()
         {
             WorkspacePath = workspacePath,
+            WorkspaceRoots = [.. (workspaceRoots ?? [workspacePath])],
             Model = NormalizeOverride(model),
             ReasoningEffort = ParseReasoningEffort(reasoningEffort),
             ServiceTier = serviceTier,
@@ -115,4 +118,5 @@ public sealed record TurnRequestComposition(
     string? ReasoningEffort,
     CodexServiceTierSelection ServiceTier,
     CodexModelOption? SelectedModel,
-    IReadOnlyList<CodexSkillInput> SkillInputs);
+    IReadOnlyList<CodexSkillInput> SkillInputs,
+    IReadOnlyList<string>? WorkspaceRoots = null);

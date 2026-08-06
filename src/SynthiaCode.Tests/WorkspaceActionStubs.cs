@@ -91,6 +91,7 @@ internal sealed class ProjectThreadActionStub : IProjectNavigationActions, IThre
 {
     public Func<Task> Browse { get; init; } = () => Task.CompletedTask;
     public Func<object?, Task> OpenRecent { get; init; } = _ => Task.CompletedTask;
+    public Func<object?, Task> EditProject { get; init; } = _ => Task.CompletedTask;
     public Func<Task> Create { get; init; } = () => Task.CompletedTask;
     public Func<Task> CreateGeneral { get; init; } = () => Task.CompletedTask;
     public Func<Task> CreateProject { get; init; } = () => Task.CompletedTask;
@@ -101,6 +102,7 @@ internal sealed class ProjectThreadActionStub : IProjectNavigationActions, IThre
     public Func<Task> RemoveWorktree { get; init; } = () => Task.CompletedTask;
     public Func<bool> CanCreate { get; init; } = () => false;
     public Func<bool> CanCreateGeneral { get; init; } = () => false;
+    public Predicate<object?> CanEditProject { get; init; } = _ => false;
     public Func<bool> CanUse { get; init; } = () => false;
     public Func<bool> CanFork { get; init; } = () => false;
     public Func<bool> CanArchive { get; init; } = () => false;
@@ -114,10 +116,10 @@ internal sealed class ProjectThreadActionStub : IProjectNavigationActions, IThre
     public Func<Task> Rename { get; init; } = () => Task.CompletedTask;
     public Func<bool> CanRename { get; init; } = () => false;
 
-    public Task BrowseProjectAsync() => Browse(); public Task OpenRecentProjectAsync(object? parameter) => OpenRecent(parameter);
+    public Task BrowseProjectAsync() => Browse(); public Task OpenRecentProjectAsync(object? parameter) => OpenRecent(parameter); public Task EditProjectAsync(object? parameter) => EditProject(parameter);
     public Task CreateThreadAsync() => Create(); public Task CreateGeneralThreadAsync() => CreateGeneral(); public Task CreateProjectThreadAsync() => CreateProject();
     public Task ResumeThreadAsync() => Resume(); public Task ForkThreadAsync() => Fork(); public Task ArchiveThreadAsync() => Archive(); public Task UnarchiveThreadAsync() => Unarchive(); public Task RemoveWorktreeAsync() => RemoveWorktree();
-    public bool CanCreateThread() => CanCreate(); public bool CanCreateGeneralThread() => CanCreateGeneral(); public bool CanUseSelectedThread() => CanUse(); public bool CanForkSelectedThread() => CanFork(); public bool CanArchiveSelectedThread() => CanArchive(); public bool CanUnarchiveSelectedThread() => CanUnarchive(); public bool CanRemoveSelectedWorktree() => CanRemove();
+    public bool CanCreateThread() => CanCreate(); public bool CanCreateGeneralThread() => CanCreateGeneral(); bool IProjectNavigationActions.CanEditProject(object? parameter) => CanEditProject.Invoke(parameter); public bool CanUseSelectedThread() => CanUse(); public bool CanForkSelectedThread() => CanFork(); public bool CanArchiveSelectedThread() => CanArchive(); public bool CanUnarchiveSelectedThread() => CanUnarchive(); public bool CanRemoveSelectedWorktree() => CanRemove();
     public void SelectedThreadChanged(ProjectThreadState? state) => SelectionChanged(state); public Task TogglePinThreadAsync() => TogglePin(); public Task DeleteThreadAsync() => Delete(); public bool CanTogglePinThread() => CanTogglePin(); public bool CanDeleteThread() => CanDelete(); public Task RenameThreadAsync() => Rename(); public bool CanRenameThread() => CanRename();
 }
 

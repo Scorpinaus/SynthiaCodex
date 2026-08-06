@@ -6,6 +6,7 @@ using SynthiaCode.Core.Codex;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Git;
 using SynthiaCode.Core.Logging;
+using SynthiaCode.Core.Projects;
 using SynthiaCode.Core.Settings;
 using SynthiaCode.Core.Terminal;
 using SynthiaCode.Core.Worktrees;
@@ -152,7 +153,8 @@ internal static class LegacyBehavioralTests
         .. NativeSkillInvocationTests.All,
         .. AgentManagementTests.All,
         .. DictationTests.All,
-        .. GoalModeTests.All
+        .. GoalModeTests.All,
+        .. MultiFolderProjectTests.All
     ];
 
 static Task TestRecentProjectsAsync()
@@ -3585,6 +3587,8 @@ internal sealed class FakeUserInteractionService : IUserInteractionService
 
     public string? SelectedImageEditPath { get; private set; }
 
+    public ProjectFolderEditSelection? ProjectFolderSelection { get; set; }
+
     public bool ConfirmDestructiveAction(string title, string message) => true;
 
     public string? PromptForText(string title, string message, string initialValue) => null;
@@ -3606,6 +3610,9 @@ internal sealed class FakeUserInteractionService : IUserInteractionService
         SelectedImageEditPath = path;
         return ImageEditSelection;
     }
+
+    public ProjectFolderEditSelection? EditProjectFolders(RecentProject project) =>
+        ProjectFolderSelection;
 
     public void RevealInExplorer(string path)
     {

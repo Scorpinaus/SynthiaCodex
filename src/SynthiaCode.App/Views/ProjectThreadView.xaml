@@ -328,6 +328,10 @@
                                             <MenuItem Header="New chat in worktree"
                                                       Command="{Binding NewWorktreeThreadForProjectCommand}"
                                                       CommandParameter="{Binding PlacementTarget.DataContext.Path, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                            <MenuItem Header="Edit project folders"
+                                                      AutomationProperties.Name="Edit project folders"
+                                                      Command="{Binding EditProjectCommand}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext.Path, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                                         </ContextMenu>
                                     </Button.ContextMenu>
                                 </Button>

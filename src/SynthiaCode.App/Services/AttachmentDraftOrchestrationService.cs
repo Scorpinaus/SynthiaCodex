@@ -55,8 +55,9 @@ public sealed class AttachmentDraftOrchestrationService
 
     public IReadOnlyList<CodexUserInput> BuildPromptInputs(
         string prompt, IReadOnlyList<AttachmentReference> attachments, string workspacePath,
-        CodexModelOption? selectedModel, IReadOnlyList<CodexSkillInput> skillInputs) =>
-        turnRequestFactory.BuildInputs(prompt, attachments, workspacePath, selectedModel, skillInputs);
+        CodexModelOption? selectedModel, IReadOnlyList<CodexSkillInput> skillInputs,
+        IReadOnlyList<string>? workspaceRoots = null) =>
+        turnRequestFactory.BuildInputs(prompt, attachments, workspacePath, selectedModel, skillInputs, workspaceRoots);
 
     public StartConversationCommand CreateHarnessConversationStart(
         ConversationId conversationId,
@@ -64,14 +65,16 @@ public sealed class AttachmentDraftOrchestrationService
         string? model,
         string workspacePath,
         string? developerInstructions,
-        string? baseInstructions) =>
+        string? baseInstructions,
+        IReadOnlyList<string>? workspaceRoots = null) =>
         harnessTurnRequestFactory.CreateConversationStart(
             conversationId,
             permissions,
             model,
             workspacePath,
             developerInstructions,
-            baseInstructions);
+            baseInstructions,
+            workspaceRoots);
 
     public ResumeConversationCommand CreateHarnessConversationResume(
         ConversationAddress address,
@@ -79,14 +82,16 @@ public sealed class AttachmentDraftOrchestrationService
         string? model,
         string workspacePath,
         string? developerInstructions,
-        string? baseInstructions) =>
+        string? baseInstructions,
+        IReadOnlyList<string>? workspaceRoots = null) =>
         harnessTurnRequestFactory.CreateConversationResume(
             address,
             permissions,
             model,
             workspacePath,
             developerInstructions,
-            baseInstructions);
+            baseInstructions,
+            workspaceRoots);
 
     public ForkConversationCommand CreateHarnessConversationFork(
         ConversationId conversationId,
@@ -95,7 +100,8 @@ public sealed class AttachmentDraftOrchestrationService
         string? model,
         string workspacePath,
         string? developerInstructions,
-        string? baseInstructions) =>
+        string? baseInstructions,
+        IReadOnlyList<string>? workspaceRoots = null) =>
         harnessTurnRequestFactory.CreateConversationFork(
             conversationId,
             source,
@@ -103,7 +109,8 @@ public sealed class AttachmentDraftOrchestrationService
             model,
             workspacePath,
             developerInstructions,
-            baseInstructions);
+            baseInstructions,
+            workspaceRoots);
 
     public StartTurnCommand CreateHarnessTurnStart(HarnessTurnRequestComposition composition) =>
         harnessTurnRequestFactory.CreateTurnStart(composition);
@@ -113,19 +120,22 @@ public sealed class AttachmentDraftOrchestrationService
         IReadOnlyList<AttachmentReference> attachments,
         string workspacePath,
         CodexModelOption? selectedModel,
-        IReadOnlyList<CodexSkillInput> skillInputs) =>
+        IReadOnlyList<CodexSkillInput> skillInputs,
+        IReadOnlyList<string>? workspaceRoots = null) =>
         harnessTurnRequestFactory.BuildInputs(
             prompt,
             attachments,
             workspacePath,
             selectedModel,
-            skillInputs);
+            skillInputs,
+            workspaceRoots);
 
     public QueuedTurnOptionsSnapshot CaptureQueuedOptions(
         CodexResolvedPermissionMode permissions, CodexPermissionMode permissionMode,
-        string workspacePath, string? model, string? reasoningEffort, CodexServiceTierSelection serviceTier) =>
+        string workspacePath, string? model, string? reasoningEffort, CodexServiceTierSelection serviceTier,
+        IReadOnlyList<string>? workspaceRoots = null) =>
         turnRequestFactory.CaptureQueuedOptions(
-            permissions, permissionMode, workspacePath, model, reasoningEffort, serviceTier);
+            permissions, permissionMode, workspacePath, model, reasoningEffort, serviceTier, workspaceRoots);
 
     public async Task RestoreAndCleanupPersistedAttachmentsAsync(AppSettings settings)
     {
@@ -174,16 +184,23 @@ public sealed class AttachmentDraftOrchestrationService
     public async Task<AttachmentImportResult> ImportPathsAsync(
         IEnumerable<string> paths,
         string workspacePath,
+        CancellationToken cancellationToken = default) =>
+        await ImportPathsAsync(paths, [workspacePath], cancellationToken).ConfigureAwait(false);
+
+    public async Task<AttachmentImportResult> ImportPathsAsync(
+        IEnumerable<string> paths,
+        IReadOnlyList<string> workspaceRoots,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(workspaceRoots);
         var attachments = new List<AttachmentReference>();
         var failures = new List<string>();
         foreach (var path in paths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             try
             {
-                attachments.Add(await ImportPathAsync(path, workspacePath, cancellationToken).ConfigureAwait(false));
+                attachments.Add(await ImportPathAsync(path, workspaceRoots, cancellationToken).ConfigureAwait(false));
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
             {
@@ -244,7 +261,8 @@ public sealed class AttachmentDraftOrchestrationService
         AppSettings settings,
         string? projectPath,
         string? threadId,
-        string workspacePath)
+        string workspacePath,
+        IReadOnlyList<string>? workspaceRoots = null)
     {
         var scope = string.IsNullOrWhiteSpace(projectPath)
             ? ThreadScopeKey.General
@@ -252,24 +270,31 @@ public sealed class AttachmentDraftOrchestrationService
         var draft = settings.ComposerAttachmentDrafts.FirstOrDefault(item =>
             scope.Matches(item.ScopeKind, item.ProjectPath) &&
             string.Equals(item.ThreadId, threadId, StringComparison.Ordinal));
-        return (draft?.Attachments ?? []).Select(attachment => RevalidateWorkspaceReference(workspacePath, attachment)).ToList();
+        return (draft?.Attachments ?? []).Select(attachment =>
+            RevalidateWorkspaceReference(workspaceRoots ?? [workspacePath], attachment)).ToList();
     }
 
-    public string ResolveOpenPath(string workspacePath, AttachmentReference attachment)
+    public string ResolveOpenPath(
+        string workspacePath,
+        AttachmentReference attachment,
+        IReadOnlyList<string>? workspaceRoots = null)
     {
         ArgumentNullException.ThrowIfNull(attachment);
         return attachment.SourceKind == AttachmentSourceKind.ManagedCopy
             ? attachmentStore?.ResolvePath(attachment) ?? attachment.ManagedPath ?? string.Empty
-            : workspaceAttachmentResolver.Revalidate(workspacePath, attachment).ManagedPath ?? string.Empty;
+            : workspaceAttachmentResolver.Revalidate(workspaceRoots ?? [workspacePath], attachment).ManagedPath ?? string.Empty;
     }
 
-    private async Task<AttachmentReference> ImportPathAsync(string path, string workspacePath, CancellationToken cancellationToken)
+    private async Task<AttachmentReference> ImportPathAsync(
+        string path,
+        IReadOnlyList<string> workspaceRoots,
+        CancellationToken cancellationToken)
     {
-        var isWithinWorkspace = workspaceAttachmentResolver.IsWithinWorkspace(workspacePath, path);
+        var isWithinWorkspace = workspaceAttachmentResolver.IsWithinWorkspace(workspaceRoots, path);
         if (Directory.Exists(path))
         {
             return isWithinWorkspace
-                ? workspaceAttachmentResolver.Resolve(workspacePath, path, AttachmentKind.Folder)
+                ? workspaceAttachmentResolver.Resolve(workspaceRoots, path, AttachmentKind.Folder)
                 : await GetStore().ImportFolderAsync(path, cancellationToken).ConfigureAwait(false);
         }
         if (IsSupportedImagePath(path))
@@ -277,11 +302,13 @@ public sealed class AttachmentDraftOrchestrationService
             return await GetStore().ImportFileAsync(path, cancellationToken).ConfigureAwait(false);
         }
         return isWithinWorkspace
-            ? workspaceAttachmentResolver.Resolve(workspacePath, path, AttachmentKind.File)
+            ? workspaceAttachmentResolver.Resolve(workspaceRoots, path, AttachmentKind.File)
             : await GetStore().ImportExternalFileAsync(path, cancellationToken).ConfigureAwait(false);
     }
 
-    private AttachmentReference RevalidateWorkspaceReference(string workspacePath, AttachmentReference attachment)
+    private AttachmentReference RevalidateWorkspaceReference(
+        IReadOnlyList<string> workspaceRoots,
+        AttachmentReference attachment)
     {
         if (attachment.SourceKind != AttachmentSourceKind.WorkspaceReference)
         {
@@ -289,7 +316,7 @@ public sealed class AttachmentDraftOrchestrationService
         }
         try
         {
-            return workspaceAttachmentResolver.Revalidate(workspacePath, attachment);
+            return workspaceAttachmentResolver.Revalidate(workspaceRoots, attachment);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException)
         {

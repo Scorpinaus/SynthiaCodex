@@ -45,6 +45,9 @@ public sealed class ProjectThreadViewModel : ObservableObject
         ClearChatSearchCommand = new RelayCommand(() => ChatSearchText = string.Empty);
         OpenChatSearchResultCommand = new AsyncRelayCommand(OpenChatSearchResultAsync);
         BrowseProjectCommand = new AsyncRelayCommand(navigationActions.BrowseProjectAsync);
+        EditProjectCommand = new AsyncRelayCommand(
+            navigationActions.EditProjectAsync,
+            navigationActions.CanEditProject);
         OpenRecentProjectCommand = new AsyncRelayCommand(async parameter =>
         {
             if (parameter is not string path || string.IsNullOrWhiteSpace(path))
@@ -91,6 +94,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
         [
             (AsyncRelayCommand)NewThreadCommand,
             (AsyncRelayCommand)NewGeneralThreadCommand,
+            (AsyncRelayCommand)EditProjectCommand,
             (AsyncRelayCommand)ResumeThreadCommand,
             (AsyncRelayCommand)ForkThreadCommand,
             (AsyncRelayCommand)ArchiveThreadCommand,
@@ -119,6 +123,7 @@ public sealed class ProjectThreadViewModel : ObservableObject
     public ICommand OpenChatSearchResultCommand { get; }
     public ICommand BrowseProjectCommand { get; }
     public ICommand OpenRecentProjectCommand { get; }
+    public ICommand EditProjectCommand { get; }
     public ICommand NewThreadCommand { get; }
     public ICommand NewGeneralThreadCommand { get; }
     public ICommand NewThreadForProjectCommand { get; }

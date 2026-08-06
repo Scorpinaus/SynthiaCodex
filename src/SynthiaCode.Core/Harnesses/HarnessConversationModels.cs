@@ -47,7 +47,8 @@ public sealed record StartConversationCommand(
     string? WorkspacePath,
     HarnessTurnOptions Options,
     string? DeveloperInstructions = null,
-    string? BaseInstructions = null);
+    string? BaseInstructions = null,
+    IReadOnlyList<string>? WorkspaceRoots = null);
 
 public sealed record StartConversationResult(ConversationAddress Address);
 
@@ -56,7 +57,8 @@ public sealed record ResumeConversationCommand(
     string? WorkspacePath,
     HarnessTurnOptions Options,
     string? DeveloperInstructions = null,
-    string? BaseInstructions = null);
+    string? BaseInstructions = null,
+    IReadOnlyList<string>? WorkspaceRoots = null);
 
 public sealed record ResumeConversationResult(
     ConversationAddress Address,
@@ -76,7 +78,8 @@ public sealed record ForkConversationCommand(
     string? WorkspacePath,
     HarnessTurnOptions Options,
     string? DeveloperInstructions = null,
-    string? BaseInstructions = null);
+    string? BaseInstructions = null,
+    IReadOnlyList<string>? WorkspaceRoots = null);
 
 public sealed record ForkConversationResult(ConversationAddress Address);
 
@@ -92,7 +95,8 @@ public sealed record StartTurnCommand(
     ConversationAddress Address,
     IReadOnlyList<HarnessContentPart> Inputs,
     string? WorkspacePath,
-    HarnessTurnOptions Options)
+    HarnessTurnOptions Options,
+    IReadOnlyList<string>? WorkspaceRoots = null)
 {
     public string Prompt => string.Join(
         Environment.NewLine,

@@ -5,4 +5,8 @@ namespace SynthiaCode.Core.Projects;
 public interface IRecentProjectService
 {
     IReadOnlyList<RecentProject> AddRecentProject(AppSettings settings, string projectPath);
+
+    ProjectFolderUpdateResult UpdateProjectFolders(
+        AppSettings settings,
+        ProjectFolderUpdateRequest request);
 }

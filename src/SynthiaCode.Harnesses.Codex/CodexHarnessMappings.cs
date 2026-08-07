@@ -101,7 +101,8 @@ public static class CodexHarnessMappings
             source.IsSuperseded,
             source.Activity.Select(ToHarness).ToArray(),
             source.UserAttachments.Select(attachment => attachment.Clone()).ToArray(),
-            source.GeneratedImagePaths.ToArray());
+            source.GeneratedImagePaths.ToArray(),
+            source.Diff);
     }
 
     public static ActivityItem ToHarness(this CodexTimelineItem source)

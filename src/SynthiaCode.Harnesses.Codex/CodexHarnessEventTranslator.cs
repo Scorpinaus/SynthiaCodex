@@ -28,6 +28,14 @@ public static class CodexHarnessEventTranslator
             CodexAppServerNotificationKind.AgentMessageDelta
                 when threadId is not null && turnId is not null =>
                 TranslateAgentDelta(notification, threadId, turnId, occurredAt),
+            CodexAppServerNotificationKind.TurnDiffUpdated
+                when threadId is not null && turnId is not null =>
+                [new TurnDiffChangedEvent(
+                    HarnessId.Codex,
+                    threadId,
+                    turnId,
+                    ReadString(notification.Params, "diff") ?? string.Empty,
+                    occurredAt)],
             CodexAppServerNotificationKind.TurnCompleted
                 when threadId is not null && turnId is not null =>
                 [new TurnCompletedEvent(

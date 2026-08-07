@@ -331,6 +331,7 @@ public enum CodexAppServerNotificationKind
     ThreadCompacted,
     TurnStarted,
     TurnCompleted,
+    TurnDiffUpdated,
     TurnPlanUpdated,
     ItemStarted,
     ItemCompleted,
@@ -355,6 +356,7 @@ public static class CodexAppServerNotificationMethods
     public const string ThreadCompacted = "thread/compacted";
     public const string TurnStarted = "turn/started";
     public const string TurnCompleted = "turn/completed";
+    public const string TurnDiffUpdated = "turn/diff/updated";
     public const string TurnPlanUpdated = "turn/plan/updated";
     public const string ItemStarted = "item/started";
     public const string ItemCompleted = "item/completed";
@@ -431,6 +433,7 @@ public sealed record CodexAppServerNotification(
         CodexAppServerNotificationMethods.ThreadCompacted => CodexAppServerNotificationKind.ThreadCompacted,
         CodexAppServerNotificationMethods.TurnStarted => CodexAppServerNotificationKind.TurnStarted,
         CodexAppServerNotificationMethods.TurnCompleted => CodexAppServerNotificationKind.TurnCompleted,
+        CodexAppServerNotificationMethods.TurnDiffUpdated => CodexAppServerNotificationKind.TurnDiffUpdated,
         CodexAppServerNotificationMethods.TurnPlanUpdated => CodexAppServerNotificationKind.TurnPlanUpdated,
         CodexAppServerNotificationMethods.ItemStarted => CodexAppServerNotificationKind.ItemStarted,
         CodexAppServerNotificationMethods.ItemCompleted => CodexAppServerNotificationKind.ItemCompleted,

@@ -241,7 +241,8 @@ public sealed class TurnExecutionUseCaseService
             ActivityKey = item.Id
         })],
         UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())],
-        GeneratedImagePaths = [.. source.GeneratedImagePaths]
+        GeneratedImagePaths = [.. source.GeneratedImagePaths],
+        Diff = source.Diff
     };
 }
 

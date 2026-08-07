@@ -158,7 +158,8 @@ internal static class LegacyBehavioralTests
         .. CodeReviewWorkflowTests.All,
         .. StructuredReviewFindingsTests.All,
         .. InlineReviewCommentsTests.All,
-        .. HunkGitOperationsTests.All
+        .. HunkGitOperationsTests.All,
+        .. HistoricalDiffScopesTests.All
     ];
 
 static Task TestRecentProjectsAsync()

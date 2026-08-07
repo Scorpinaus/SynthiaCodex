@@ -333,6 +333,7 @@ public sealed class CodexThreadService
                 }
             }
             turn.AssistantResponse = UnicodeTextNormalizer.RepairLegacyMojibake(snapshot.AssistantResponse);
+            turn.Diff = snapshot.Diff;
             turn.Status = snapshot.Status;
             turn.StartedAt = snapshot.StartedAt;
             turn.CompletedAt = snapshot.CompletedAt;
@@ -348,13 +349,21 @@ public sealed class CodexThreadService
         RefreshCompatibilityResponse();
     }
 
-    public IReadOnlyList<CodexConversationTurnSnapshot> SnapshotConversation() =>
-        ConversationTurns.TakeLast(MaximumConversationTurns).Select(turn =>
+    public IReadOnlyList<CodexConversationTurnSnapshot> SnapshotConversation()
+    {
+        var retainedTurns = ConversationTurns.TakeLast(MaximumConversationTurns).ToList();
+        var latestTurn = retainedTurns.LastOrDefault(turn => !turn.IsSuperseded);
+        return retainedTurns.Select(turn =>
         {
             var snapshot = turn.ToSnapshot();
             snapshot.Activity = [.. snapshot.Activity.TakeLast(MaximumPersistedActivityItemsPerTurn)];
+            if (!ReferenceEquals(turn, latestTurn))
+            {
+                snapshot.Diff = string.Empty;
+            }
             return snapshot;
         }).ToList();
+    }
 
     public void ApplyEvent(HarnessEvent harnessEvent)
     {
@@ -392,6 +401,11 @@ public sealed class CodexThreadService
                     var responseTurn = BindPendingTurn(delta.RemoteTurnId!);
                     responseTurn.AssistantResponse += UnicodeTextNormalizer.RepairLegacyMojibake(delta.Delta);
                     RefreshCompatibilityResponse();
+                    break;
+
+                case TurnDiffChangedEvent changed:
+                    ActiveThreadId ??= changed.RemoteConversationId;
+                    BindPendingTurn(changed.RemoteTurnId!).Diff = changed.Diff;
                     break;
 
                 case ActivityChangedEvent changed:
@@ -516,6 +530,13 @@ public sealed class CodexThreadService
 
             case CodexAppServerNotificationKind.AgentMessageDelta:
                 ApplyAgentMessageDelta(notification);
+                break;
+
+            case CodexAppServerNotificationKind.TurnDiffUpdated:
+                if (GetNotificationTurn(notification) is { } diffTurn)
+                {
+                    diffTurn.Diff = ReadString(notification.Params, "diff") ?? string.Empty;
+                }
                 break;
 
             case CodexAppServerNotificationKind.TurnCompleted:

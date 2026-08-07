@@ -132,7 +132,8 @@ public static class SettingsStorageMapper
         ReviewScope = source.ReviewScope,
         Activity = [.. source.Activity],
         UserAttachments = [.. source.UserAttachments.Select(CloneAttachment)],
-        GeneratedImagePaths = [.. source.GeneratedImagePaths]
+        GeneratedImagePaths = [.. source.GeneratedImagePaths],
+        Diff = source.Diff
     };
 
     private static QueuedFollowUpSnapshot CloneQueuedFollowUp(QueuedFollowUpSnapshot source) => new()

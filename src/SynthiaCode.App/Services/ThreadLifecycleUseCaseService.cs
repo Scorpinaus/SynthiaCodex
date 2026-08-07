@@ -429,7 +429,8 @@ public sealed class ThreadLifecycleUseCaseService
         ReviewScope = source.ReviewScope,
         Activity = [.. source.Activity],
         UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())],
-        GeneratedImagePaths = [.. source.GeneratedImagePaths]
+        GeneratedImagePaths = [.. source.GeneratedImagePaths],
+        Diff = source.Diff
     };
 
     private static CodexConversationTurnSnapshot ToLegacySnapshot(ConversationTurnSnapshot source) => new()
@@ -460,7 +461,8 @@ public sealed class ThreadLifecycleUseCaseService
             ActivityKey = item.Id
         })],
         UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())],
-        GeneratedImagePaths = [.. source.GeneratedImagePaths]
+        GeneratedImagePaths = [.. source.GeneratedImagePaths],
+        Diff = source.Diff
     };
 }
 

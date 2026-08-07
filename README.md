@@ -8,7 +8,7 @@ The app is intended to launch and communicate with `codex app-server` while keep
 
 **Current release:** 0.1.0
 
-The current build also includes a Git-aware Changes workspace for selectable attached repositories, working and staged diffs, file- and hunk-level staging/unstaging/confirmed discard, commits, dedicated Codex code review, and editor/Explorer shortcuts.
+The current build also includes a Git-aware Changes workspace for selectable attached repositories; Unstaged, Staged, exact Commit, merge-base Branch, and latest-turn diffs; file- and hunk-level staging/unstaging/confirmed discard; commits; dedicated Codex code review; and editor/Explorer shortcuts.
 
 See the [current architecture](docs/current-architecture.md) for the release boundary and the [feature-parity audit](feature_parity.md) for the implemented matrix and prioritized gaps.
 
@@ -55,9 +55,11 @@ In a Git-backed Codex project chat, choose **Review** beside the composer or sub
 
 Diff rows now also expose an accessible **Add comment** action. Pending user comments retain the repository, renamed path, old/new side, line number, and captured diff text; they remain editable and removable, persist per chat beside attachment drafts, and are appended deterministically to the next start, active-turn steer, or queued follow-up. Only the captured comment IDs clear after the submission is acknowledged, so comments added while a request is in flight or in another chat remain intact. Queued cards disclose their captured comment count.
 
-For ordinary tracked text modifications, each `@@` row also exposes **Stage hunk** and **Discard hunk** in the Working view or **Unstage hunk** in the Staged view. Hunk patches are applied through Git standard input; discard requires confirmation and refreshes the selected repository without affecting adjacent hunks. Added, deleted, renamed, copied, conflicted, type-changed, untracked, and binary changes retain the existing whole-file actions.
+For ordinary tracked text modifications, each `@@` row also exposes **Stage hunk** and **Discard hunk** in the Unstaged view or **Unstage hunk** in the Staged view. Hunk patches are applied through Git standard input; discard requires confirmation and refreshes the selected repository without affecting adjacent hunks. Added, deleted, renamed, copied, conflicted, type-changed, untracked, and binary changes retain the existing whole-file actions.
 
-Commit/Branch/Last turn diff loading, confidence display for app-server's plain-text review payload, and detached review delivery remain separate parity gaps.
+The Changes comparison selector also loads an exact recent commit, compares the selected base branch's merge base to `HEAD`, or renders the latest app-server turn diff. Commit and Branch retain the selected repository; Last turn follows Codex's **All repos** presentation and survives restart through a bounded latest-turn snapshot. All three historical scopes are read-only and reuse the existing virtualized line renderer.
+
+Confidence display for app-server's plain-text review payload and detached review delivery remain separate parity gaps.
 
 ## Execution permissions
 

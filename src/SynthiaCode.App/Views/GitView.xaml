@@ -152,19 +152,51 @@
             <TextBlock Text="{Binding Git.Branch, TargetNullValue=Changes}"
                        FontSize="16"
                        FontWeight="SemiBold"
-                       TextTrimming="CharacterEllipsis" />
+                       TextTrimming="CharacterEllipsis"
+                       Visibility="{Binding Git.ShowsRepositorySelector, Converter={StaticResource BooleanToVisibilityConverter}}" />
+            <TextBlock Text="All repos"
+                       FontSize="16"
+                       FontWeight="SemiBold"
+                       Visibility="{Binding Git.ShowsRepositorySelector, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
             <TextBlock Text="{Binding Git.StatusMessage}"
                        Foreground="{DynamicResource TextSecondaryBrush}"
                        FontSize="11"
                        Margin="0,3,0,0"
                        TextWrapping="Wrap" />
-            <TextBlock Text="Repository"
+            <TextBlock Text="Comparison"
                        Style="{StaticResource SectionLabel}"
                        Margin="0,10,0,4" />
+            <ComboBox x:Name="DiffScopeSelector"
+                      ItemsSource="{Binding Git.DiffScopes}"
+                      SelectedItem="{Binding Git.SelectedDiffScope, Mode=TwoWay}"
+                      DisplayMemberPath="DisplayName"
+                      MinHeight="32"
+                      AutomationProperties.Name="Comparison scope"
+                      ToolTip="Choose which changes to inspect" />
+            <ComboBox x:Name="CommitComparisonSelector"
+                      ItemsSource="{Binding Git.ReviewCommits}"
+                      SelectedItem="{Binding Git.SelectedReviewCommit, Mode=TwoWay}"
+                      DisplayMemberPath="DisplayLabel"
+                      MinHeight="32"
+                      Margin="0,6,0,0"
+                      Visibility="{Binding Git.ShowsCommitSelector, Converter={StaticResource BooleanToVisibilityConverter}}"
+                      AutomationProperties.Name="Commit to compare" />
+            <ComboBox x:Name="BranchComparisonSelector"
+                      ItemsSource="{Binding Git.ReviewBranches}"
+                      SelectedItem="{Binding Git.SelectedReviewBranch, Mode=TwoWay}"
+                      MinHeight="32"
+                      Margin="0,6,0,0"
+                      Visibility="{Binding Git.ShowsBranchSelector, Converter={StaticResource BooleanToVisibilityConverter}}"
+                      AutomationProperties.Name="Base branch to compare" />
+            <TextBlock Text="Repository"
+                       Style="{StaticResource SectionLabel}"
+                       Margin="0,10,0,4"
+                       Visibility="{Binding Git.ShowsRepositorySelector, Converter={StaticResource BooleanToVisibilityConverter}}" />
             <ComboBox ItemsSource="{Binding Git.Repositories}"
                       SelectedItem="{Binding Git.SelectedRepository, Mode=TwoWay}"
                       DisplayMemberPath="DisplayLabel"
                       MinHeight="32"
+                      Visibility="{Binding Git.ShowsRepositorySelector, Converter={StaticResource BooleanToVisibilityConverter}}"
                       AutomationProperties.Name="Repository"
                       ToolTip="Choose the attached Git repository to inspect" />
             <WrapPanel Margin="0,10,0,0">
@@ -235,22 +267,9 @@
         </Grid>
 
         <Grid Grid.Row="2" Margin="0,12,0,6">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
             <TextBlock Text="{Binding Git.DiffViewLabel}"
                        Style="{StaticResource SectionLabel}"
                        VerticalAlignment="Center" />
-            <StackPanel Grid.Column="1" Orientation="Horizontal">
-                <Button Content="Working"
-                        Command="{Binding Git.ShowWorkingDiffCommand}"
-                        Style="{StaticResource CompactButton}"
-                        Margin="0,0,5,0" />
-                <Button Content="Staged"
-                        Command="{Binding Git.ShowStagedDiffCommand}"
-                        Style="{StaticResource CompactButton}" />
-            </StackPanel>
         </Grid>
 
         <Grid Grid.Row="3">

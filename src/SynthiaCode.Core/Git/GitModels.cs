@@ -4,7 +4,8 @@ public sealed record GitChangedFile(
     string Path,
     string? OriginalPath,
     char IndexStatus,
-    char WorkTreeStatus)
+    char WorkTreeStatus,
+    string? StatusSummaryOverride = null)
 {
     public bool IsStaged => IndexStatus is not ' ' and not '?';
 
@@ -22,6 +23,11 @@ public sealed record GitChangedFile(
     {
         get
         {
+            if (!string.IsNullOrWhiteSpace(StatusSummaryOverride))
+            {
+                return StatusSummaryOverride;
+            }
+
             if (IsUntracked)
             {
                 return "Untracked";
@@ -62,3 +68,28 @@ public sealed record GitReviewCatalog(
     string CurrentBranch,
     IReadOnlyList<string> BaseBranches,
     IReadOnlyList<GitReviewCommit> Commits);
+
+public enum GitDiffScope
+{
+    Unstaged,
+    Staged,
+    Commit,
+    Branch,
+    LastTurn
+}
+
+public sealed record GitComparisonTarget(GitDiffScope Scope, string Revision)
+{
+    public static GitComparisonTarget Commit(string sha) =>
+        new(GitDiffScope.Commit, RequireRevision(sha, "commit"));
+
+    public static GitComparisonTarget Branch(string branch) =>
+        new(GitDiffScope.Branch, RequireRevision(branch, "branch"));
+
+    private static string RequireRevision(string value, string label) =>
+        string.IsNullOrWhiteSpace(value)
+            ? throw new ArgumentException($"Select a {label} to compare.", nameof(value))
+            : value.Trim();
+}
+
+public sealed record GitDiffDocument(GitChangedFile File, string Diff);

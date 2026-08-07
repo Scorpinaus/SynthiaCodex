@@ -9,9 +9,12 @@ namespace SynthiaCode.Core.Codex.AppServer;
 
 public sealed class CodexConversationTurn : INotifyPropertyChanged
 {
+    public const int MaximumDiffCharacters = 8 * 1024 * 1024;
+
     private string turnId = string.Empty;
     private string userPrompt = string.Empty;
     private string assistantResponse = string.Empty;
+    private string diff = string.Empty;
     private CodexTurnStatus status = CodexTurnStatus.Idle;
     private DateTimeOffset? completedAt;
     private bool isActivityExpanded;
@@ -68,6 +71,12 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
                 OnPropertyChanged(nameof(HasReviewFindings));
             }
         }
+    }
+
+    public string Diff
+    {
+        get => diff;
+        set => SetProperty(ref diff, NormalizeDiff(value));
     }
 
     public bool HasAssistantResponse => !string.IsNullOrWhiteSpace(AssistantResponse);
@@ -313,6 +322,7 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
         TurnId = TurnId,
         UserPrompt = UserPrompt,
         AssistantResponse = AssistantResponse,
+        Diff = Diff,
         Status = Status,
         StartedAt = StartedAt,
         CompletedAt = CompletedAt,
@@ -331,6 +341,7 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
             TurnId = snapshot.TurnId,
             UserPrompt = snapshot.UserPrompt,
             AssistantResponse = UnicodeTextNormalizer.RepairLegacyMojibake(snapshot.AssistantResponse),
+            Diff = snapshot.Diff,
             Status = snapshot.Status,
             StartedAt = snapshot.StartedAt,
             CompletedAt = snapshot.CompletedAt,
@@ -353,6 +364,11 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
 
         return turn;
     }
+
+    private static string NormalizeDiff(string? value) =>
+        string.IsNullOrEmpty(value) || value.Length > MaximumDiffCharacters
+            ? string.Empty
+            : value;
 
     private void OnActivityChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
@@ -450,6 +466,7 @@ public sealed class CodexConversationTurnSnapshot
     public string TurnId { get; set; } = string.Empty;
     public string UserPrompt { get; set; } = string.Empty;
     public string AssistantResponse { get; set; } = string.Empty;
+    public string Diff { get; set; } = string.Empty;
     public CodexTurnStatus Status { get; set; } = CodexTurnStatus.Idle;
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAt { get; set; }

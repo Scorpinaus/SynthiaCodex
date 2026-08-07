@@ -26,6 +26,8 @@ public sealed record GitRepositoryOption(
         : $"{DisplayName} · {Branch}";
 }
 
+public sealed record GitDiffScopeOption(GitDiffScope Scope, string DisplayName);
+
 public sealed class GitDiffLineViewModel(
     GitDiffLine line,
     GitDiffHunkPatch? hunkPatch = null,
@@ -186,8 +188,13 @@ public sealed class GitViewModel : ObservableObject
     private string commitMessage = string.Empty;
     private GitChangedFile? selectedFile;
     private GitRepositoryOption? selectedRepository;
+    private GitDiffScopeOption selectedDiffScope;
+    private GitReviewCommit? selectedReviewCommit;
+    private string? selectedReviewBranch;
     private bool isBusy;
-    private bool showingStagedDiff;
+    private bool diffScopeInitialized;
+    private string lastTurnDiff = string.Empty;
+    private readonly Dictionary<GitChangedFile, string> comparisonDiffs = new(ReferenceEqualityComparer.Instance);
     private IReadOnlyList<CodexReviewFinding> reviewFindings = [];
     private long diffLoadVersion;
 
@@ -205,9 +212,22 @@ public sealed class GitViewModel : ObservableObject
         this.contextProvider = contextProvider;
         this.isShuttingDown = isShuttingDown;
         this.reportStatus = reportStatus;
+        DiffScopes =
+        [
+            new(GitDiffScope.Unstaged, "Unstaged"),
+            new(GitDiffScope.Staged, "Staged"),
+            new(GitDiffScope.Commit, "Commit"),
+            new(GitDiffScope.Branch, "Branch"),
+            new(GitDiffScope.LastTurn, "Last turn")
+        ];
+        selectedDiffScope = DiffScopes[0];
         RefreshCommand = refreshCommand = new AsyncRelayCommand(RefreshAsync, CanUseProject);
-        ShowWorkingDiffCommand = showWorkingDiffCommand = new AsyncRelayCommand(() => LoadDiffAsync(false), CanShowWorkingDiff);
-        ShowStagedDiffCommand = showStagedDiffCommand = new AsyncRelayCommand(() => LoadDiffAsync(true), CanShowStagedDiff);
+        ShowWorkingDiffCommand = showWorkingDiffCommand = new AsyncRelayCommand(
+            () => SwitchScopeAsync(GitDiffScope.Unstaged),
+            CanShowWorkingDiff);
+        ShowStagedDiffCommand = showStagedDiffCommand = new AsyncRelayCommand(
+            () => SwitchScopeAsync(GitDiffScope.Staged),
+            CanShowStagedDiff);
         StageCommand = stageCommand = new AsyncRelayCommand(StageAsync, CanStage);
         UnstageCommand = unstageCommand = new AsyncRelayCommand(UnstageAsync, CanUnstage);
         DiscardCommand = discardCommand = new AsyncRelayCommand(DiscardAsync, CanMutateSelectedFile);
@@ -233,6 +253,12 @@ public sealed class GitViewModel : ObservableObject
     public ObservableCollection<GitChangedFile> ChangedFiles { get; } = [];
 
     public ObservableCollection<GitRepositoryOption> Repositories { get; } = [];
+
+    public IReadOnlyList<GitDiffScopeOption> DiffScopes { get; }
+
+    public ObservableCollection<string> ReviewBranches { get; } = [];
+
+    public ObservableCollection<GitReviewCommit> ReviewCommits { get; } = [];
 
     public ObservableCollection<GitDiffLineViewModel> SelectedDiffLines { get; } = [];
 
@@ -276,6 +302,58 @@ public sealed class GitViewModel : ObservableObject
 
     public bool HasMultipleRepositories => Repositories.Count > 1;
 
+    public bool ShowsRepositorySelector => SelectedDiffScope.Scope != GitDiffScope.LastTurn;
+
+    public bool ShowsBranchSelector => SelectedDiffScope.Scope == GitDiffScope.Branch;
+
+    public bool ShowsCommitSelector => SelectedDiffScope.Scope == GitDiffScope.Commit;
+
+    public bool IsHistoricalScope => SelectedDiffScope.Scope is GitDiffScope.Commit or GitDiffScope.Branch or GitDiffScope.LastTurn;
+
+    public GitDiffScopeOption SelectedDiffScope
+    {
+        get => selectedDiffScope;
+        set
+        {
+            if (value is null || !SetProperty(ref selectedDiffScope, value))
+            {
+                return;
+            }
+            diffScopeInitialized = true;
+            OnPropertyChanged(nameof(ShowsRepositorySelector));
+            OnPropertyChanged(nameof(ShowsBranchSelector));
+            OnPropertyChanged(nameof(ShowsCommitSelector));
+            OnPropertyChanged(nameof(IsHistoricalScope));
+            OnPropertyChanged(nameof(DiffViewLabel));
+            RaiseCommandStates();
+            _ = LoadSelectedScopeAsync(SelectedFile?.Path);
+        }
+    }
+
+    public string? SelectedReviewBranch
+    {
+        get => selectedReviewBranch;
+        set
+        {
+            if (SetProperty(ref selectedReviewBranch, value) && ShowsBranchSelector)
+            {
+                _ = LoadSelectedScopeAsync(SelectedFile?.Path);
+            }
+        }
+    }
+
+    public GitReviewCommit? SelectedReviewCommit
+    {
+        get => selectedReviewCommit;
+        set
+        {
+            if (SetProperty(ref selectedReviewCommit, value) && ShowsCommitSelector)
+            {
+                _ = LoadSelectedScopeAsync(SelectedFile?.Path);
+            }
+        }
+    }
+
     public GitRepositoryOption? SelectedRepository
     {
         get => selectedRepository;
@@ -306,15 +384,22 @@ public sealed class GitViewModel : ObservableObject
                 return;
             }
 
-            diffLoadVersion++;
             RaiseCommandStates();
             if (value is null)
             {
                 SelectedDiff = "Select a changed file to inspect its diff.";
             }
+            else if (comparisonDiffs.TryGetValue(value, out var comparisonDiff))
+            {
+                SelectedDiff = comparisonDiff;
+            }
+            else if (SelectedDiffScope.Scope is GitDiffScope.Unstaged or GitDiffScope.Staged)
+            {
+                _ = LoadDiffAsync(SelectedDiffScope.Scope == GitDiffScope.Staged);
+            }
             else
             {
-                _ = LoadDiffAsync(value.IsStaged && !value.HasWorkingTreeChanges);
+                SelectedDiff = "No diff is available for the selected file.";
             }
         }
     }
@@ -331,7 +416,15 @@ public sealed class GitViewModel : ObservableObject
         }
     }
 
-    public string DiffViewLabel => showingStagedDiff ? "Staged diff" : "Working tree diff";
+    public string DiffViewLabel => SelectedDiffScope.Scope switch
+    {
+        GitDiffScope.Unstaged => "Unstaged diff",
+        GitDiffScope.Staged => "Staged diff",
+        GitDiffScope.Commit => "Commit diff",
+        GitDiffScope.Branch => "Branch diff",
+        GitDiffScope.LastTurn => "Last turn diff",
+        _ => "Diff"
+    };
 
     public bool HasUnmatchedReviewFindings => UnmatchedReviewFindings.Count > 0;
 
@@ -467,6 +560,15 @@ public sealed class GitViewModel : ObservableObject
         RebuildDiffProjection();
     }
 
+    public void SetLastTurnDiff(string? diff)
+    {
+        lastTurnDiff = diff?.Length <= CodexConversationTurn.MaximumDiffCharacters ? diff : string.Empty;
+        if (SelectedDiffScope.Scope == GitDiffScope.LastTurn)
+        {
+            _ = LoadSelectedScopeAsync(SelectedFile?.Path);
+        }
+    }
+
     public IReadOnlyList<GitInlineComment> CaptureReviewComments() =>
         ReviewComments.Select(item => item.Snapshot()).ToArray();
 
@@ -541,8 +643,6 @@ public sealed class GitViewModel : ObservableObject
         var requestedRoot = repositoryRoot;
         var requestVersion = ++diffLoadVersion;
         IsBusy = true;
-        showingStagedDiff = staged;
-        OnPropertyChanged(nameof(DiffViewLabel));
         SelectedDiff = "Loading diff...";
         try
         {
@@ -572,6 +672,187 @@ public sealed class GitViewModel : ObservableObject
         }
     }
 
+    private async Task SwitchScopeAsync(GitDiffScope scope)
+    {
+        var option = DiffScopes.Single(item => item.Scope == scope);
+        if (!ReferenceEquals(selectedDiffScope, option))
+        {
+            selectedDiffScope = option;
+            diffScopeInitialized = true;
+            OnPropertyChanged(nameof(SelectedDiffScope));
+            OnPropertyChanged(nameof(ShowsRepositorySelector));
+            OnPropertyChanged(nameof(ShowsBranchSelector));
+            OnPropertyChanged(nameof(ShowsCommitSelector));
+            OnPropertyChanged(nameof(IsHistoricalScope));
+            OnPropertyChanged(nameof(DiffViewLabel));
+        }
+        RaiseCommandStates();
+        await LoadSelectedScopeAsync(SelectedFile?.Path).ConfigureAwait(true);
+    }
+
+    private async Task LoadSelectedScopeAsync(string? preferredFilePath)
+    {
+        var scope = SelectedDiffScope.Scope;
+        var requestVersion = ++diffLoadVersion;
+        comparisonDiffs.Clear();
+
+        if (scope is GitDiffScope.Unstaged or GitDiffScope.Staged)
+        {
+            ApplyCurrentScope(preferredFilePath);
+            if (SelectedFile is not null)
+            {
+                await LoadDiffAsync(SelectedDiffScope.Scope == GitDiffScope.Staged).ConfigureAwait(true);
+            }
+            return;
+        }
+
+        if (scope == GitDiffScope.LastTurn)
+        {
+            ApplyComparisonDocuments(
+                GitUnifiedDiffDocumentParser.Parse(lastTurnDiff, "Last turn"),
+                preferredFilePath,
+                string.IsNullOrWhiteSpace(lastTurnDiff)
+                    ? "The latest turn made no file changes"
+                    : "Changes from the latest turn");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(repositoryRoot))
+        {
+            ApplyComparisonDocuments([], preferredFilePath, "Select a repository to compare");
+            return;
+        }
+
+        var requestedRoot = repositoryRoot;
+        IsBusy = true;
+        StatusMessage = scope == GitDiffScope.Commit ? "Loading commit history" : "Loading branches";
+        try
+        {
+            var catalog = await gitService.GetReviewCatalogAsync(requestedRoot).ConfigureAwait(true);
+            if (requestVersion != diffLoadVersion || !PathsEqual(repositoryRoot, requestedRoot))
+            {
+                return;
+            }
+            ApplyReviewCatalog(catalog);
+
+            var target = scope switch
+            {
+                GitDiffScope.Commit when SelectedReviewCommit is not null =>
+                    GitComparisonTarget.Commit(SelectedReviewCommit.Sha),
+                GitDiffScope.Branch when !string.IsNullOrWhiteSpace(SelectedReviewBranch) =>
+                    GitComparisonTarget.Branch(SelectedReviewBranch),
+                GitDiffScope.Commit => throw new InvalidOperationException("No commits are available to compare."),
+                _ => throw new InvalidOperationException("No base branches are available to compare.")
+            };
+            var documents = await gitService.GetComparisonDiffAsync(requestedRoot, target).ConfigureAwait(true);
+            if (requestVersion != diffLoadVersion || !PathsEqual(repositoryRoot, requestedRoot))
+            {
+                return;
+            }
+            var label = scope == GitDiffScope.Commit
+                ? $"Commit {SelectedReviewCommit!.ShortSha}"
+                : $"Changes from {SelectedReviewBranch} merge base to HEAD";
+            ApplyComparisonDocuments(documents, preferredFilePath, label);
+        }
+        catch (Exception ex)
+        {
+            if (requestVersion == diffLoadVersion)
+            {
+                ApplyComparisonDocuments([], preferredFilePath, ex.Message);
+                logger.Log(AppLogLevel.Warning, "git_comparison_failed", "Could not load a Git comparison.", exception: ex);
+            }
+        }
+        finally
+        {
+            if (requestVersion == diffLoadVersion)
+            {
+                IsBusy = false;
+            }
+        }
+    }
+
+    private void ApplyReviewCatalog(GitReviewCatalog catalog)
+    {
+        ReviewBranches.Clear();
+        foreach (var branchName in catalog.BaseBranches)
+        {
+            ReviewBranches.Add(branchName);
+        }
+        if (!ReviewBranches.Contains(selectedReviewBranch ?? string.Empty, StringComparer.Ordinal))
+        {
+            selectedReviewBranch = ReviewBranches.FirstOrDefault();
+            OnPropertyChanged(nameof(SelectedReviewBranch));
+        }
+
+        ReviewCommits.Clear();
+        foreach (var commit in catalog.Commits)
+        {
+            ReviewCommits.Add(commit);
+        }
+        if (selectedReviewCommit is null || !ReviewCommits.Any(commit => commit.Sha == selectedReviewCommit.Sha))
+        {
+            selectedReviewCommit = ReviewCommits.FirstOrDefault();
+            OnPropertyChanged(nameof(SelectedReviewCommit));
+        }
+    }
+
+    private void ApplyCurrentScope(string? preferredFilePath)
+    {
+        ChangedFiles.Clear();
+        var files = SelectedRepository?.State.ChangedFiles ?? [];
+        if (!diffScopeInitialized &&
+            SelectedDiffScope.Scope == GitDiffScope.Unstaged &&
+            !files.Any(file => file.HasWorkingTreeChanges) &&
+            files.Any(file => file.IsStaged))
+        {
+            selectedDiffScope = DiffScopes.Single(scope => scope.Scope == GitDiffScope.Staged);
+            OnPropertyChanged(nameof(SelectedDiffScope));
+            OnPropertyChanged(nameof(DiffViewLabel));
+        }
+        diffScopeInitialized = true;
+        var staged = SelectedDiffScope.Scope == GitDiffScope.Staged;
+        foreach (var file in files.Where(file => staged ? file.IsStaged : file.HasWorkingTreeChanges))
+        {
+            ChangedFiles.Add(file);
+        }
+        SelectPreferredFile(preferredFilePath);
+        StatusMessage = ChangedFiles.Count == 0
+            ? staged ? "No staged changes" : "Working tree clean"
+            : $"{ChangedFiles.Count} {(staged ? "staged" : "unstaged")} file{(ChangedFiles.Count == 1 ? string.Empty : "s")}";
+    }
+
+    private void ApplyComparisonDocuments(
+        IReadOnlyList<GitDiffDocument> documents,
+        string? preferredFilePath,
+        string status)
+    {
+        ChangedFiles.Clear();
+        comparisonDiffs.Clear();
+        foreach (var document in documents)
+        {
+            ChangedFiles.Add(document.File);
+            comparisonDiffs[document.File] = document.Diff;
+        }
+        SelectPreferredFile(preferredFilePath);
+        if (ChangedFiles.Count == 0)
+        {
+            SelectedDiff = status;
+        }
+        StatusMessage = status;
+        RaiseCommandStates();
+    }
+
+    private void SelectPreferredFile(string? preferredFilePath)
+    {
+        SelectedFile = ChangedFiles.FirstOrDefault(file =>
+                string.Equals(file.Path, preferredFilePath, StringComparison.OrdinalIgnoreCase))
+            ?? ChangedFiles.FirstOrDefault();
+        if (SelectedFile is null)
+        {
+            SelectedDiff = "Select a changed file to inspect its diff.";
+        }
+    }
+
     private void RebuildDiffProjection()
     {
         SelectedDiffLines.Clear();
@@ -583,13 +864,13 @@ public sealed class GitViewModel : ObservableObject
             OriginalPath: null,
             IsUntracked: false,
             WorkTreeStatus: 'M'
-        } && !showingStagedDiff;
+        } && SelectedDiffScope.Scope == GitDiffScope.Unstaged;
         var supportsStagedHunks = SelectedFile is
         {
             OriginalPath: null,
             IsUntracked: false,
             IndexStatus: 'M'
-        } && showingStagedDiff;
+        } && SelectedDiffScope.Scope == GitDiffScope.Staged;
         var rows = GitUnifiedDiffParser.Parse(SelectedDiff)
             .Select(line =>
             {
@@ -994,6 +1275,7 @@ public sealed class GitViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedRepository));
         OnPropertyChanged(nameof(HasMultipleRepositories));
         repositoryRoot = null;
+        comparisonDiffs.Clear();
         Branch = "No repository";
         ChangedFiles.Clear();
         SelectedFile = null;
@@ -1006,26 +1288,7 @@ public sealed class GitViewModel : ObservableObject
     {
         repositoryRoot = repository?.RootPath;
         Branch = repository?.Branch ?? "No repository";
-        ChangedFiles.Clear();
-        if (repository is not null)
-        {
-            foreach (var file in repository.State.ChangedFiles)
-            {
-                ChangedFiles.Add(file);
-            }
-        }
-
-        SelectedFile = ChangedFiles.FirstOrDefault(file =>
-                string.Equals(file.Path, preferredFilePath, StringComparison.OrdinalIgnoreCase))
-            ?? ChangedFiles.FirstOrDefault();
-        SelectedDiff = SelectedFile is null
-            ? "Select a changed file to inspect its diff."
-            : SelectedDiff;
-        StatusMessage = repository is null
-            ? "No Git repository detected"
-            : ChangedFiles.Count == 0
-                ? $"{repository.DisplayName} · {Branch}: working tree clean"
-                : $"{repository.DisplayName} · {Branch}: {ChangedFiles.Count} changed file{(ChangedFiles.Count == 1 ? string.Empty : "s")}";
+        _ = LoadSelectedScopeAsync(preferredFilePath);
         OnPropertyChanged(nameof(IsRepository));
         RaiseCommandStates();
     }
@@ -1075,8 +1338,10 @@ public sealed class GitViewModel : ObservableObject
         string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
 
     private bool CanUseProject() => !isShuttingDown() && !IsBusy && !string.IsNullOrWhiteSpace(contextProvider().ProjectPath);
-    private bool CanShowWorkingDiff() => CanMutateSelectedFile() && SelectedFile?.HasWorkingTreeChanges == true;
-    private bool CanShowStagedDiff() => CanMutateSelectedFile() && SelectedFile?.IsStaged == true;
+    private bool CanShowWorkingDiff() => !isShuttingDown() && !IsBusy && IsRepository &&
+        SelectedRepository?.State.ChangedFiles.Any(file => file.HasWorkingTreeChanges) == true;
+    private bool CanShowStagedDiff() => !isShuttingDown() && !IsBusy && IsRepository &&
+        SelectedRepository?.State.ChangedFiles.Any(file => file.IsStaged) == true;
     private bool CanStage() => CanMutateSelectedFile() && SelectedFile?.HasWorkingTreeChanges == true;
     private bool CanUnstage() => CanMutateSelectedFile() && SelectedFile?.IsStaged == true;
     private bool CanStageHunk(object? parameter) =>
@@ -1085,11 +1350,13 @@ public sealed class GitViewModel : ObservableObject
         CanMutateSelectedFile() && parameter is GitDiffLineViewModel { CanUnstageHunk: true } row && SelectedDiffLines.Contains(row);
     private bool CanDiscardHunk(object? parameter) =>
         CanMutateSelectedFile() && parameter is GitDiffLineViewModel { CanDiscardHunk: true } row && SelectedDiffLines.Contains(row);
-    private bool CanMutateSelectedFile() => !isShuttingDown() && !IsBusy && IsRepository && SelectedFile is not null;
-    private bool CanCommit() => !isShuttingDown() && !IsBusy && IsRepository && !string.IsNullOrWhiteSpace(CommitMessage) && ChangedFiles.Any(file => file.IsStaged);
+    private bool CanMutateSelectedFile() => !isShuttingDown() && !IsBusy && IsRepository && SelectedFile is not null &&
+        SelectedDiffScope.Scope is GitDiffScope.Unstaged or GitDiffScope.Staged;
+    private bool CanCommit() => !isShuttingDown() && !IsBusy && IsRepository && !string.IsNullOrWhiteSpace(CommitMessage) &&
+        SelectedRepository?.State.ChangedFiles.Any(file => file.IsStaged) == true;
     private bool CanOpenProjectTarget() => !isShuttingDown() && !string.IsNullOrWhiteSpace(contextProvider().ProjectPath);
     private bool CanBeginAddComment(object? parameter) =>
-        !isShuttingDown() && !IsBusy && IsRepository && SelectedFile is not null &&
+        !isShuttingDown() && !IsBusy && IsRepository && SelectedFile is not null && SelectedDiffScope.Scope != GitDiffScope.LastTurn &&
         parameter is GitDiffLineViewModel { CanAddComment: true, IsCommentEditorOpen: false };
     private static bool CanCancelAddComment(object? parameter) =>
         parameter is GitDiffLineViewModel { IsCommentEditorOpen: true };

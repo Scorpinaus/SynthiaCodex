@@ -160,7 +160,8 @@ public sealed record ConversationTurnSnapshot(
     bool IsSuperseded,
     IReadOnlyList<ActivityItem> Activity,
     IReadOnlyList<AttachmentReference> UserAttachments,
-    IReadOnlyList<string> GeneratedImagePaths);
+    IReadOnlyList<string> GeneratedImagePaths,
+    string Diff = "");
 
 public enum HarnessInputModality
 {

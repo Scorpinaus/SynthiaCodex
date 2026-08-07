@@ -103,6 +103,48 @@ public sealed class GitService(IAppLogger logger) : IGitService
             : result.StandardOutput;
     }
 
+    public async Task<IReadOnlyList<GitDiffDocument>> GetComparisonDiffAsync(
+        string repositoryRoot,
+        GitComparisonTarget target,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureRepositoryRoot(repositoryRoot);
+        ArgumentNullException.ThrowIfNull(target);
+        var revision = await ResolveCommitAsync(repositoryRoot, target.Revision, cancellationToken)
+            .ConfigureAwait(false);
+
+        GitCommandResult result;
+        string statusSummary;
+        switch (target.Scope)
+        {
+            case GitDiffScope.Commit:
+                result = await RunAsync(
+                    repositoryRoot,
+                    ["show", "--format=", "--root", "--find-renames", "--no-ext-diff", "--no-color", revision, "--"],
+                    [0],
+                    cancellationToken).ConfigureAwait(false);
+                statusSummary = "Commit";
+                break;
+            case GitDiffScope.Branch:
+                var mergeBase = await RunAsync(
+                    repositoryRoot,
+                    ["merge-base", "HEAD", revision],
+                    [0],
+                    cancellationToken).ConfigureAwait(false);
+                result = await RunAsync(
+                    repositoryRoot,
+                    ["diff", "--find-renames", "--no-ext-diff", "--no-color", mergeBase.StandardOutput.Trim(), "HEAD", "--"],
+                    [0],
+                    cancellationToken).ConfigureAwait(false);
+                statusSummary = "Branch";
+                break;
+            default:
+                throw new ArgumentException("Only commit and branch comparisons are supported by Git.", nameof(target));
+        }
+
+        return GitUnifiedDiffDocumentParser.Parse(result.StandardOutput, statusSummary);
+    }
+
     public async Task ApplyHunkAsync(
         string repositoryRoot,
         GitDiffHunkPatch patch,
@@ -300,6 +342,23 @@ public sealed class GitService(IAppLogger logger) : IGitService
             [0, 128],
             cancellationToken).ConfigureAwait(false);
         return result.ExitCode == 0;
+    }
+
+    private async Task<string> ResolveCommitAsync(
+        string repositoryRoot,
+        string revision,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(revision))
+        {
+            throw new InvalidOperationException("Select a Git revision to compare.");
+        }
+        var result = await RunAsync(
+            repositoryRoot,
+            ["rev-parse", "--verify", "--end-of-options", $"{revision.Trim()}^{{commit}}"],
+            [0],
+            cancellationToken).ConfigureAwait(false);
+        return result.StandardOutput.Trim();
     }
 
     private async Task RunPathCommandAsync(

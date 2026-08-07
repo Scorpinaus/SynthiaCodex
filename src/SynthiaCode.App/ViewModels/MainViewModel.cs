@@ -4152,7 +4152,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ReviewScope = source.ReviewScope,
         Activity = [.. source.Activity],
         UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())],
-        GeneratedImagePaths = [.. source.GeneratedImagePaths]
+        GeneratedImagePaths = [.. source.GeneratedImagePaths],
+        Diff = source.Diff
     };
 
     public async ValueTask DisposeAsync()
@@ -4302,6 +4303,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (propertyName == nameof(TaskViewModel.ConversationTurns))
         {
             Git.SetReviewFindings(CodexReviewFindingProjection.GetLatest(TaskWorkspace.ConversationTurns));
+            Git.SetLastTurnDiff(TaskWorkspace.ConversationTurns.LastOrDefault(turn => !turn.IsSuperseded)?.Diff);
         }
 
         var mainProperty = propertyName switch

@@ -136,7 +136,8 @@ public sealed class ThreadStatePersistenceUseCaseService
         ReviewScope = source.ReviewScope,
         Activity = [.. source.Activity],
         UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())],
-        GeneratedImagePaths = [.. source.GeneratedImagePaths]
+        GeneratedImagePaths = [.. source.GeneratedImagePaths],
+        Diff = source.Diff
     };
 }
 

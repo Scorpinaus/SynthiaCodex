@@ -196,3 +196,110 @@ public static class GitUnifiedDiffParser
         line.StartsWith("rename from ", StringComparison.Ordinal) ||
         line.StartsWith("rename to ", StringComparison.Ordinal);
 }
+
+public static class GitUnifiedDiffDocumentParser
+{
+    private static readonly Regex DiffHeaderRegex = new(
+        """^diff --git (?<old>"(?:\\.|[^"])*"|\S+) (?<new>"(?:\\.|[^"])*"|\S+)$""",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    public static IReadOnlyList<GitDiffDocument> Parse(string? diff, string statusSummary)
+    {
+        if (string.IsNullOrWhiteSpace(diff))
+        {
+            return [];
+        }
+
+        var normalized = diff
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n');
+        var starts = new List<int>();
+        var position = 0;
+        while (position < normalized.Length)
+        {
+            if ((position == 0 || normalized[position - 1] == '\n') &&
+                normalized.AsSpan(position).StartsWith("diff --git ", StringComparison.Ordinal))
+            {
+                starts.Add(position);
+            }
+            var next = normalized.IndexOf('\n', position);
+            position = next < 0 ? normalized.Length : next + 1;
+        }
+
+        var documents = new List<GitDiffDocument>(starts.Count);
+        for (var index = 0; index < starts.Count; index++)
+        {
+            var start = starts[index];
+            var end = index + 1 < starts.Count ? starts[index + 1] : normalized.Length;
+            var section = normalized[start..end].TrimEnd('\n') + "\n";
+            if (TryCreateDocument(section, statusSummary, out var document))
+            {
+                documents.Add(document);
+            }
+        }
+        return documents;
+    }
+
+    private static bool TryCreateDocument(
+        string section,
+        string statusSummary,
+        out GitDiffDocument document)
+    {
+        var lines = section.Split('\n');
+        var oldPath = ReadPath(lines, "rename from ") ?? ReadPath(lines, "--- ");
+        var newPath = ReadPath(lines, "rename to ") ?? ReadPath(lines, "+++ ");
+        var header = DiffHeaderRegex.Match(lines[0]);
+        if (header.Success)
+        {
+            oldPath ??= Unquote(header.Groups["old"].Value);
+            newPath ??= Unquote(header.Groups["new"].Value);
+        }
+        var isAdded = string.Equals(oldPath, "/dev/null", StringComparison.Ordinal);
+        var isDeleted = string.Equals(newPath, "/dev/null", StringComparison.Ordinal);
+        oldPath = isAdded ? null : NormalizePath(oldPath);
+        newPath = isDeleted ? null : NormalizePath(newPath);
+        var path = newPath ?? oldPath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            document = null!;
+            return false;
+        }
+
+        var originalPath = oldPath is not null && newPath is not null &&
+            !string.Equals(oldPath, newPath, StringComparison.Ordinal)
+                ? oldPath
+                : null;
+        document = new GitDiffDocument(
+            new GitChangedFile(path, originalPath, ' ', ' ', statusSummary),
+            section);
+        return true;
+    }
+
+    private static string? ReadPath(IEnumerable<string> lines, string prefix)
+    {
+        var line = lines.FirstOrDefault(candidate => candidate.StartsWith(prefix, StringComparison.Ordinal));
+        return line is null ? null : Unquote(line[prefix.Length..].Trim());
+    }
+
+    private static string? NormalizePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || string.Equals(path, "/dev/null", StringComparison.Ordinal))
+        {
+            return null;
+        }
+        return path.StartsWith("a/", StringComparison.Ordinal) || path.StartsWith("b/", StringComparison.Ordinal)
+            ? path[2..]
+            : path;
+    }
+
+    private static string Unquote(string path)
+    {
+        if (path.Length < 2 || path[0] != '"' || path[^1] != '"')
+        {
+            return path;
+        }
+        return path[1..^1]
+            .Replace("\\\"", "\"", StringComparison.Ordinal)
+            .Replace("\\\\", "\\", StringComparison.Ordinal);
+    }
+}

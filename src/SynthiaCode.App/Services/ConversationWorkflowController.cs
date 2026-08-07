@@ -344,6 +344,7 @@ public sealed record ConversationWorkspaceSnapshot(
         ReviewScope = source.ReviewScope,
         Activity = [.. source.Activity.Select(item => item with { })],
         UserAttachments = [.. source.UserAttachments.Select(attachment => attachment.Clone())],
-        GeneratedImagePaths = [.. source.GeneratedImagePaths]
+        GeneratedImagePaths = [.. source.GeneratedImagePaths],
+        Diff = source.Diff
     };
 }

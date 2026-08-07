@@ -14,6 +14,12 @@ public interface IGitService
         bool staged,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<GitDiffDocument>> GetComparisonDiffAsync(
+        string repositoryRoot,
+        GitComparisonTarget target,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Historical Git comparisons are not supported by this service.");
+
     Task ApplyHunkAsync(
         string repositoryRoot,
         GitDiffHunkPatch patch,

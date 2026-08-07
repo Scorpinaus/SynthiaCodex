@@ -35,6 +35,14 @@ public sealed record AssistantTextDeltaEvent(
     DateTimeOffset Timestamp)
     : HarnessEvent(HarnessId, RemoteConversationId, RemoteTurnId, Timestamp);
 
+public sealed record TurnDiffChangedEvent(
+    HarnessId HarnessId,
+    string RemoteConversationId,
+    string RemoteTurnId,
+    string Diff,
+    DateTimeOffset Timestamp)
+    : HarnessEvent(HarnessId, RemoteConversationId, RemoteTurnId, Timestamp);
+
 public sealed record ActivityChangedEvent(
     HarnessId HarnessId,
     string RemoteConversationId,

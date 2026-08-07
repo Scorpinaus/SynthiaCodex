@@ -2138,6 +2138,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
                 TurnId = turnId,
                 UserPrompt = string.Join(Environment.NewLine, prompts),
                 AssistantResponse = assistantMessages.LastOrDefault() ?? string.Empty,
+                Diff = ReadString(turn, "diff") ?? string.Empty,
                 Status = ParseTurnStatus(ReadString(turn, "status")),
                 StartedAt = ReadUnixTimestamp(turn, "startedAt") ?? DateTimeOffset.UtcNow,
                 CompletedAt = ReadUnixTimestamp(turn, "completedAt"),

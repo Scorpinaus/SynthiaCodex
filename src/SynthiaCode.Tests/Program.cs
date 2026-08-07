@@ -155,7 +155,8 @@ internal static class LegacyBehavioralTests
         .. DictationTests.All,
         .. GoalModeTests.All,
         .. MultiFolderProjectTests.All,
-        .. CodeReviewWorkflowTests.All
+        .. CodeReviewWorkflowTests.All,
+        .. StructuredReviewFindingsTests.All
     ];
 
 static Task TestRecentProjectsAsync()

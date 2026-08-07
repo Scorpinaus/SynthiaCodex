@@ -4164,6 +4164,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             _ = SaveAttachmentDraftAsync();
         }
 
+        if (propertyName == nameof(TaskViewModel.ConversationTurns))
+        {
+            Git.SetReviewFindings(CodexReviewFindingProjection.GetLatest(TaskWorkspace.ConversationTurns));
+        }
+
         var mainProperty = propertyName switch
         {
             nameof(TaskViewModel.Prompt) => nameof(PromptText),

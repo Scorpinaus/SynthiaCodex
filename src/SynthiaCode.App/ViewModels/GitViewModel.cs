@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows.Input;
 using SynthiaCode.App.Services;
+using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Git;
 using SynthiaCode.Core.Logging;
 
@@ -23,6 +24,29 @@ public sealed record GitRepositoryOption(
     public string DisplayLabel => IsPrimary
         ? $"{DisplayName} (Primary) · {Branch}"
         : $"{DisplayName} · {Branch}";
+}
+
+public sealed class GitDiffLineViewModel(GitDiffLine line)
+{
+    public GitDiffLineKind Kind => line.Kind;
+
+    public int? OldLineNumber => line.OldLineNumber;
+
+    public int? NewLineNumber => line.NewLineNumber;
+
+    public string OldLineDisplay => line.OldLineDisplay;
+
+    public string NewLineDisplay => line.NewLineDisplay;
+
+    public string Prefix => line.Prefix;
+
+    public string Content => line.Content;
+
+    public string AutomationName => string.IsNullOrWhiteSpace(line.Text)
+        ? "Blank diff line"
+        : $"Diff line {line.Text}";
+
+    public ObservableCollection<CodexReviewFinding> ReviewFindings { get; } = [];
 }
 
 public sealed class GitViewModel : ObservableObject
@@ -51,6 +75,8 @@ public sealed class GitViewModel : ObservableObject
     private GitRepositoryOption? selectedRepository;
     private bool isBusy;
     private bool showingStagedDiff;
+    private IReadOnlyList<CodexReviewFinding> reviewFindings = [];
+    private long diffLoadVersion;
 
     public GitViewModel(
         IGitService gitService,
@@ -80,6 +106,10 @@ public sealed class GitViewModel : ObservableObject
     public ObservableCollection<GitChangedFile> ChangedFiles { get; } = [];
 
     public ObservableCollection<GitRepositoryOption> Repositories { get; } = [];
+
+    public ObservableCollection<GitDiffLineViewModel> SelectedDiffLines { get; } = [];
+
+    public ObservableCollection<CodexReviewFinding> UnmatchedReviewFindings { get; } = [];
 
     public ICommand RefreshCommand { get; }
     public ICommand ShowWorkingDiffCommand { get; }
@@ -137,6 +167,7 @@ public sealed class GitViewModel : ObservableObject
                 return;
             }
 
+            diffLoadVersion++;
             RaiseCommandStates();
             if (value is null)
             {
@@ -152,10 +183,18 @@ public sealed class GitViewModel : ObservableObject
     public string SelectedDiff
     {
         get => selectedDiff;
-        private set => SetProperty(ref selectedDiff, value);
+        private set
+        {
+            if (SetProperty(ref selectedDiff, value))
+            {
+                RebuildDiffProjection();
+            }
+        }
     }
 
     public string DiffViewLabel => showingStagedDiff ? "Staged diff" : "Working tree diff";
+
+    public bool HasUnmatchedReviewFindings => UnmatchedReviewFindings.Count > 0;
 
     public string CommitMessage
     {
@@ -276,6 +315,13 @@ public sealed class GitViewModel : ObservableObject
         }
     }
 
+    public void SetReviewFindings(IEnumerable<CodexReviewFinding> findings)
+    {
+        ArgumentNullException.ThrowIfNull(findings);
+        reviewFindings = findings.Take(100).ToArray();
+        RebuildDiffProjection();
+    }
+
     public void RaiseCommandStates()
     {
         refreshCommand.RaiseCanExecuteChanged();
@@ -296,24 +342,143 @@ public sealed class GitViewModel : ObservableObject
             return;
         }
 
+        var requestedFile = SelectedFile;
+        var requestedRoot = repositoryRoot;
+        var requestVersion = ++diffLoadVersion;
         IsBusy = true;
         showingStagedDiff = staged;
         OnPropertyChanged(nameof(DiffViewLabel));
         SelectedDiff = "Loading diff...";
         try
         {
-            SelectedDiff = await gitService.GetDiffAsync(repositoryRoot, SelectedFile, staged).ConfigureAwait(true);
+            var diff = await gitService.GetDiffAsync(requestedRoot, requestedFile, staged).ConfigureAwait(true);
+            if (requestVersion == diffLoadVersion &&
+                ReferenceEquals(SelectedFile, requestedFile) &&
+                PathsEqual(repositoryRoot, requestedRoot))
+            {
+                SelectedDiff = diff;
+            }
         }
         catch (Exception ex)
         {
-            SelectedDiff = ex.Message;
-            StatusMessage = "Could not load the selected diff";
-            logger.Log(AppLogLevel.Warning, "git_diff_failed", "Could not load a Git diff.", exception: ex);
+            if (requestVersion == diffLoadVersion)
+            {
+                SelectedDiff = ex.Message;
+                StatusMessage = "Could not load the selected diff";
+                logger.Log(AppLogLevel.Warning, "git_diff_failed", "Could not load a Git diff.", exception: ex);
+            }
         }
         finally
         {
-            IsBusy = false;
+            if (requestVersion == diffLoadVersion)
+            {
+                IsBusy = false;
+            }
         }
+    }
+
+    private void RebuildDiffProjection()
+    {
+        SelectedDiffLines.Clear();
+        UnmatchedReviewFindings.Clear();
+
+        var rows = GitUnifiedDiffParser.Parse(SelectedDiff)
+            .Select(line => new GitDiffLineViewModel(line))
+            .ToList();
+        foreach (var row in rows)
+        {
+            SelectedDiffLines.Add(row);
+        }
+
+        if (SelectedFile is not null && !string.IsNullOrWhiteSpace(repositoryRoot))
+        {
+            foreach (var finding in reviewFindings.Where(FindingMatchesSelectedFile))
+            {
+                var anchor = rows
+                    .Where(row => row.NewLineNumber is { } line &&
+                        line >= finding.StartLine &&
+                        line <= finding.EndLine)
+                    .LastOrDefault()
+                    ?? rows
+                        .Where(row => row.OldLineNumber is { } line &&
+                            line >= finding.StartLine &&
+                            line <= finding.EndLine)
+                        .LastOrDefault();
+                if (anchor is null)
+                {
+                    UnmatchedReviewFindings.Add(finding);
+                }
+                else
+                {
+                    anchor.ReviewFindings.Add(finding);
+                }
+            }
+        }
+
+        OnPropertyChanged(nameof(SelectedDiffLines));
+        OnPropertyChanged(nameof(UnmatchedReviewFindings));
+        OnPropertyChanged(nameof(HasUnmatchedReviewFindings));
+    }
+
+    private bool FindingMatchesSelectedFile(CodexReviewFinding finding) =>
+        SelectedFile is not null &&
+        !string.IsNullOrWhiteSpace(repositoryRoot) &&
+        (FindingMatchesPath(finding.AbsoluteFilePath, repositoryRoot, SelectedFile.Path) ||
+         (!string.IsNullOrWhiteSpace(SelectedFile.OriginalPath) &&
+          FindingMatchesPath(finding.AbsoluteFilePath, repositoryRoot, SelectedFile.OriginalPath)));
+
+    private static bool FindingMatchesPath(string findingPath, string root, string relativePath)
+    {
+        try
+        {
+            var normalizedFinding = findingPath.Trim().Replace('\\', '/');
+            var normalizedRelative = NormalizeRelativePath(relativePath);
+            var isDriveAbsolute = normalizedFinding.Length >= 3 &&
+                char.IsAsciiLetter(normalizedFinding[0]) &&
+                normalizedFinding[1] == ':' &&
+                normalizedFinding[2] == '/';
+            var isUncAbsolute = normalizedFinding.StartsWith("//", StringComparison.Ordinal);
+            if (isDriveAbsolute || isUncAbsolute)
+            {
+                var expected = Path.GetFullPath(Path.Combine(
+                    root,
+                    normalizedRelative.Replace('/', Path.DirectorySeparatorChar)));
+                var actual = Path.GetFullPath(findingPath.Replace('/', Path.DirectorySeparatorChar));
+                return string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (normalizedFinding.StartsWith("/", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return string.Equals(
+                NormalizeRelativePath(normalizedFinding),
+                normalizedRelative,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or
+            NotSupportedException or
+            PathTooLongException)
+        {
+            return false;
+        }
+    }
+
+    private static string NormalizeRelativePath(string path)
+    {
+        var normalized = path.Trim().Replace('\\', '/').TrimStart('/');
+        while (normalized.StartsWith("./", StringComparison.Ordinal))
+        {
+            normalized = normalized[2..];
+        }
+        if (normalized.StartsWith("a/", StringComparison.Ordinal) ||
+            normalized.StartsWith("b/", StringComparison.Ordinal))
+        {
+            normalized = normalized[2..];
+        }
+        return normalized;
     }
 
     private Task StageAsync()

@@ -51,9 +51,9 @@ The primary folder remains the Codex working directory and the automatic discove
 
 ## Code review
 
-In a Git-backed Codex project chat, choose **Review** beside the composer or submit exactly `/review`. The native picker can review uncommitted changes, changes against a local or remote base branch, a recent commit, or custom instructions. SynthiaCode calls the dedicated app-server `review/start` workflow and renders its lifecycle and prioritized findings as a labeled review turn in the current chat.
+In a Git-backed Codex project chat, choose **Review** beside the composer or submit exactly `/review`. The native picker can review uncommitted changes, changes against a local or remote base branch, a recent commit, or custom instructions. SynthiaCode calls the dedicated app-server `review/start` workflow and renders its lifecycle and prioritized findings as a labeled review turn in the current chat. The latest review is also parsed into typed P0-P3 file/line findings and shown as accessible inline cards on matching rows in the selected repository's Changes diff; valid findings that cannot anchor in the loaded diff remain visible in an explicit fallback section.
 
-This release implements inline delivery. Structured severity/file-line finding objects, inline diff comments, per-hunk actions, and detached review delivery remain separate parity gaps.
+This release implements inline delivery and read-only structured reviewer annotations. User-authored inline comments carried into the next prompt, per-hunk actions, commit/branch/last-turn diff loading, confidence display for app-server's plain-text review payload, and detached review delivery remain separate parity gaps.
 
 ## Execution permissions
 

@@ -22,6 +22,7 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
     private bool isCodeReview;
     private string reviewScope = string.Empty;
     private string editedPrompt = string.Empty;
+    private IReadOnlyList<CodexReviewFinding>? reviewFindings;
 
     public CodexConversationTurn()
     {
@@ -57,11 +58,14 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
         {
             if (SetProperty(ref assistantResponse, value ?? string.Empty))
             {
+                reviewFindings = null;
                 OnPropertyChanged(nameof(AssistantResponseDisplay));
                 OnPropertyChanged(nameof(HasAssistantResponse));
                 OnPropertyChanged(nameof(HasAssistantContent));
                 OnPropertyChanged(nameof(ShowsCommentaryChannel));
                 OnPropertyChanged(nameof(ShowsAssistantChannel));
+                OnPropertyChanged(nameof(ReviewFindings));
+                OnPropertyChanged(nameof(HasReviewFindings));
             }
         }
     }
@@ -147,8 +151,11 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
         {
             if (SetProperty(ref isCodeReview, value))
             {
+                reviewFindings = null;
                 OnPropertyChanged(nameof(CanEditPrompt));
                 OnPropertyChanged(nameof(ReviewBadgeLabel));
+                OnPropertyChanged(nameof(ReviewFindings));
+                OnPropertyChanged(nameof(HasReviewFindings));
             }
         }
     }
@@ -174,6 +181,15 @@ public sealed class CodexConversationTurn : INotifyPropertyChanged
 
     [JsonIgnore]
     public string ReviewScopeDisplay => HasReviewScope ? $"Scope: {ReviewScope}" : string.Empty;
+
+    [JsonIgnore]
+    public IReadOnlyList<CodexReviewFinding> ReviewFindings =>
+        reviewFindings ??= IsCodeReview
+            ? CodexReviewFindingParser.Parse(AssistantResponse)
+            : [];
+
+    [JsonIgnore]
+    public bool HasReviewFindings => ReviewFindings.Count > 0;
 
     public bool IsSuperseded
     {

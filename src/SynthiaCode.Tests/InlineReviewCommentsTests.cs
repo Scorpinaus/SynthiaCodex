@@ -349,6 +349,8 @@ internal static class InlineReviewCommentsTests
             bool staged,
             CancellationToken cancellationToken = default) => Task.FromResult(diff);
 
+        public Task ApplyHunkAsync(string requestedRepositoryRoot, GitDiffHunkPatch patch, GitHunkOperation operation, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
         public Task StageAsync(string requestedRepositoryRoot, IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task UnstageAsync(string requestedRepositoryRoot, IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task RevertAsync(string requestedRepositoryRoot, IReadOnlyCollection<GitChangedFile> files, CancellationToken cancellationToken = default) => Task.CompletedTask;

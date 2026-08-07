@@ -279,6 +279,12 @@ internal static class StructuredReviewFindingsTests
             bool staged,
             CancellationToken cancellationToken = default) => Task.FromResult(diff);
 
+        public Task ApplyHunkAsync(
+            string requestedRepositoryRoot,
+            GitDiffHunkPatch patch,
+            GitHunkOperation operation,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
         public Task StageAsync(
             string requestedRepositoryRoot,
             IReadOnlyCollection<string> paths,

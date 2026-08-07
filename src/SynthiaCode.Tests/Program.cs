@@ -157,7 +157,8 @@ internal static class LegacyBehavioralTests
         .. MultiFolderProjectTests.All,
         .. CodeReviewWorkflowTests.All,
         .. StructuredReviewFindingsTests.All,
-        .. InlineReviewCommentsTests.All
+        .. InlineReviewCommentsTests.All,
+        .. HunkGitOperationsTests.All
     ];
 
 static Task TestRecentProjectsAsync()
@@ -3457,6 +3458,9 @@ internal sealed class FakeGitService(string repositoryRoot) : IGitService
 
     public Task<string> GetDiffAsync(string repositoryRoot, GitChangedFile file, bool staged, CancellationToken cancellationToken = default) =>
         Task.FromResult("test diff");
+
+    public Task ApplyHunkAsync(string repositoryRoot, GitDiffHunkPatch patch, GitHunkOperation operation, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
 
     public Task StageAsync(string repositoryRoot, IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;

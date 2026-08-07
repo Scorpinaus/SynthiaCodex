@@ -26,7 +26,12 @@ public sealed record GitRepositoryOption(
         : $"{DisplayName} · {Branch}";
 }
 
-public sealed class GitDiffLineViewModel(GitDiffLine line) : ObservableObject
+public sealed class GitDiffLineViewModel(
+    GitDiffLine line,
+    GitDiffHunkPatch? hunkPatch = null,
+    bool canStageHunk = false,
+    bool canUnstageHunk = false,
+    bool canDiscardHunk = false) : ObservableObject
 {
     private bool isCommentEditorOpen;
     private string commentDraft = string.Empty;
@@ -44,6 +49,14 @@ public sealed class GitDiffLineViewModel(GitDiffLine line) : ObservableObject
     public string Prefix => line.Prefix;
 
     public string Content => line.Content;
+
+    public GitDiffHunkPatch? HunkPatch => hunkPatch;
+
+    public bool CanStageHunk => canStageHunk;
+
+    public bool CanUnstageHunk => canUnstageHunk;
+
+    public bool CanDiscardHunk => canDiscardHunk;
 
     public string AutomationName => string.IsNullOrWhiteSpace(line.Text)
         ? "Blank diff line"
@@ -153,6 +166,9 @@ public sealed class GitViewModel : ObservableObject
     private readonly AsyncRelayCommand stageCommand;
     private readonly AsyncRelayCommand unstageCommand;
     private readonly AsyncRelayCommand discardCommand;
+    private readonly AsyncRelayCommand stageHunkCommand;
+    private readonly AsyncRelayCommand unstageHunkCommand;
+    private readonly AsyncRelayCommand discardHunkCommand;
     private readonly AsyncRelayCommand commitCommand;
     private readonly RelayCommand openEditorCommand;
     private readonly RelayCommand revealExplorerCommand;
@@ -195,6 +211,13 @@ public sealed class GitViewModel : ObservableObject
         StageCommand = stageCommand = new AsyncRelayCommand(StageAsync, CanStage);
         UnstageCommand = unstageCommand = new AsyncRelayCommand(UnstageAsync, CanUnstage);
         DiscardCommand = discardCommand = new AsyncRelayCommand(DiscardAsync, CanMutateSelectedFile);
+        StageHunkCommand = stageHunkCommand = new AsyncRelayCommand(
+            parameter => ApplyHunkAsync(parameter, GitHunkOperation.Stage),
+            CanStageHunk);
+        UnstageHunkCommand = unstageHunkCommand = new AsyncRelayCommand(
+            parameter => ApplyHunkAsync(parameter, GitHunkOperation.Unstage),
+            CanUnstageHunk);
+        DiscardHunkCommand = discardHunkCommand = new AsyncRelayCommand(DiscardHunkAsync, CanDiscardHunk);
         CommitCommand = commitCommand = new AsyncRelayCommand(CommitAsync, CanCommit);
         OpenEditorCommand = openEditorCommand = new RelayCommand(OpenInEditor, CanOpenProjectTarget);
         RevealExplorerCommand = revealExplorerCommand = new RelayCommand(RevealInExplorer, CanOpenProjectTarget);
@@ -223,6 +246,9 @@ public sealed class GitViewModel : ObservableObject
     public ICommand StageCommand { get; }
     public ICommand UnstageCommand { get; }
     public ICommand DiscardCommand { get; }
+    public ICommand StageHunkCommand { get; }
+    public ICommand UnstageHunkCommand { get; }
+    public ICommand DiscardHunkCommand { get; }
     public ICommand CommitCommand { get; }
     public ICommand OpenEditorCommand { get; }
     public ICommand RevealExplorerCommand { get; }
@@ -489,6 +515,9 @@ public sealed class GitViewModel : ObservableObject
         stageCommand.RaiseCanExecuteChanged();
         unstageCommand.RaiseCanExecuteChanged();
         discardCommand.RaiseCanExecuteChanged();
+        stageHunkCommand.RaiseCanExecuteChanged();
+        unstageHunkCommand.RaiseCanExecuteChanged();
+        discardHunkCommand.RaiseCanExecuteChanged();
         commitCommand.RaiseCanExecuteChanged();
         openEditorCommand.RaiseCanExecuteChanged();
         revealExplorerCommand.RaiseCanExecuteChanged();
@@ -548,8 +577,32 @@ public sealed class GitViewModel : ObservableObject
         SelectedDiffLines.Clear();
         UnmatchedReviewFindings.Clear();
 
+        var hunkPatches = new Queue<GitDiffHunkPatch>(GitUnifiedDiffParser.ParseHunks(SelectedDiff));
+        var supportsWorkingHunks = SelectedFile is
+        {
+            OriginalPath: null,
+            IsUntracked: false,
+            WorkTreeStatus: 'M'
+        } && !showingStagedDiff;
+        var supportsStagedHunks = SelectedFile is
+        {
+            OriginalPath: null,
+            IsUntracked: false,
+            IndexStatus: 'M'
+        } && showingStagedDiff;
         var rows = GitUnifiedDiffParser.Parse(SelectedDiff)
-            .Select(line => new GitDiffLineViewModel(line))
+            .Select(line =>
+            {
+                var patch = line.Kind == GitDiffLineKind.Hunk && hunkPatches.TryDequeue(out var nextPatch)
+                    ? nextPatch
+                    : null;
+                return new GitDiffLineViewModel(
+                    line,
+                    patch,
+                    canStageHunk: patch is not null && supportsWorkingHunks,
+                    canUnstageHunk: patch is not null && supportsStagedHunks,
+                    canDiscardHunk: patch is not null && supportsWorkingHunks);
+            })
             .ToList();
         foreach (var row in rows)
         {
@@ -833,6 +886,31 @@ public sealed class GitViewModel : ObservableObject
         await RunMutationAsync(() => gitService.RevertAsync(repositoryRoot!, [file]), $"Discarded changes to {file.Path}").ConfigureAwait(true);
     }
 
+    private Task ApplyHunkAsync(object? parameter, GitHunkOperation operation)
+    {
+        var row = (GitDiffLineViewModel)parameter!;
+        var action = operation == GitHunkOperation.Stage ? "Staged" : "Unstaged";
+        return RunMutationAsync(
+            () => gitService.ApplyHunkAsync(repositoryRoot!, row.HunkPatch!, operation),
+            $"{action} hunk in {SelectedFile!.Path}");
+    }
+
+    private async Task DiscardHunkAsync(object? parameter)
+    {
+        var row = (GitDiffLineViewModel)parameter!;
+        if (!userInteractionService.ConfirmDestructiveAction(
+                "Discard Git hunk",
+                $"This will discard only this working-tree hunk from {SelectedFile!.DisplayPath}:\n\n{row.Content}\n\nThis cannot be undone. Continue?"))
+        {
+            StatusMessage = "Discard hunk cancelled";
+            return;
+        }
+
+        await RunMutationAsync(
+            () => gitService.ApplyHunkAsync(repositoryRoot!, row.HunkPatch!, GitHunkOperation.Discard),
+            $"Discarded hunk from {SelectedFile.Path}").ConfigureAwait(true);
+    }
+
     private async Task CommitAsync()
     {
         IsBusy = true;
@@ -1001,6 +1079,12 @@ public sealed class GitViewModel : ObservableObject
     private bool CanShowStagedDiff() => CanMutateSelectedFile() && SelectedFile?.IsStaged == true;
     private bool CanStage() => CanMutateSelectedFile() && SelectedFile?.HasWorkingTreeChanges == true;
     private bool CanUnstage() => CanMutateSelectedFile() && SelectedFile?.IsStaged == true;
+    private bool CanStageHunk(object? parameter) =>
+        CanMutateSelectedFile() && parameter is GitDiffLineViewModel { CanStageHunk: true } row && SelectedDiffLines.Contains(row);
+    private bool CanUnstageHunk(object? parameter) =>
+        CanMutateSelectedFile() && parameter is GitDiffLineViewModel { CanUnstageHunk: true } row && SelectedDiffLines.Contains(row);
+    private bool CanDiscardHunk(object? parameter) =>
+        CanMutateSelectedFile() && parameter is GitDiffLineViewModel { CanDiscardHunk: true } row && SelectedDiffLines.Contains(row);
     private bool CanMutateSelectedFile() => !isShuttingDown() && !IsBusy && IsRepository && SelectedFile is not null;
     private bool CanCommit() => !isShuttingDown() && !IsBusy && IsRepository && !string.IsNullOrWhiteSpace(CommitMessage) && ChangedFiles.Any(file => file.IsStaged);
     private bool CanOpenProjectTarget() => !isShuttingDown() && !string.IsNullOrWhiteSpace(contextProvider().ProjectPath);

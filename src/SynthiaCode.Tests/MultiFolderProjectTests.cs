@@ -339,6 +339,8 @@ internal static class MultiFolderProjectTests
         public Task<string> GetDiffAsync(string repositoryRoot, GitChangedFile file, bool staged, CancellationToken cancellationToken = default) =>
             Task.FromResult($"{repositoryRoot}:{file.Path}");
 
+        public Task ApplyHunkAsync(string repositoryRoot, GitDiffHunkPatch patch, GitHunkOperation operation, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
         public Task StageAsync(string repositoryRoot, IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default)
         {
             StageRoots.Add(repositoryRoot);

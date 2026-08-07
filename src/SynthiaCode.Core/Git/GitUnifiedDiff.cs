@@ -13,6 +13,15 @@ public enum GitDiffLineKind
     Metadata
 }
 
+public enum GitHunkOperation
+{
+    Stage,
+    Unstage,
+    Discard
+}
+
+public sealed record GitDiffHunkPatch(string Header, string Patch);
+
 public sealed record GitDiffLine(
     string Text,
     GitDiffLineKind Kind,
@@ -49,14 +58,7 @@ public static class GitUnifiedDiffParser
             return [];
         }
 
-        var lines = diff
-            .Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace('\r', '\n')
-            .Split('\n');
-        if (lines.Length > 0 && lines[^1].Length == 0)
-        {
-            lines = lines[..^1];
-        }
+        var lines = NormalizeLines(diff);
 
         var result = new List<GitDiffLine>(lines.Length);
         var insideHunk = false;
@@ -114,6 +116,74 @@ public static class GitUnifiedDiffParser
         }
 
         return result;
+    }
+
+    public static IReadOnlyList<GitDiffHunkPatch> ParseHunks(string? diff)
+    {
+        if (string.IsNullOrEmpty(diff))
+        {
+            return [];
+        }
+
+        var lines = NormalizeLines(diff);
+        var result = new List<GitDiffHunkPatch>();
+        var fileHeader = new List<string>();
+        var collectingFileHeader = false;
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var line = lines[index];
+            if (line.StartsWith("diff --git ", StringComparison.Ordinal))
+            {
+                fileHeader.Clear();
+                fileHeader.Add(line);
+                collectingFileHeader = true;
+                continue;
+            }
+
+            if (!HunkHeaderRegex.IsMatch(line))
+            {
+                if (collectingFileHeader)
+                {
+                    fileHeader.Add(line);
+                }
+                continue;
+            }
+
+            if (fileHeader.Count == 0)
+            {
+                continue;
+            }
+            collectingFileHeader = false;
+
+            var hunkLines = new List<string> { line };
+            for (var next = index + 1; next < lines.Length; next++)
+            {
+                if (HunkHeaderRegex.IsMatch(lines[next]) ||
+                    lines[next].StartsWith("diff --git ", StringComparison.Ordinal))
+                {
+                    break;
+                }
+                hunkLines.Add(lines[next]);
+                index = next;
+            }
+
+            result.Add(new GitDiffHunkPatch(
+                line,
+                string.Join('\n', fileHeader.Concat(hunkLines)) + "\n"));
+        }
+
+        return result;
+    }
+
+    private static string[] NormalizeLines(string diff)
+    {
+        var lines = diff
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n');
+        return lines.Length > 0 && lines[^1].Length == 0
+            ? lines[..^1]
+            : lines;
     }
 
     private static bool IsHeader(string line) =>

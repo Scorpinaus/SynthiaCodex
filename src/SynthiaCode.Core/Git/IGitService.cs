@@ -14,6 +14,12 @@ public interface IGitService
         bool staged,
         CancellationToken cancellationToken = default);
 
+    Task ApplyHunkAsync(
+        string repositoryRoot,
+        GitDiffHunkPatch patch,
+        GitHunkOperation operation,
+        CancellationToken cancellationToken = default);
+
     Task StageAsync(string repositoryRoot, IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default);
 
     Task UnstageAsync(string repositoryRoot, IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default);

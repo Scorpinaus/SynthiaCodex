@@ -331,16 +331,43 @@
                                                Text="{Binding Content}"
                                                TextWrapping="NoWrap"
                                                Padding="2,0,10,0" />
-                                    <Button Grid.Column="4"
-                                            Content="Comment"
-                                            Command="{Binding DataContext.Git.BeginAddCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                            CommandParameter="{Binding}"
-                                            Style="{StaticResource CompactButton}"
-                                            MinHeight="24"
-                                            Padding="7,1"
-                                            Margin="4,0,6,0"
-                                            Visibility="{Binding CanAddComment, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                            AutomationProperties.Name="Add inline review comment" />
+                                    <StackPanel Grid.Column="4"
+                                                Orientation="Horizontal"
+                                                Margin="4,0,6,0">
+                                        <Button Content="Stage hunk"
+                                                Command="{Binding DataContext.Git.StageHunkCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource CompactButton}"
+                                                MinHeight="24"
+                                                Padding="7,1"
+                                                Visibility="{Binding CanStageHunk, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                AutomationProperties.Name="Stage hunk" />
+                                        <Button Content="Unstage hunk"
+                                                Command="{Binding DataContext.Git.UnstageHunkCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource CompactButton}"
+                                                MinHeight="24"
+                                                Padding="7,1"
+                                                Visibility="{Binding CanUnstageHunk, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                AutomationProperties.Name="Unstage hunk" />
+                                        <Button Content="Discard hunk"
+                                                Command="{Binding DataContext.Git.DiscardHunkCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource DangerButton}"
+                                                MinHeight="24"
+                                                Padding="7,1"
+                                                Margin="5,0,0,0"
+                                                Visibility="{Binding CanDiscardHunk, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                AutomationProperties.Name="Discard hunk" />
+                                        <Button Content="Comment"
+                                                Command="{Binding DataContext.Git.BeginAddCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource CompactButton}"
+                                                MinHeight="24"
+                                                Padding="7,1"
+                                                Visibility="{Binding CanAddComment, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                AutomationProperties.Name="Add inline review comment" />
+                                    </StackPanel>
                                 </Grid>
                             </Border>
                             <Border Margin="54,4,8,8"

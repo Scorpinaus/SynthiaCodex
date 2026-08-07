@@ -7,6 +7,8 @@ namespace SynthiaCode.Infrastructure.Git;
 
 public sealed class GitService(IAppLogger logger) : IGitService
 {
+    private const int MaximumHunkPatchBytes = 8 * 1024 * 1024;
+
     public async Task<GitRepositoryState> GetRepositoryStateAsync(
         string workingDirectory,
         CancellationToken cancellationToken = default)
@@ -99,6 +101,35 @@ public sealed class GitService(IAppLogger logger) : IGitService
         return string.IsNullOrWhiteSpace(result.StandardOutput)
             ? "No diff is available for this file in the selected view."
             : result.StandardOutput;
+    }
+
+    public async Task ApplyHunkAsync(
+        string repositoryRoot,
+        GitDiffHunkPatch patch,
+        GitHunkOperation operation,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureRepositoryRoot(repositoryRoot);
+        ArgumentNullException.ThrowIfNull(patch);
+        if (Encoding.UTF8.GetByteCount(patch.Patch) > MaximumHunkPatchBytes)
+        {
+            throw new InvalidOperationException("The selected hunk is too large to apply safely.");
+        }
+
+        var parsed = GitUnifiedDiffParser.ParseHunks(patch.Patch);
+        if (parsed.Count != 1 || parsed[0] != patch)
+        {
+            throw new InvalidOperationException("The selected hunk patch is invalid or contains additional changes.");
+        }
+
+        var arguments = operation switch
+        {
+            GitHunkOperation.Stage => new[] { "apply", "--cached", "--whitespace=nowarn", "-" },
+            GitHunkOperation.Unstage => new[] { "apply", "--cached", "--reverse", "--whitespace=nowarn", "-" },
+            GitHunkOperation.Discard => new[] { "apply", "--reverse", "--whitespace=nowarn", "-" },
+            _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, "Unsupported hunk operation.")
+        };
+        await RunAsync(repositoryRoot, arguments, [0], cancellationToken, patch.Patch).ConfigureAwait(false);
     }
 
     public Task StageAsync(
@@ -291,22 +322,26 @@ public sealed class GitService(IAppLogger logger) : IGitService
         string workingDirectory,
         IReadOnlyCollection<string> arguments,
         IReadOnlyCollection<int> allowedExitCodes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? standardInput = null)
     {
-        using var process = new Process
+        var startInfo = new ProcessStartInfo
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "git.exe",
-                WorkingDirectory = workingDirectory,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8
-            }
+            FileName = "git.exe",
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = standardInput is not null,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
         };
+        if (standardInput is not null)
+        {
+            startInfo.StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        }
+        using var process = new Process { StartInfo = startInfo };
 
         foreach (var argument in arguments)
         {
@@ -326,6 +361,12 @@ public sealed class GitService(IAppLogger logger) : IGitService
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         try
         {
+            if (standardInput is not null)
+            {
+                await process.StandardInput.WriteAsync(standardInput.AsMemory(), cancellationToken).ConfigureAwait(false);
+                await process.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
+                process.StandardInput.Close();
+            }
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)

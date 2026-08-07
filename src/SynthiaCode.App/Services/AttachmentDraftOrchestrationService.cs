@@ -238,7 +238,12 @@ public sealed class AttachmentDraftOrchestrationService
         {
             if (draft is not null)
             {
-                settings.ComposerAttachmentDrafts.Remove(draft);
+                draft.Attachments = [];
+                draft.UpdatedAt = DateTimeOffset.UtcNow;
+                if (draft.ReviewComments.Count == 0)
+                {
+                    settings.ComposerAttachmentDrafts.Remove(draft);
+                }
             }
             return;
         }

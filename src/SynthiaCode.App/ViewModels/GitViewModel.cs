@@ -26,8 +26,11 @@ public sealed record GitRepositoryOption(
         : $"{DisplayName} · {Branch}";
 }
 
-public sealed class GitDiffLineViewModel(GitDiffLine line)
+public sealed class GitDiffLineViewModel(GitDiffLine line) : ObservableObject
 {
+    private bool isCommentEditorOpen;
+    private string commentDraft = string.Empty;
+
     public GitDiffLineKind Kind => line.Kind;
 
     public int? OldLineNumber => line.OldLineNumber;
@@ -46,7 +49,94 @@ public sealed class GitDiffLineViewModel(GitDiffLine line)
         ? "Blank diff line"
         : $"Diff line {line.Text}";
 
+    public bool CanAddComment => Kind is GitDiffLineKind.Context or GitDiffLineKind.Addition or GitDiffLineKind.Removal &&
+        (OldLineNumber.HasValue || NewLineNumber.HasValue);
+
+    public bool IsCommentEditorOpen
+    {
+        get => isCommentEditorOpen;
+        internal set => SetProperty(ref isCommentEditorOpen, value);
+    }
+
+    public string CommentDraft
+    {
+        get => commentDraft;
+        set => SetProperty(ref commentDraft, value ?? string.Empty);
+    }
+
     public ObservableCollection<CodexReviewFinding> ReviewFindings { get; } = [];
+
+    public ObservableCollection<GitInlineCommentViewModel> UserComments { get; } = [];
+}
+
+public sealed class GitInlineCommentViewModel : ObservableObject
+{
+    private GitInlineComment comment;
+    private bool isEditing;
+    private string editText;
+
+    public GitInlineCommentViewModel(GitInlineComment comment)
+    {
+        this.comment = comment.Clone();
+        editText = this.comment.Body;
+    }
+
+    public string Id => comment.Id;
+
+    public string RepositoryRoot => comment.RepositoryRoot;
+
+    public string FilePath => comment.FilePath;
+
+    public string? OriginalFilePath => comment.OriginalFilePath;
+
+    public GitDiffSide Side => comment.Side;
+
+    public int LineNumber => comment.LineNumber;
+
+    public string LineText => comment.LineText;
+
+    public string Body => comment.Body;
+
+    public string SideLabel => comment.SideLabel;
+
+    public string DisplayLocation => comment.DisplayLocation;
+
+    public string AutomationName => comment.AutomationName;
+
+    public bool IsEditing
+    {
+        get => isEditing;
+        internal set => SetProperty(ref isEditing, value);
+    }
+
+    public string EditText
+    {
+        get => editText;
+        set => SetProperty(ref editText, value ?? string.Empty);
+    }
+
+    public GitInlineComment Snapshot() => comment.Clone();
+
+    internal void BeginEdit()
+    {
+        EditText = Body;
+        IsEditing = true;
+    }
+
+    internal void CancelEdit()
+    {
+        EditText = Body;
+        IsEditing = false;
+    }
+
+    internal void Replace(GitInlineComment value)
+    {
+        comment = value.Clone();
+        EditText = comment.Body;
+        IsEditing = false;
+        OnPropertyChanged(nameof(Body));
+        OnPropertyChanged(nameof(AutomationName));
+    }
 }
 
 public sealed class GitViewModel : ObservableObject
@@ -66,6 +156,13 @@ public sealed class GitViewModel : ObservableObject
     private readonly AsyncRelayCommand commitCommand;
     private readonly RelayCommand openEditorCommand;
     private readonly RelayCommand revealExplorerCommand;
+    private readonly RelayCommand beginAddCommentCommand;
+    private readonly RelayCommand cancelAddCommentCommand;
+    private readonly RelayCommand saveCommentCommand;
+    private readonly RelayCommand beginEditCommentCommand;
+    private readonly RelayCommand cancelEditCommentCommand;
+    private readonly RelayCommand saveEditedCommentCommand;
+    private readonly RelayCommand removeCommentCommand;
     private string? repositoryRoot;
     private string branch = "No repository";
     private string statusMessage = "Select a project to inspect Git changes";
@@ -101,6 +198,13 @@ public sealed class GitViewModel : ObservableObject
         CommitCommand = commitCommand = new AsyncRelayCommand(CommitAsync, CanCommit);
         OpenEditorCommand = openEditorCommand = new RelayCommand(OpenInEditor, CanOpenProjectTarget);
         RevealExplorerCommand = revealExplorerCommand = new RelayCommand(RevealInExplorer, CanOpenProjectTarget);
+        BeginAddCommentCommand = beginAddCommentCommand = new RelayCommand(BeginAddComment, CanBeginAddComment);
+        CancelAddCommentCommand = cancelAddCommentCommand = new RelayCommand(CancelAddComment, CanCancelAddComment);
+        SaveCommentCommand = saveCommentCommand = new RelayCommand(SaveComment, CanSaveComment);
+        BeginEditCommentCommand = beginEditCommentCommand = new RelayCommand(BeginEditComment, CanBeginEditComment);
+        CancelEditCommentCommand = cancelEditCommentCommand = new RelayCommand(CancelEditComment, CanCancelEditComment);
+        SaveEditedCommentCommand = saveEditedCommentCommand = new RelayCommand(SaveEditedComment, CanSaveEditedComment);
+        RemoveCommentCommand = removeCommentCommand = new RelayCommand(RemoveComment, CanRemoveComment);
     }
 
     public ObservableCollection<GitChangedFile> ChangedFiles { get; } = [];
@@ -111,6 +215,8 @@ public sealed class GitViewModel : ObservableObject
 
     public ObservableCollection<CodexReviewFinding> UnmatchedReviewFindings { get; } = [];
 
+    public ObservableCollection<GitInlineCommentViewModel> ReviewComments { get; } = [];
+
     public ICommand RefreshCommand { get; }
     public ICommand ShowWorkingDiffCommand { get; }
     public ICommand ShowStagedDiffCommand { get; }
@@ -120,6 +226,13 @@ public sealed class GitViewModel : ObservableObject
     public ICommand CommitCommand { get; }
     public ICommand OpenEditorCommand { get; }
     public ICommand RevealExplorerCommand { get; }
+    public ICommand BeginAddCommentCommand { get; }
+    public ICommand CancelAddCommentCommand { get; }
+    public ICommand SaveCommentCommand { get; }
+    public ICommand BeginEditCommentCommand { get; }
+    public ICommand CancelEditCommentCommand { get; }
+    public ICommand SaveEditedCommentCommand { get; }
+    public ICommand RemoveCommentCommand { get; }
 
     public string Branch
     {
@@ -195,6 +308,12 @@ public sealed class GitViewModel : ObservableObject
     public string DiffViewLabel => showingStagedDiff ? "Staged diff" : "Working tree diff";
 
     public bool HasUnmatchedReviewFindings => UnmatchedReviewFindings.Count > 0;
+
+    public bool HasReviewComments => ReviewComments.Count > 0;
+
+    public string PendingReviewCommentsLabel => ReviewComments.Count == 1
+        ? "1 pending inline comment will accompany your next message"
+        : $"{ReviewComments.Count} pending inline comments will accompany your next message";
 
     public string CommitMessage
     {
@@ -322,6 +441,46 @@ public sealed class GitViewModel : ObservableObject
         RebuildDiffProjection();
     }
 
+    public IReadOnlyList<GitInlineComment> CaptureReviewComments() =>
+        ReviewComments.Select(item => item.Snapshot()).ToArray();
+
+    public void SetReviewComments(IEnumerable<GitInlineComment> comments)
+    {
+        ArgumentNullException.ThrowIfNull(comments);
+        ReviewComments.Clear();
+        foreach (var comment in GitInlineComment.NormalizeRestored(comments))
+        {
+            ReviewComments.Add(new GitInlineCommentViewModel(comment));
+        }
+        RebuildDiffProjection();
+        NotifyReviewCommentsChanged();
+    }
+
+    public void RemoveReviewComments(IEnumerable<string> commentIds)
+    {
+        ArgumentNullException.ThrowIfNull(commentIds);
+        var ids = commentIds.ToHashSet(StringComparer.Ordinal);
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        var removed = false;
+        for (var index = ReviewComments.Count - 1; index >= 0; index--)
+        {
+            if (ids.Contains(ReviewComments[index].Id))
+            {
+                ReviewComments.RemoveAt(index);
+                removed = true;
+            }
+        }
+        if (removed)
+        {
+            RebuildDiffProjection();
+            NotifyReviewCommentsChanged();
+        }
+    }
+
     public void RaiseCommandStates()
     {
         refreshCommand.RaiseCanExecuteChanged();
@@ -333,6 +492,13 @@ public sealed class GitViewModel : ObservableObject
         commitCommand.RaiseCanExecuteChanged();
         openEditorCommand.RaiseCanExecuteChanged();
         revealExplorerCommand.RaiseCanExecuteChanged();
+        beginAddCommentCommand.RaiseCanExecuteChanged();
+        cancelAddCommentCommand.RaiseCanExecuteChanged();
+        saveCommentCommand.RaiseCanExecuteChanged();
+        beginEditCommentCommand.RaiseCanExecuteChanged();
+        cancelEditCommentCommand.RaiseCanExecuteChanged();
+        saveEditedCommentCommand.RaiseCanExecuteChanged();
+        removeCommentCommand.RaiseCanExecuteChanged();
     }
 
     private async Task LoadDiffAsync(bool staged)
@@ -413,12 +579,171 @@ public sealed class GitViewModel : ObservableObject
                     anchor.ReviewFindings.Add(finding);
                 }
             }
+
+            foreach (var comment in ReviewComments.Where(CommentMatchesSelectedFile))
+            {
+                var anchor = rows.LastOrDefault(row => comment.Side == GitDiffSide.New
+                    ? row.NewLineNumber == comment.LineNumber
+                    : row.OldLineNumber == comment.LineNumber);
+                anchor?.UserComments.Add(comment);
+            }
         }
 
         OnPropertyChanged(nameof(SelectedDiffLines));
         OnPropertyChanged(nameof(UnmatchedReviewFindings));
         OnPropertyChanged(nameof(HasUnmatchedReviewFindings));
     }
+
+    private void BeginAddComment(object? parameter)
+    {
+        if (parameter is not GitDiffLineViewModel row || !CanBeginAddComment(parameter))
+        {
+            return;
+        }
+        foreach (var other in SelectedDiffLines.Where(item => !ReferenceEquals(item, row)))
+        {
+            other.IsCommentEditorOpen = false;
+            other.CommentDraft = string.Empty;
+        }
+        row.CommentDraft = string.Empty;
+        row.IsCommentEditorOpen = true;
+        RaiseCommentCommandStates();
+    }
+
+    private void CancelAddComment(object? parameter)
+    {
+        if (parameter is not GitDiffLineViewModel row)
+        {
+            return;
+        }
+        row.CommentDraft = string.Empty;
+        row.IsCommentEditorOpen = false;
+        RaiseCommentCommandStates();
+    }
+
+    private void SaveComment(object? parameter)
+    {
+        if (parameter is not GitDiffLineViewModel row ||
+            SelectedFile is null ||
+            string.IsNullOrWhiteSpace(repositoryRoot))
+        {
+            return;
+        }
+
+        try
+        {
+            var side = row.Kind == GitDiffLineKind.Removal ? GitDiffSide.Old : GitDiffSide.New;
+            var lineNumber = side == GitDiffSide.Old ? row.OldLineNumber : row.NewLineNumber;
+            if (lineNumber is null)
+            {
+                throw new InvalidDataException("This diff row does not have a commentable line number.");
+            }
+            var comment = GitInlineComment.Create(
+                repositoryRoot,
+                SelectedFile.Path,
+                SelectedFile.OriginalPath,
+                side,
+                lineNumber.Value,
+                row.Content,
+                row.CommentDraft);
+            GitInlineComment.NormalizeForSubmission(CaptureReviewComments().Append(comment));
+            var viewModel = new GitInlineCommentViewModel(comment);
+            ReviewComments.Add(viewModel);
+            row.UserComments.Add(viewModel);
+            row.CommentDraft = string.Empty;
+            row.IsCommentEditorOpen = false;
+            StatusMessage = $"Added inline comment at {comment.DisplayLocation}";
+            NotifyReviewCommentsChanged();
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or InvalidDataException or NotSupportedException or PathTooLongException)
+        {
+            StatusMessage = exception.Message;
+        }
+    }
+
+    private void BeginEditComment(object? parameter)
+    {
+        if (parameter is not GitInlineCommentViewModel comment || !ReviewComments.Contains(comment))
+        {
+            return;
+        }
+        foreach (var other in ReviewComments.Where(item => !ReferenceEquals(item, comment)))
+        {
+            other.CancelEdit();
+        }
+        comment.BeginEdit();
+        RaiseCommentCommandStates();
+    }
+
+    private void CancelEditComment(object? parameter)
+    {
+        if (parameter is GitInlineCommentViewModel comment && ReviewComments.Contains(comment))
+        {
+            comment.CancelEdit();
+            RaiseCommentCommandStates();
+        }
+    }
+
+    private void SaveEditedComment(object? parameter)
+    {
+        if (parameter is not GitInlineCommentViewModel comment || !ReviewComments.Contains(comment))
+        {
+            return;
+        }
+        try
+        {
+            var updated = comment.Snapshot().WithBody(comment.EditText);
+            GitInlineComment.NormalizeForSubmission(
+                ReviewComments.Where(item => !ReferenceEquals(item, comment)).Select(item => item.Snapshot()).Append(updated));
+            comment.Replace(updated);
+            RebuildDiffProjection();
+            StatusMessage = $"Updated inline comment at {comment.DisplayLocation}";
+            NotifyReviewCommentsChanged();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException)
+        {
+            StatusMessage = exception.Message;
+        }
+    }
+
+    private void RemoveComment(object? parameter)
+    {
+        if (parameter is GitInlineCommentViewModel comment && ReviewComments.Remove(comment))
+        {
+            RebuildDiffProjection();
+            StatusMessage = $"Removed inline comment at {comment.DisplayLocation}";
+            NotifyReviewCommentsChanged();
+        }
+    }
+
+    private void NotifyReviewCommentsChanged()
+    {
+        OnPropertyChanged(nameof(ReviewComments));
+        OnPropertyChanged(nameof(HasReviewComments));
+        OnPropertyChanged(nameof(PendingReviewCommentsLabel));
+        RaiseCommentCommandStates();
+    }
+
+    private void RaiseCommentCommandStates()
+    {
+        beginAddCommentCommand.RaiseCanExecuteChanged();
+        cancelAddCommentCommand.RaiseCanExecuteChanged();
+        saveCommentCommand.RaiseCanExecuteChanged();
+        beginEditCommentCommand.RaiseCanExecuteChanged();
+        cancelEditCommentCommand.RaiseCanExecuteChanged();
+        saveEditedCommentCommand.RaiseCanExecuteChanged();
+        removeCommentCommand.RaiseCanExecuteChanged();
+    }
+
+    private bool CommentMatchesSelectedFile(GitInlineCommentViewModel comment) =>
+        SelectedFile is not null &&
+        !string.IsNullOrWhiteSpace(repositoryRoot) &&
+        PathsEqual(comment.RepositoryRoot, repositoryRoot) &&
+        (string.Equals(NormalizeRelativePath(comment.FilePath), NormalizeRelativePath(SelectedFile.Path), StringComparison.OrdinalIgnoreCase) ||
+         (!string.IsNullOrWhiteSpace(SelectedFile.OriginalPath) &&
+          (string.Equals(NormalizeRelativePath(comment.FilePath), NormalizeRelativePath(SelectedFile.OriginalPath), StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(NormalizeRelativePath(comment.OriginalFilePath ?? string.Empty), NormalizeRelativePath(SelectedFile.OriginalPath), StringComparison.OrdinalIgnoreCase))));
 
     private bool FindingMatchesSelectedFile(CodexReviewFinding finding) =>
         SelectedFile is not null &&
@@ -679,4 +1004,18 @@ public sealed class GitViewModel : ObservableObject
     private bool CanMutateSelectedFile() => !isShuttingDown() && !IsBusy && IsRepository && SelectedFile is not null;
     private bool CanCommit() => !isShuttingDown() && !IsBusy && IsRepository && !string.IsNullOrWhiteSpace(CommitMessage) && ChangedFiles.Any(file => file.IsStaged);
     private bool CanOpenProjectTarget() => !isShuttingDown() && !string.IsNullOrWhiteSpace(contextProvider().ProjectPath);
+    private bool CanBeginAddComment(object? parameter) =>
+        !isShuttingDown() && !IsBusy && IsRepository && SelectedFile is not null &&
+        parameter is GitDiffLineViewModel { CanAddComment: true, IsCommentEditorOpen: false };
+    private static bool CanCancelAddComment(object? parameter) =>
+        parameter is GitDiffLineViewModel { IsCommentEditorOpen: true };
+    private static bool CanSaveComment(object? parameter) =>
+        parameter is GitDiffLineViewModel { IsCommentEditorOpen: true };
+    private bool CanBeginEditComment(object? parameter) =>
+        !isShuttingDown() && parameter is GitInlineCommentViewModel { IsEditing: false } comment && ReviewComments.Contains(comment);
+    private bool CanCancelEditComment(object? parameter) =>
+        parameter is GitInlineCommentViewModel { IsEditing: true } comment && ReviewComments.Contains(comment);
+    private bool CanSaveEditedComment(object? parameter) => CanCancelEditComment(parameter);
+    private bool CanRemoveComment(object? parameter) =>
+        !isShuttingDown() && parameter is GitInlineCommentViewModel comment && ReviewComments.Contains(comment);
 }

@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json.Serialization;
 using SynthiaCode.Core.Attachments;
+using SynthiaCode.Core.Git;
 
 namespace SynthiaCode.Core.Codex.AppServer;
 
@@ -75,6 +76,7 @@ public sealed class QueuedFollowUpSnapshot
     public QueuedTurnOptionsSnapshot Options { get; set; } = new();
     public List<AttachmentReference> Attachments { get; set; } = [];
     public List<CodexSkillInput> SkillInputs { get; set; } = [];
+    public List<GitInlineComment> ReviewComments { get; set; } = [];
 
     [JsonIgnore]
     public List<AttachmentReference> Images
@@ -107,7 +109,8 @@ public sealed class QueuedFollowUpSnapshot
         LastError = LastError,
         Options = Options.Clone(),
         Attachments = [.. Attachments.Select(attachment => attachment.Clone())],
-        SkillInputs = [.. SkillInputs]
+        SkillInputs = [.. SkillInputs],
+        ReviewComments = [.. ReviewComments.Select(comment => comment.Clone())]
     };
 }
 
@@ -183,11 +186,19 @@ public sealed class QueuedFollowUp : INotifyPropertyChanged
 
     public IReadOnlyList<CodexSkillInput> SkillInputs { get; init; } = [];
 
+    public IReadOnlyList<GitInlineComment> ReviewComments { get; init; } = [];
+
     public IReadOnlyList<AttachmentReference> Images => Attachments;
 
     public bool HasAttachments => Attachments.Count > 0;
 
     public bool HasImages => Attachments.Any(attachment => attachment.Kind == AttachmentKind.Image);
+
+    public bool HasReviewComments => ReviewComments.Count > 0;
+
+    public string ReviewCommentSummary => ReviewComments.Count == 1
+        ? "1 inline comment"
+        : $"{ReviewComments.Count} inline comments";
 
     public string StateLabel => State switch
     {
@@ -211,7 +222,8 @@ public sealed class QueuedFollowUp : INotifyPropertyChanged
         LastError = LastError,
         Options = Options.Clone(),
         Attachments = [.. Attachments.Select(attachment => attachment.Clone())],
-        SkillInputs = [.. SkillInputs]
+        SkillInputs = [.. SkillInputs],
+        ReviewComments = [.. ReviewComments.Select(comment => comment.Clone())]
     };
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
@@ -245,12 +257,14 @@ public sealed class CodexFollowUpQueue
         string text,
         QueuedTurnOptionsSnapshot options,
         IEnumerable<AttachmentReference>? attachments = null,
-        IEnumerable<CodexSkillInput>? skillInputs = null)
+        IEnumerable<CodexSkillInput>? skillInputs = null,
+        IEnumerable<GitInlineComment>? reviewComments = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         var attachmentList = (attachments ?? []).Select(attachment => attachment.Clone()).ToList();
         var skillInputList = NormalizeSkillInputs(skillInputs, throwOnInvalid: true);
-        var normalized = ValidateContent(text, attachmentList, replacingItemId: null);
+        var commentList = GitInlineComment.NormalizeForSubmission(reviewComments).ToList();
+        var normalized = ValidateContent(text, attachmentList, commentList, replacingItemId: null);
         if (Items.Count >= MaximumItems)
         {
             throw new InvalidOperationException($"A thread can queue at most {MaximumItems} follow-ups.");
@@ -267,7 +281,8 @@ public sealed class CodexFollowUpQueue
             State = QueuedFollowUpState.Pending,
             Options = options.Clone(),
             Attachments = attachmentList,
-            SkillInputs = skillInputList
+            SkillInputs = skillInputList,
+            ReviewComments = commentList
         };
         Items.Add(item);
         return item;
@@ -278,7 +293,8 @@ public sealed class CodexFollowUpQueue
         Items.Clear();
         foreach (var snapshot in (snapshots ?? []).Take(MaximumItems))
         {
-            if (string.IsNullOrWhiteSpace(snapshot.Text) && snapshot.Attachments.Count == 0)
+            var comments = GitInlineComment.NormalizeRestored(snapshot.ReviewComments);
+            if (string.IsNullOrWhiteSpace(snapshot.Text) && snapshot.Attachments.Count == 0 && comments.Count == 0)
             {
                 continue;
             }
@@ -299,7 +315,8 @@ public sealed class CodexFollowUpQueue
                     : snapshot.LastError,
                 Options = (snapshot.Options ?? new QueuedTurnOptionsSnapshot()).Clone(),
                 Attachments = [.. snapshot.Attachments.Select(attachment => attachment.Clone())],
-                SkillInputs = NormalizeSkillInputs(snapshot.SkillInputs, throwOnInvalid: false)
+                SkillInputs = NormalizeSkillInputs(snapshot.SkillInputs, throwOnInvalid: false),
+                ReviewComments = comments
             });
         }
     }
@@ -311,7 +328,7 @@ public sealed class CodexFollowUpQueue
     {
         var item = GetRequired(id);
         EnsureMutable(item);
-        item.Text = ValidateContent(text, item.Attachments, id);
+        item.Text = ValidateContent(text, item.Attachments, item.ReviewComments, id);
         item.EditText = item.Text;
         item.UpdatedAt = DateTimeOffset.UtcNow;
     }
@@ -413,10 +430,11 @@ public sealed class CodexFollowUpQueue
     private string ValidateContent(
         string? text,
         IReadOnlyCollection<AttachmentReference> attachments,
+        IReadOnlyCollection<GitInlineComment> reviewComments,
         string? replacingItemId)
     {
         var normalized = text?.Trim() ?? string.Empty;
-        if (normalized.Length == 0 && attachments.Count == 0)
+        if (normalized.Length == 0 && attachments.Count == 0 && reviewComments.Count == 0)
         {
             throw new InvalidOperationException("A queued follow-up cannot be empty.");
         }
@@ -446,7 +464,8 @@ public sealed class CodexFollowUpQueue
             throw new InvalidOperationException($"Queued managed attachments cannot exceed {AttachmentLimits.MaximumBytesPerInput / (1024 * 1024)} MiB per follow-up.");
         }
 
-        var byteCount = Encoding.UTF8.GetByteCount(normalized);
+        var byteCount = Encoding.UTF8.GetByteCount(
+            GitInlineCommentPromptFormatter.AppendToPrompt(normalized, reviewComments));
         if (byteCount > MaximumItemBytes)
         {
             throw new InvalidOperationException($"A queued follow-up cannot exceed {MaximumItemBytes / 1024} KiB.");
@@ -454,7 +473,8 @@ public sealed class CodexFollowUpQueue
 
         var aggregate = Items
             .Where(item => !string.Equals(item.Id, replacingItemId, StringComparison.Ordinal))
-            .Sum(item => Encoding.UTF8.GetByteCount(item.Text));
+            .Sum(item => Encoding.UTF8.GetByteCount(
+                GitInlineCommentPromptFormatter.AppendToPrompt(item.Text, item.ReviewComments)));
         if (aggregate + byteCount > MaximumAggregateBytes)
         {
             throw new InvalidOperationException($"Queued follow-ups cannot exceed {MaximumAggregateBytes / 1024} KiB per thread.");

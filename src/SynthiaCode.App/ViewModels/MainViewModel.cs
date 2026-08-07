@@ -86,6 +86,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string? executionPolicyCwd;
     private bool isShuttingDown;
     private bool isRestoringAttachmentDraft;
+    private bool isRestoringReviewCommentDraft;
     private string? generalWorkspacePath;
     private string? generalWorkspaceError;
     private Task? shutdownTask;
@@ -1117,9 +1118,106 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    private void CaptureReviewCommentDraft(string? projectPath, string? threadId)
+    {
+        if (!isRestoringReviewCommentDraft)
+        {
+            ComposerReviewCommentDraftStore.Capture(
+                settings,
+                projectPath,
+                threadId,
+                Git.CaptureReviewComments());
+        }
+    }
+
+    private void RestoreReviewCommentDraft(string? projectPath, string? threadId)
+    {
+        isRestoringReviewCommentDraft = true;
+        try
+        {
+            Git.SetReviewComments(ComposerReviewCommentDraftStore.Restore(
+                settings,
+                projectPath,
+                threadId));
+        }
+        finally
+        {
+            isRestoringReviewCommentDraft = false;
+        }
+    }
+
+    private async Task SaveReviewCommentDraftAsync()
+    {
+        if (isRestoringReviewCommentDraft)
+        {
+            return;
+        }
+        CaptureReviewCommentDraft(SelectedProjectPath, activeThreadId);
+        try
+        {
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            logger.Log(
+                AppLogLevel.Warning,
+                "review_comment_draft_save_failed",
+                "Could not save the inline review comment draft.",
+                exception: exception);
+        }
+    }
+
+    private async Task AcknowledgeReviewCommentsAsync(
+        string? projectPath,
+        string? threadId,
+        IReadOnlyList<GitInlineComment> capturedComments)
+    {
+        var capturedIds = capturedComments.Select(comment => comment.Id).ToArray();
+        if (capturedIds.Length == 0)
+        {
+            return;
+        }
+
+        var isCurrentScope = string.Equals(activeThreadId, threadId, StringComparison.Ordinal) &&
+            (string.IsNullOrWhiteSpace(projectPath)
+                ? string.IsNullOrWhiteSpace(SelectedProjectPath)
+                : ProjectFolderSet.PathsEqual(projectPath, SelectedProjectPath));
+        if (isCurrentScope)
+        {
+            isRestoringReviewCommentDraft = true;
+            try
+            {
+                Git.RemoveReviewComments(capturedIds);
+            }
+            finally
+            {
+                isRestoringReviewCommentDraft = false;
+            }
+            CaptureReviewCommentDraft(projectPath, threadId);
+        }
+        else
+        {
+            ComposerReviewCommentDraftStore.Remove(settings, projectPath, threadId, capturedIds);
+        }
+
+        try
+        {
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            logger.Log(
+                AppLogLevel.Warning,
+                "review_comment_acknowledgement_save_failed",
+                "Could not persist the acknowledged inline review comments.",
+                exception: exception);
+        }
+    }
+
     private async Task SelectProjectAsync(string path)
     {
         CaptureAttachmentDraft(SelectedProjectPath, activeThreadId);
+        CaptureReviewCommentDraft(SelectedProjectPath, activeThreadId);
         await settingsStore.SaveAsync(settings).ConfigureAwait(true);
         isRestoringAttachmentDraft = true;
         try
@@ -1166,6 +1264,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (!string.IsNullOrWhiteSpace(SelectedProjectPath))
         {
             CaptureAttachmentDraft(SelectedProjectPath, activeThreadId);
+            CaptureReviewCommentDraft(SelectedProjectPath, activeThreadId);
             SelectedProjectPath = null;
             activeThreadId = null;
             activeTurnId = null;
@@ -1507,10 +1606,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
 
         var threadId = activeThreadId;
+        var sourceProjectPath = SelectedProjectPath;
         try
         {
             var guidance = SteeringText.Trim();
             var attachments = TaskWorkspace.Attachments.Select(attachment => attachment.Clone()).ToList();
+            var capturedComments = Git.CaptureReviewComments();
             var skillInputs = TaskWorkspace.SkillSelector.ResolveSkillInputs(guidance);
             var mutation = await followUpQueue.EnqueueAsync(new FollowUpEnqueueUseCaseRequest(
                 settings,
@@ -1518,8 +1619,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 guidance,
                 CaptureQueuedTurnOptions(threadId, GetWorkspacePathForThread(threadId)),
                 attachments,
-                skillInputs)).ConfigureAwait(true);
+                skillInputs,
+                capturedComments)).ConfigureAwait(true);
             ApplyFollowUpQueueMutation(threadId, mutation);
+            await AcknowledgeReviewCommentsAsync(sourceProjectPath, threadId, capturedComments).ConfigureAwait(true);
             TaskWorkspace.SkillSelector.ClearSelectedSkills();
             SteeringText = string.Empty;
             TaskWorkspace.ClearAttachments();
@@ -1572,6 +1675,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             try
             {
                 var turnId = activeTurnId;
+                var effectiveGuidance = GitInlineCommentPromptFormatter.AppendToPrompt(
+                    item.Text,
+                    item.ReviewComments);
                 var mutation = await followUpQueue.SteerAsync(
                     settings,
                     threadId,
@@ -1581,7 +1687,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                         GetConversationAddress(threadId),
                         turnId,
                         attachmentDraftService.BuildHarnessPromptInputs(
-                            item.Text, item.Attachments, item.Options.WorkspacePath,
+                            effectiveGuidance, item.Attachments, item.Options.WorkspacePath,
                             ResolveModel(item.Options.Model), item.SkillInputs,
                             GetQueuedWorkspaceRoots(threadId, item.Options)))).ConfigureAwait(true);
                 ApplyFollowUpQueueMutation(threadId, mutation);
@@ -1622,10 +1728,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         var threadId = activeThreadId;
         var turnId = activeTurnId;
+        var sourceProjectPath = SelectedProjectPath;
         try
         {
             var guidance = SteeringText.Trim();
             var attachments = TaskWorkspace.Attachments.Select(attachment => attachment.Clone()).ToList();
+            var capturedComments = Git.CaptureReviewComments();
+            var effectiveGuidance = GitInlineCommentPromptFormatter.AppendToPrompt(
+                guidance,
+                capturedComments);
             await turnExecution.SteerAsync(
                 threadId,
                 CreateHarnessConnectionOptions(GetActiveWorkspacePath()),
@@ -1633,10 +1744,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                     GetConversationAddress(threadId),
                     turnId,
                     attachmentDraftService.BuildHarnessPromptInputs(
-                        guidance, attachments, GetActiveWorkspacePath(), TaskWorkspace.SelectedModel,
+                        effectiveGuidance, attachments, GetActiveWorkspacePath(), TaskWorkspace.SelectedModel,
                         TaskWorkspace.SkillSelector.ResolveSkillInputs(guidance),
                         GetActiveWorkspaceRoots())),
-                guidance).ConfigureAwait(true);
+                effectiveGuidance).ConfigureAwait(true);
+            await AcknowledgeReviewCommentsAsync(sourceProjectPath, threadId, capturedComments).ConfigureAwait(true);
             TaskWorkspace.NotifyResponseChanged();
             TaskWorkspace.SkillSelector.ClearSelectedSkills();
             SteeringText = string.Empty;
@@ -1982,9 +2094,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(PromptText) && !TaskWorkspace.HasAttachments)
+        if (string.IsNullOrWhiteSpace(PromptText) && !TaskWorkspace.HasAttachments && !Git.HasReviewComments)
         {
-            StatusMessage = "Enter a prompt or attach an image before starting a task";
+            StatusMessage = "Enter a prompt, add an inline comment, or attach a file before starting a task";
             return;
         }
 
@@ -2007,20 +2119,29 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
 
         StatusMessage = $"Starting {ResolveHarnessName(SelectedThread)} task";
+        var sourceProjectPath = SelectedProjectPath;
 
         try
         {
             var submittedPrompt = PromptText.Trim();
             var submittedImages = TaskWorkspace.Attachments.Select(image => image.Clone()).ToList();
-            TaskWorkspace.SubmittedPrompt = submittedPrompt;
+            var capturedComments = Git.CaptureReviewComments();
+            var effectivePrompt = GitInlineCommentPromptFormatter.AppendToPrompt(
+                submittedPrompt,
+                capturedComments);
+            TaskWorkspace.SubmittedPrompt = effectivePrompt;
             await EnsureHarnessSessionAsync(
                 ResolveHarnessId(SelectedThread),
                 GetActiveWorkspacePath()).ConfigureAwait(true);
             activeThreadId = await EnsureActiveThreadAsync().ConfigureAwait(true);
+            var submissionThreadId = activeThreadId;
             var persistedThread = settings.ProjectThreads.FirstOrDefault(thread =>
                 string.Equals(thread.ThreadId, activeThreadId, StringComparison.Ordinal));
+            var titlePrompt = string.IsNullOrWhiteSpace(submittedPrompt)
+                ? "Address inline review comments"
+                : submittedPrompt;
             var automaticTitle = persistedThread?.IsTitlePlaceholder == true
-                ? CreateAutomaticThreadTitle(submittedPrompt, submittedImages)
+                ? CreateAutomaticThreadTitle(titlePrompt, submittedImages)
                 : null;
             var workspacePath = GetActiveWorkspacePath();
             settings.LastModelOverride = NormalizeOverride(ModelOverride);
@@ -2030,10 +2151,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 settings,
                 activeThreadId,
                 GetConversationAddress(activeThreadId),
-                submittedPrompt,
+                effectivePrompt,
                 submittedImages,
                 CreateHarnessConnectionOptions(workspacePath),
-                CreateHarnessTurnStartCommand(activeThreadId, submittedPrompt, submittedImages, workspacePath),
+                CreateHarnessTurnStartCommand(activeThreadId, effectivePrompt, submittedImages, workspacePath),
                 automaticTitle,
                 snapshot => InvokeOnCapturedSynchronizationContext(
                     () => TaskWorkspace.ApplyConversationSnapshot(snapshot)),
@@ -2052,6 +2173,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                         IsTurnRunning = false;
                     }
                     cancelTurnCommand.RaiseCanExecuteChanged();
+                    _ = AcknowledgeReviewCommentsAsync(sourceProjectPath, submissionThreadId, capturedComments);
                     TaskWorkspace.ClearAttachments();
                     StatusMessage = started.Status == CodexTurnStatus.Running
                         ? "Codex turn running"
@@ -2061,7 +2183,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             TaskWorkspace.ApplyConversationSnapshot(result.Snapshot);
             if (SelectedThread is not null)
             {
-                SelectedThread.Preview = persistedThread?.Preview ?? submittedPrompt;
+                SelectedThread.Preview = persistedThread?.Preview ?? titlePrompt;
             }
             if (result.Status == CodexTurnStatus.Running)
             {
@@ -2849,7 +2971,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         Supports(HarnessCapability.SteerTurn, FindThread(activeThreadId)) &&
         !string.IsNullOrWhiteSpace(activeThreadId) &&
         !string.IsNullOrWhiteSpace(activeTurnId) &&
-        (!string.IsNullOrWhiteSpace(SteeringText) || TaskWorkspace.HasAttachments) &&
+        (!string.IsNullOrWhiteSpace(SteeringText) || TaskWorkspace.HasAttachments || Git.HasReviewComments) &&
         TaskWorkspace.CanSubmitAttachments;
 
     private bool CanLoadModels() =>
@@ -3156,9 +3278,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 effectiveConfig,
                 requirements,
                 profiles);
+            var effectivePrompt = GitInlineCommentPromptFormatter.AppendToPrompt(
+                queued.Text,
+                queued.ReviewComments);
             var command = attachmentDraftService.CreateHarnessTurnStart(new HarnessTurnRequestComposition(
                 GetConversationAddress(threadId),
-                queued.Text,
+                effectivePrompt,
                 queued.Attachments,
                 workspacePath,
                 resolved.Permissions,
@@ -3170,7 +3295,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 GetQueuedWorkspaceRoots(threadId, options)));
             return new PreparedHarnessTurn(
                 CreateHarnessConnectionOptions(workspacePath),
-                command);
+                command,
+                effectivePrompt);
         }
 
         var result = await followUpQueue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
@@ -3847,6 +3973,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (state?.ScopeKind == ThreadScopeKind.General && !string.IsNullOrWhiteSpace(SelectedProjectPath))
         {
             CaptureAttachmentDraft(SelectedProjectPath, activeThreadId);
+            CaptureReviewCommentDraft(SelectedProjectPath, activeThreadId);
             SelectedProjectPath = null;
             activeThreadId = null;
             activeTurnId = null;
@@ -3871,6 +3998,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         var previousActiveThreadId = activeThreadId;
         CaptureAttachmentDraft(SelectedProjectPath, previousActiveThreadId);
+        CaptureReviewCommentDraft(SelectedProjectPath, previousActiveThreadId);
         if (previousActiveThreadId is null && state is not null)
         {
             var scope = state.ScopeKey;
@@ -3921,6 +4049,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
 
         RestoreAttachmentDraft(SelectedProjectPath, activeThreadId);
+        RestoreReviewCommentDraft(SelectedProjectPath, activeThreadId);
 
         OnPropertyChanged(nameof(TimelineItems));
         OnPropertyChanged(nameof(RawEvents));
@@ -4088,6 +4217,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void RelayGitPropertyChanged(string? propertyName)
     {
+        if (propertyName == nameof(GitViewModel.ReviewComments))
+        {
+            _ = SaveReviewCommentDraftAsync();
+            TaskWorkspace.RaiseCommandStates();
+        }
+
         var mainProperty = propertyName switch
         {
             nameof(GitViewModel.Branch) => nameof(GitBranch),

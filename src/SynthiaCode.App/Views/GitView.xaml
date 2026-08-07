@@ -62,6 +62,82 @@
                 </StackPanel>
             </Border>
         </DataTemplate>
+        <DataTemplate x:Key="InlineReviewCommentCardTemplate">
+            <Border Margin="54,4,8,8"
+                    Padding="10,8"
+                    Background="{DynamicResource SurfaceRaisedBrush}"
+                    BorderBrush="{DynamicResource AccentBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    AutomationProperties.Name="{Binding AutomationName}">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Padding="5,1"
+                                Margin="0,0,7,0"
+                                CornerRadius="4"
+                                Background="{DynamicResource FieldBrush}"
+                                BorderBrush="{DynamicResource BorderStrongBrush}"
+                                BorderThickness="1">
+                            <TextBlock Text="{Binding SideLabel}"
+                                       FontSize="10"
+                                       FontWeight="Bold" />
+                        </Border>
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding DisplayLocation}"
+                                   FontFamily="{StaticResource MonoFont}"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   TextWrapping="Wrap" />
+                    </Grid>
+                    <TextBlock Text="{Binding Body}"
+                               Margin="0,6,0,0"
+                               TextWrapping="Wrap"
+                               Visibility="{Binding IsEditing, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+                    <TextBox Text="{Binding EditText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             Margin="0,6,0,0"
+                             MinHeight="58"
+                             MaxHeight="140"
+                             MaxLength="16384"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             Visibility="{Binding IsEditing, Converter={StaticResource BooleanToVisibilityConverter}}"
+                             AutomationProperties.Name="Edit inline review comment" />
+                    <WrapPanel Margin="0,7,0,0">
+                        <Button Content="Edit"
+                                Command="{Binding DataContext.Git.BeginEditCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                CommandParameter="{Binding}"
+                                Style="{StaticResource CompactButton}"
+                                Visibility="{Binding IsEditing, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                                AutomationProperties.Name="Edit inline review comment" />
+                        <Button Content="Save"
+                                Command="{Binding DataContext.Git.SaveEditedCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                CommandParameter="{Binding}"
+                                Style="{StaticResource CompactButton}"
+                                Visibility="{Binding IsEditing, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                AutomationProperties.Name="Save inline review comment" />
+                        <Button Content="Cancel"
+                                Command="{Binding DataContext.Git.CancelEditCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                CommandParameter="{Binding}"
+                                Style="{StaticResource CompactButton}"
+                                Margin="5,0,0,0"
+                                Visibility="{Binding IsEditing, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                AutomationProperties.Name="Cancel inline review comment edit" />
+                        <Button Content="Remove"
+                                Command="{Binding DataContext.Git.RemoveCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                CommandParameter="{Binding}"
+                                Style="{StaticResource CompactButton}"
+                                Margin="5,0,0,0"
+                                Visibility="{Binding IsEditing, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                                AutomationProperties.Name="Remove inline review comment" />
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
     </UserControl.Resources>
     <Grid Background="{DynamicResource InspectorBrush}" Margin="10">
         <Grid.RowDefinitions>
@@ -181,6 +257,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <ListBox ItemsSource="{Binding Git.SelectedDiffLines}"
@@ -234,6 +311,7 @@
                                         <ColumnDefinition Width="36" />
                                         <ColumnDefinition Width="36" />
                                         <ColumnDefinition Width="18" />
+                                        <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="{Binding OldLineDisplay}"
@@ -253,10 +331,57 @@
                                                Text="{Binding Content}"
                                                TextWrapping="NoWrap"
                                                Padding="2,0,10,0" />
+                                    <Button Grid.Column="4"
+                                            Content="Comment"
+                                            Command="{Binding DataContext.Git.BeginAddCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                            CommandParameter="{Binding}"
+                                            Style="{StaticResource CompactButton}"
+                                            MinHeight="24"
+                                            Padding="7,1"
+                                            Margin="4,0,6,0"
+                                            Visibility="{Binding CanAddComment, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                            AutomationProperties.Name="Add inline review comment" />
                                 </Grid>
+                            </Border>
+                            <Border Margin="54,4,8,8"
+                                    Padding="10,8"
+                                    Background="{DynamicResource FieldBrush}"
+                                    BorderBrush="{DynamicResource AccentBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Visibility="{Binding IsCommentEditorOpen, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                    AutomationProperties.Name="New inline review comment editor">
+                                <StackPanel>
+                                    <TextBlock Text="Comment on this line"
+                                               FontWeight="SemiBold" />
+                                    <TextBox Text="{Binding CommentDraft, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             MinHeight="64"
+                                             MaxHeight="150"
+                                             MaxLength="16384"
+                                             Margin="0,6,0,0"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             AutomationProperties.Name="Inline review comment text" />
+                                    <WrapPanel Margin="0,7,0,0">
+                                        <Button Content="Save comment"
+                                                Command="{Binding DataContext.Git.SaveCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource PrimaryButton}"
+                                                AutomationProperties.Name="Save inline review comment" />
+                                        <Button Content="Cancel"
+                                                Command="{Binding DataContext.Git.CancelAddCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource CompactButton}"
+                                                Margin="5,0,0,0"
+                                                AutomationProperties.Name="Cancel new inline review comment" />
+                                    </WrapPanel>
+                                </StackPanel>
                             </Border>
                             <ItemsControl ItemsSource="{Binding ReviewFindings}"
                                           ItemTemplate="{StaticResource ReviewFindingCardTemplate}" />
+                            <ItemsControl ItemsSource="{Binding UserComments}"
+                                          ItemTemplate="{StaticResource InlineReviewCommentCardTemplate}" />
                         </StackPanel>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
@@ -280,6 +405,31 @@
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <ItemsControl ItemsSource="{Binding Git.UnmatchedReviewFindings}"
                                       ItemTemplate="{StaticResource ReviewFindingCardTemplate}" />
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <Border Grid.Row="2"
+                    MaxHeight="220"
+                    Margin="0,8,0,0"
+                    Padding="8"
+                    Background="{DynamicResource SurfaceRaisedBrush}"
+                    BorderBrush="{DynamicResource AccentBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Visibility="{Binding Git.HasReviewComments, Converter={StaticResource BooleanToVisibilityConverter}}"
+                    AutomationProperties.Name="Pending inline review comments">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top"
+                               Text="{Binding Git.PendingReviewCommentsLabel}"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap"
+                               Margin="4,0,4,4"
+                               AutomationProperties.LiveSetting="Polite" />
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl ItemsSource="{Binding Git.ReviewComments}"
+                                      ItemTemplate="{StaticResource InlineReviewCommentCardTemplate}" />
                     </ScrollViewer>
                 </DockPanel>
             </Border>

@@ -2,6 +2,7 @@ using System.IO;
 using SynthiaCode.Application.Harnesses;
 using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Git;
 using SynthiaCode.Core.Harnesses;
 using SynthiaCode.Core.Settings;
 
@@ -75,7 +76,8 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
             request.Text,
             request.Options,
             request.Attachments,
-            request.SkillInputs);
+            request.SkillInputs,
+            request.ReviewComments);
         return await PersistAsync(request.Settings, request.ThreadId, cancellationToken).ConfigureAwait(false);
     }
 
@@ -110,9 +112,12 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
         var item = Get(threadId, followUpId)
             ?? throw new InvalidOperationException("The queued follow-up is no longer available.");
         await harnesses.SteerTurnAsync(connectionOptions, command, cancellationToken).ConfigureAwait(false);
-        if (!string.IsNullOrWhiteSpace(item.Text))
+        var effectiveGuidance = GitInlineCommentPromptFormatter.AppendToPrompt(
+            item.Text,
+            item.ReviewComments);
+        if (!string.IsNullOrWhiteSpace(effectiveGuidance))
         {
-            conversations.AddGuidance(threadId, item.Text);
+            conversations.AddGuidance(threadId, effectiveGuidance);
         }
         queues.GetRequired(threadId).Remove(followUpId);
         return await PersistAsync(settings, threadId, cancellationToken).ConfigureAwait(false);
@@ -347,8 +352,11 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
                     snapshot.Clone(),
                     cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
-                service.BeginTurn(snapshot.Text, snapshot.Attachments);
-                persistedThread.Preview = snapshot.Text;
+                var effectivePrompt = prepared.UserPrompt ?? snapshot.Text;
+                service.BeginTurn(effectivePrompt, snapshot.Attachments);
+                persistedThread.Preview = string.IsNullOrWhiteSpace(snapshot.Text)
+                    ? snapshot.ReviewComments.Count == 1 ? "1 inline review comment" : $"{snapshot.ReviewComments.Count} inline review comments"
+                    : snapshot.Text;
                 var started = await harnesses.StartTurnAsync(
                     prepared.ConnectionOptions,
                     prepared.Command,
@@ -500,7 +508,8 @@ public sealed record FollowUpEnqueueUseCaseRequest(
     string Text,
     QueuedTurnOptionsSnapshot Options,
     IReadOnlyList<AttachmentReference> Attachments,
-    IReadOnlyList<CodexSkillInput> SkillInputs);
+    IReadOnlyList<CodexSkillInput> SkillInputs,
+    IReadOnlyList<GitInlineComment>? ReviewComments = null);
 
 public sealed record FollowUpDispatchUseCaseRequest(
     AppSettings Settings,
@@ -509,7 +518,8 @@ public sealed record FollowUpDispatchUseCaseRequest(
 
 public sealed record PreparedHarnessTurn(
     HarnessConnectionOptions ConnectionOptions,
-    StartTurnCommand Command);
+    StartTurnCommand Command,
+    string? UserPrompt = null);
 
 public sealed record QueuedFollowUpDispatchResult(
     bool Attempted,

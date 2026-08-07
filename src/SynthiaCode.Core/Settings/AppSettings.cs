@@ -1,6 +1,7 @@
 using SynthiaCode.Core.Projects;
 using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Git;
 using SynthiaCode.Core.Harnesses;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -63,6 +64,7 @@ public sealed class ComposerAttachmentDraftSnapshot
     public string ProjectPath { get; set; } = string.Empty;
     public string? ThreadId { get; set; }
     public List<AttachmentReference> Attachments { get; set; } = [];
+    public List<GitInlineComment> ReviewComments { get; set; } = [];
 
     [JsonIgnore]
     public List<AttachmentReference> Images
@@ -92,6 +94,7 @@ public sealed class ComposerAttachmentDraftSnapshot
         ProjectPath = ProjectPath,
         ThreadId = ThreadId,
         Attachments = [.. Attachments.Select(attachment => attachment.Clone())],
+        ReviewComments = [.. ReviewComments.Select(comment => comment.Clone())],
         UpdatedAt = UpdatedAt
     };
 }

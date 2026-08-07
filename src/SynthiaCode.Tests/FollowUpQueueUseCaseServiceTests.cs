@@ -3,6 +3,7 @@ using SynthiaCode.App.Services;
 using SynthiaCode.Application.Harnesses;
 using SynthiaCode.Core.Codex;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Git;
 using SynthiaCode.Core.Harnesses;
 using SynthiaCode.Core.Settings;
 using SynthiaCode.Harnesses.Codex;
@@ -94,6 +95,61 @@ public sealed class FollowUpQueueUseCaseServiceTests
         Assert.Empty(context.Queue.GetSnapshots(context.ThreadId));
         Assert.Empty(context.Settings.ProjectThreads.Single().QueuedFollowUps);
         Assert.True(context.Conversations.IsRunning(context.ThreadId));
+        await context.Queue.DisposeAsync();
+        await context.HarnessRuntime.DisposeAsync();
+        await context.Coordinator.DisposeAsync();
+    }
+
+    [Fact(DisplayName = "inline review comments dispatch exact queued prompt")]
+    public async Task Dispatch_uses_effective_inline_review_prompt_in_local_transcript()
+    {
+        await using var transport = new FakeAppServerTransport();
+        var context = CreateContext(transport, new FakeSettingsStore(), "queue-inline-comment");
+        await ConnectAsync(context.Coordinator, transport);
+        var root = Path.GetFullPath(Path.GetTempPath());
+        var comment = GitInlineComment.Create(
+            root,
+            "src/App.cs",
+            null,
+            GitDiffSide.New,
+            8,
+            "return value;",
+            "Use the validated value.");
+        await context.Queue.EnqueueAsync(new FollowUpEnqueueUseCaseRequest(
+            context.Settings,
+            context.ThreadId,
+            string.Empty,
+            new QueuedTurnOptionsSnapshot { WorkspacePath = root },
+            [],
+            [],
+            [comment]));
+        var effectivePrompt = GitInlineCommentPromptFormatter.AppendToPrompt(string.Empty, [comment]);
+
+        var dispatch = context.Queue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
+            context.Settings,
+            context.ThreadId,
+            (item, _) => Task.FromResult(new PreparedHarnessTurn(
+                new HarnessConnectionOptions(item.Options.WorkspacePath),
+                new StartTurnCommand(
+                    new ConversationAddress(
+                        new ConversationId(AppSettingsHarnessMigration.CreateDeterministicConversationId(
+                            KnownHarnessIds.Codex,
+                            context.ThreadId)),
+                        HarnessId.Codex,
+                        context.ThreadId),
+                    [new TextContentPart(effectivePrompt)],
+                    item.Options.WorkspacePath,
+                    HarnessTurnOptions.Default),
+                effectivePrompt))));
+        var request = await WaitForRequestAsync(transport, "turn/start");
+        transport.ServerSend($"{{\"id\":{request["id"]!.ToJsonString()},\"result\":{{\"turn\":{{\"id\":\"turn-inline-comment\"}}}}}}");
+
+        var result = await dispatch;
+        var turn = context.Conversations.GetSnapshot(context.ThreadId).ConversationTurns.Single();
+        Assert.True(result.Dispatch.RemoteTurnStarted);
+        Assert.Equal(effectivePrompt, turn.UserPrompt);
+        Assert.Contains("Use the validated value.", turn.UserPrompt, StringComparison.Ordinal);
+        Assert.Empty(context.Queue.GetSnapshots(context.ThreadId));
         await context.Queue.DisposeAsync();
         await context.HarnessRuntime.DisposeAsync();
         await context.Coordinator.DisposeAsync();

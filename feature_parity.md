@@ -130,6 +130,8 @@
 | Phase 3 - Verification | All 43 code-review-filtered tests pass in Release. The complete Release suite is 296/302 with the same six protected-baseline failures and no new regression; the Release solution build completes with zero warnings and zero errors. | **Complete** |
 | Phase 4 - Structured inline reviewer findings | Added bounded parsing for Codex's official plain-text review formatter and structured JSON fallback, immutable P0-P3/path/range findings derived from persisted responses, latest-review replacement semantics, unified-diff old/new line projection, repository/rename-aware matching, accessible inline finding cards, and an explicit unanchored fallback. | **Complete** |
 | Phase 5 - Structured review verification | All six new structured-review behavioral cases and all 43 existing code-review-filtered cases pass in Release. The complete Release suite is 302/308 with exactly the same six protected-baseline failures and no new regression; the Release solution build succeeds with zero warnings and zero errors. | **Complete** |
+| Phase 6 - User-authored inline comments | Added bounded repository-contained old/new-side comments, accessible diff-row authoring and editing, renamed-path projection, per-chat draft persistence beside attachments, deterministic prompt context for start and steer, structured queue snapshots and summaries, origin-aware captured-ID acknowledgement, and failure/in-flight retention. | **Complete** |
+| Phase 7 - Inline comment verification | All 43 inline-comment-filtered tests and all 44 code-review-filtered tests pass in Release. The complete Release suite is 310/316 with exactly the same six protected-baseline failures and no new regression; an unrelated fork timeout on the first run passed 37/37 in isolation and the full rerun matched baseline. The Release solution build succeeds with zero warnings and zero errors. | **Complete** |
 
 ## Status legend
 
@@ -146,7 +148,7 @@
 | --- | --- | --- |
 | Local coding loop | **Strong** | General and multi-folder project chats, multi-turn work, persistent goals, queued follow-ups, streaming, models, permissions, terminal, multi-repository Git changes, and worktrees are usable end to end. |
 | Safety and approvals | **Near full** | The three composer permission modes and server-request approvals now map closely to ChatGPT desktop. |
-| Git and worktree lifecycle | **Moderate** | Core isolation, file-level Git operations, dedicated review targets, structured diff rows, and inline reviewer findings exist; hunk operations, user-authored inline comments, handoff, push, PR, snapshots, and setup actions do not. |
+| Git and worktree lifecycle | **Moderate** | Core isolation, file-level Git operations, dedicated review targets, structured diff rows, inline reviewer findings, and user-authored comments exist; hunk operations, handoff, push, PR, snapshots, and setup actions do not. |
 | Agent orchestration | **Near** | Parallel chats plus Active/Done subagent inspection, transcripts, steering, and stopping are usable; nicknames, live open-transcript refresh, and custom-agent management remain absent. |
 | Context and multimodal input | **Near** | Per-chat context-window visibility plus image/file/folder picker, paste/drop, previews, queued lifecycle persistence, workspace mentions, and managed external snapshots are implemented; rich artifact viewing and remaining hardening are out of scope. |
 | Tools and integrations | **Moderate** | Skills discovery and enablement are now native Settings surfaces, and configured MCP/web activity can flow through app-server. Browser, Chrome, plugin/connector management, MCP administration, and Scheduled remain absent. |
@@ -200,10 +202,10 @@
 | Assistant Markdown rendering | Headings, emphasis, strikethrough, inline/fenced code, hierarchical ordered/unordered/task lists, quotes, rules, aligned tables, safe links/autolinks, local and remote images, safe native HTML, footnotes, definition lists, themed syntax highlighting, per-block copy, escapes, and literal unsafe/malformed fallback | **Full** | Arbitrary executable, embedded, form, media, and browser-DOM HTML intentionally remains visible and inert. |
 | Rich activity rows | Commands, complete file changes, tools, MCP calls, structured web-search actions, plans, collaboration, guidance, and errors are projected without client-side text truncation | **Near** | Some newer item families may appear only in raw diagnostics until allowlisted. |
 | Integrated terminal | Per-thread ConPTY PowerShell sessions with start, input, clear, kill, working directory, and bounded output | **Partial** | ChatGPT can directly consume current terminal output and exposes reusable project actions; SynthiaCode does not wire terminal output into agent context or environment actions. |
-| Git status and file diff | Working/staged views, changed-file selection, refresh, repository selection across attached folders/worktrees, old/new line-numbered unified-diff rows, and latest-review annotations with unmatched fallback | **Near** | No per-hunk actions, user-authored comments, or Commit/Branch/Last turn diff loading. |
+| Git status and file diff | Working/staged views, changed-file selection, refresh, repository selection across attached folders/worktrees, old/new line-numbered unified-diff rows, latest-review annotations with unmatched fallback, and pending user-comment cards | **Near** | No per-hunk actions or Commit/Branch/Last turn diff loading. |
 | Stage, unstage, discard, commit | Repository-scoped file actions with destructive confirmation and commit message UI | **Near** | No individual-hunk operations. |
 | Push and pull request | Terminal can run Git commands, but no native push/PR flow | **Missing** | Add branch push and GitHub pull-request creation/status. |
-| User-authored inline review comments | Reviewer findings render on matching diff rows, but users cannot author diff comments or carry them into the next prompt | **Missing** | ChatGPT supports user-authored inline comments in its review pane. |
+| User-authored inline review comments | Users can add, edit, and remove comments on old/new diff rows; comments persist per chat with renamed-file context and travel through the next start, steer, or durable queued follow-up with captured-ID acknowledgement | **Full** | None material for the documented line-feedback outcome. |
 | Dedicated code review flow | A native Review action and exact `/review` picker call app-server `review/start` for uncommitted changes, a base branch, a commit, or custom instructions; lifecycle and prioritized findings restore as labeled turns and the latest result is derived into typed P0-P3 file/range records for inline diff rendering | **Near** | Detached delivery is not exposed; app-server's plain-text review payload omits confidence; Commit/Branch/Last turn diff panes are not implemented. |
 | Editor and Explorer handoff | Open editor and reveal in Explorer are available | **Full** | None material on Windows. |
 | Local environment setup/actions | No `.codex` setup-script or reusable action management UI | **Missing** | ChatGPT can configure worktree setup and one-click project actions. |
@@ -249,13 +251,14 @@
 
 ## What changed in this recheck
 
-The 6 August current-feature recheck found and classified newly documented Codex surfaces:
+The 7 August current-feature recheck found and classified newly documented Codex surfaces:
 
 1. **Goal mode moved from Missing to Full** for the local-chat outcome: server-owned goals now load per chat, render above the composer, and support set/edit/pause/resume/clear, usage, reconnect, and push updates.
 2. **Multi-folder local projects moved from Missing to Full** for the local-project outcome: projects now retain one primary plus secondary roots, migrate existing scoped state, authorize bounded multi-root turns, preserve attachment ownership, and select among attached Git repositories.
 3. **Activity view remains Missing.** Parallel execution exists, but there is no combined unread/running/blocked/needs-input inbox or completion notification center.
 4. **ChatGPT Voice coordination remains Missing.** The implemented Windows recognizer is useful local dictation, not a GPT-Live conversation that can coordinate other threads.
 5. **Ephemeral side chats remain Missing.** Current forks are durable; app-server now supports in-memory forks that do not enter stored thread lists.
+6. **User-authored inline review comments moved from Missing to Full** for the documented line-feedback outcome: accessible old/new-side comments persist per chat and travel through start, steer, and durable queued follow-ups with exact captured context.
 
 Phase 6A skills and effective settings moved from backend-only behavior to **Near** desktop parity:
 
@@ -396,7 +399,7 @@ P0 attachments and image input moved from **Missing** to **Near**:
 ### P0 — Complete the core local coding experience
 
 1. **Attachments and image input (managed external core implemented):** add installed-runtime managed file/folder mention smoke coverage, attachment-specific permission preflight/narrowing, interactive folder review/exclusions, bounded thumbnail decoding, and app-server history attachment materialization. Optional live external roots remain deferred.
-2. **Interactive Git review (structured reviewer findings implemented):** add hunk staging/revert, user-authored inline comments carried into the next prompt, and Commit/Branch/Last turn diff loading on top of the implemented multi-repository selector, dedicated review targets, and typed inline reviewer annotations.
+2. **Interactive Git review (structured findings and user comments implemented):** add hunk staging/revert and Commit/Branch/Last turn diff loading on top of the implemented multi-repository selector, dedicated review targets, typed inline reviewer annotations, and user-authored old/new-side comments.
 3. **Push and pull requests:** add native branch push and GitHub PR creation/status.
 4. **Worktree lifecycle:** add starting-branch selection, setup scripts/actions, Local/Worktree handoff, snapshots/restore, and retention settings.
 
@@ -421,7 +424,7 @@ P0 attachments and image input moved from **Missing** to **Near**:
 
 ## Product recommendation
 
-Keep SynthiaCode's parity target focused on the **local coding loop**, not every ChatGPT feature. With queued follow-ups, persistent Goal mode, and multi-folder local projects at Full functional parity, the best next release is structured review/PR workflows, followed by complete worktree lifecycle. Those close the largest everyday workflow gaps without requiring SynthiaCode to become a browser, connector marketplace, automation platform, or general artifact suite.
+Keep SynthiaCode's parity target focused on the **local coding loop**, not every ChatGPT feature. With queued follow-ups, persistent Goal mode, multi-folder local projects, and user-authored inline review comments at Full functional parity, the best next release is hunk-level review plus push/PR workflows, followed by complete worktree lifecycle. Those close the largest everyday workflow gaps without requiring SynthiaCode to become a browser, connector marketplace, automation platform, or general artifact suite.
 
 ## Audit sources
 

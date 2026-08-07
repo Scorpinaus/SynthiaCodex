@@ -115,6 +115,7 @@ public static class SettingsStorageMapper
         ProjectPath = source.ProjectPath,
         ThreadId = source.ThreadId,
         Attachments = [.. source.Attachments.Select(CloneAttachment)],
+        ReviewComments = [.. source.ReviewComments.Select(comment => comment.Clone())],
         UpdatedAt = source.UpdatedAt
     };
 
@@ -156,7 +157,8 @@ public static class SettingsStorageMapper
             PermissionProfileId = source.Options.PermissionProfileId
         },
         Attachments = [.. source.Attachments.Select(CloneAttachment)],
-        SkillInputs = [.. source.SkillInputs]
+        SkillInputs = [.. source.SkillInputs],
+        ReviewComments = [.. source.ReviewComments.Select(comment => comment.Clone())]
     };
 
     private static AttachmentReference CloneAttachment(AttachmentReference source) => new()

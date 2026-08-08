@@ -1412,7 +1412,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (!CanForkSelectedThread() ||
             SelectedThread is null ||
             (!string.IsNullOrWhiteSpace(forkPointTurnId) &&
-             (forkPoint is null || IsTurnRunning || forkPoint.IsSuperseded || string.IsNullOrWhiteSpace(forkPoint.AssistantResponse))))
+             (forkPoint is null ||
+              IsTurnRunning ||
+              forkPoint.Status != CodexTurnStatus.Completed ||
+              forkPoint.IsSuperseded ||
+              string.IsNullOrWhiteSpace(forkPoint.AssistantResponse))))
         {
             return;
         }
@@ -1430,9 +1434,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 sourceThread,
                 sourceWorkspace,
                 CreateHarnessConnectionOptions(sourceWorkspace),
-                CreateThreadForkRequest(sourceThread, sourceWorkspace, instructionSnapshot),
+                CreateThreadForkRequest(sourceThread, sourceWorkspace, instructionSnapshot, forkPointTurnId),
                 new ThreadInstructionSnapshot(instructionSnapshot.DeveloperInstructions, instructionSnapshot.BaseInstructions),
-                forkPointTurnId,
                 sourceThread.ScopeKind == ThreadScopeKind.Project &&
                 string.Equals(sourceThread.Mode, "worktree", StringComparison.OrdinalIgnoreCase))).ConfigureAwait(true);
             conversationWorkflow.RegisterCreated(result.State);
@@ -3188,7 +3191,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             GetWorkspaceRootsForThread(threadId, cwd)));
 
     private ForkConversationCommand CreateThreadForkRequest(
-        ProjectThreadState thread, string cwd, CodexInstructionSnapshot instructionSnapshot) =>
+        ProjectThreadState thread,
+        string cwd,
+        CodexInstructionSnapshot instructionSnapshot,
+        string? lastTurnId) =>
         attachmentDraftService.CreateHarnessConversationFork(
             ConversationId.New(),
             GetConversationAddress(thread.ThreadId),
@@ -3197,7 +3203,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             cwd,
             instructionSnapshot.DeveloperInstructions,
             instructionSnapshot.BaseInstructions,
-            GetWorkspaceRoots(cwd, thread.ScopeKind == ThreadScopeKind.Project ? thread.ProjectPath : null));
+            GetWorkspaceRoots(cwd, thread.ScopeKind == ThreadScopeKind.Project ? thread.ProjectPath : null),
+            lastTurnId);
 
     private CodexInstructionSnapshot ResolveDefaultInstructionSnapshot() => new(
         settings.CustomDeveloperInstructionsEnabled

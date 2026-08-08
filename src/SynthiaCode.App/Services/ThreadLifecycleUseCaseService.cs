@@ -161,43 +161,36 @@ public sealed class ThreadLifecycleUseCaseService
     {
         var sourceService = threadWorkspace.GetRequired(request.Source.ThreadId);
         var sourceConversation = sourceService.SnapshotConversation();
-        var forkPoint = string.IsNullOrWhiteSpace(request.ForkPointTurnId)
+        var lastTurnId = string.IsNullOrWhiteSpace(request.ForkCommand.LastTurnId)
+            ? null
+            : request.ForkCommand.LastTurnId;
+        var forkPoint = lastTurnId is null
             ? null
             : sourceService.ConversationTurns.FirstOrDefault(turn =>
-                string.Equals(turn.TurnId, request.ForkPointTurnId, StringComparison.Ordinal));
+                string.Equals(turn.TurnId, lastTurnId, StringComparison.Ordinal));
         var forkPointIndex = forkPoint is null
             ? sourceConversation.Count - 1
             : sourceService.ConversationTurns.IndexOf(forkPoint);
-        if (!string.IsNullOrWhiteSpace(request.ForkPointTurnId) && forkPoint is null)
+        if (lastTurnId is not null && forkPoint is null)
         {
             throw new InvalidOperationException("The selected assistant response is no longer part of this chat.");
         }
-
-        var rollbackCount = forkPoint is null
-            ? 0
-            : sourceService.GetActiveRollbackTurnCount(forkPoint) - 1;
-        if (rollbackCount < 0)
+        if (forkPoint is not null &&
+            (forkPoint.IsSuperseded ||
+             forkPoint.Status != CodexTurnStatus.Completed ||
+             string.IsNullOrWhiteSpace(forkPoint.AssistantResponse)))
         {
             throw new InvalidOperationException("Only an active completed response can be forked.");
         }
+        var omitsLaterTurns = forkPoint is not null && sourceService.ConversationTurns
+            .Skip(forkPointIndex + 1)
+            .Any(turn => !turn.IsSuperseded && !string.IsNullOrWhiteSpace(turn.TurnId));
 
         var forked = await harnesses.ForkConversationAsync(
             request.ConnectionOptions,
             request.ForkCommand,
             cancellationToken).ConfigureAwait(false);
         var forkThreadId = forked.Address.RemoteId ?? forked.Address.LocalId.ToString();
-        if (rollbackCount > 0)
-        {
-            var rollback = await harnesses.RollbackConversationAsync(
-                request.ConnectionOptions,
-                new RollbackConversationCommand(forked.Address, rollbackCount),
-                cancellationToken).ConfigureAwait(false);
-            if (rollback.Address.LocalId != forked.Address.LocalId ||
-                rollback.Address.HarnessId != forked.Address.HarnessId)
-            {
-                throw new InvalidOperationException("The harness returned a different conversation while creating the fork.");
-            }
-        }
 
         AssistantWorktree? worktree = null;
         if (request.CreateWorktree)
@@ -229,14 +222,14 @@ public sealed class ThreadLifecycleUseCaseService
             .Take(forkPoint is null ? sourceConversation.Count : forkPointIndex + 1)
             .Select(CloneConversationTurn)
             .ToList();
-        state.ContextTokensUsed = rollbackCount == 0 ? sourceService.ContextTokensUsed : 0;
+        state.ContextTokensUsed = omitsLaterTurns ? 0 : sourceService.ContextTokensUsed;
         state.ContextWindowTokens = sourceService.ContextWindowTokens;
-        state.ContextCompactionCount = rollbackCount == 0 ? sourceService.ContextCompactionCount : 0;
+        state.ContextCompactionCount = omitsLaterTurns ? 0 : sourceService.ContextCompactionCount;
         threadStore.Upsert(request.Settings, state);
         threadStore.SetActive(request.Settings, state.ScopeKey, state.ThreadId);
         threadWorkspace.Restore(state);
         await settingsStore.SaveAsync(request.Settings, cancellationToken).ConfigureAwait(false);
-        return new ThreadForkResult(state, worktree, rollbackCount);
+        return new ThreadForkResult(state, worktree);
     }
 
     public async Task<ThreadCreateResult> CreateAsync(ThreadCreateRequest request, CancellationToken cancellationToken = default)
@@ -473,9 +466,8 @@ public sealed record ThreadForkRequest(
     HarnessConnectionOptions ConnectionOptions,
     ForkConversationCommand ForkCommand,
     ThreadInstructionSnapshot Instructions,
-    string? ForkPointTurnId,
     bool CreateWorktree);
-public sealed record ThreadForkResult(ProjectThreadState State, AssistantWorktree? Worktree, int RollbackCount);
+public sealed record ThreadForkResult(ProjectThreadState State, AssistantWorktree? Worktree);
 public sealed record ThreadCreateRequest(
     AppSettings Settings,
     ThreadScopeKey Scope,

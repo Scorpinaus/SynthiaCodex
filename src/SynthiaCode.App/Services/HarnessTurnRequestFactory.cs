@@ -61,14 +61,16 @@ public sealed class HarnessTurnRequestFactory
         string workspacePath,
         string? developerInstructions,
         string? baseInstructions,
-        IReadOnlyList<string>? workspaceRoots = null) => new(
+        IReadOnlyList<string>? workspaceRoots = null,
+        string? lastTurnId = null) => new(
             conversationId,
             source,
             workspacePath,
             CreateOptions(permissions, model, null, CodexServiceTierSelection.Inherit),
             developerInstructions,
             baseInstructions,
-            workspaceRoots);
+            workspaceRoots,
+            lastTurnId);
 
     public StartTurnCommand CreateTurnStart(HarnessTurnRequestComposition composition)
     {

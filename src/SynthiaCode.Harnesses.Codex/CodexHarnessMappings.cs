@@ -58,7 +58,8 @@ public static class CodexHarnessMappings
                 command.DeveloperInstructions,
                 command.WorkspacePath,
                 command.WorkspaceRoots),
-            command.BaseInstructions);
+            command.BaseInstructions,
+            command.LastTurnId);
     }
 
     public static CodexTurnStartRequest ToCodex(this StartTurnCommand command)

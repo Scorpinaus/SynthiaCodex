@@ -107,6 +107,76 @@ public sealed class HarnessContractTests
     }
 
     [Fact]
+    public async Task In_memory_forks_first_middle_and_latest_turns_inclusively_without_mutating_the_source()
+    {
+        await using var session = await new InMemoryHarness().ConnectAsync(new HarnessConnectionOptions());
+        var creation = session.RequireFeature<IConversationCreationFeature>(HarnessCapability.CreateConversation);
+        var execution = session.RequireFeature<ITurnExecutionFeature>(HarnessCapability.StartTurn);
+        var forking = session.RequireFeature<IConversationForkFeature>(HarnessCapability.ForkConversation);
+        var read = session.RequireFeature<IConversationReadFeature>(HarnessCapability.ReadConversation);
+        var source = (await creation.StartConversationAsync(new StartConversationCommand(
+            ConversationId.New(),
+            "C:\\workspace",
+            HarnessTurnOptions.Default))).Address;
+        var inMemory = Assert.IsType<InMemoryHarnessSession>(session);
+        var turnIds = new List<string>();
+        for (var index = 0; index < 3; index++)
+        {
+            var started = await execution.StartTurnAsync(new StartTurnCommand(
+                source,
+                [new TextContentPart($"prompt {index + 1}")],
+                "C:\\workspace",
+                HarnessTurnOptions.Default));
+            turnIds.Add(started.RemoteTurnId);
+            inMemory.EmitAssistantText(source, started.RemoteTurnId, $"response {index + 1}");
+            inMemory.CompleteTurn(source, started.RemoteTurnId);
+        }
+
+        for (var boundaryIndex = 0; boundaryIndex < turnIds.Count; boundaryIndex++)
+        {
+            var fork = await forking.ForkConversationAsync(new ForkConversationCommand(
+                ConversationId.New(),
+                source,
+                "C:\\workspace",
+                HarnessTurnOptions.Default,
+                LastTurnId: turnIds[boundaryIndex]));
+            var forkedHistory = await read.ReadConversationAsync(new ReadConversationCommand(fork.Address));
+            Assert.Equal(turnIds.Take(boundaryIndex + 1), forkedHistory.Turns.Select(turn => turn.RemoteTurnId));
+            Assert.Equal($"response {boundaryIndex + 1}", forkedHistory.Turns[^1].AssistantResponse);
+        }
+
+        var fullFork = await forking.ForkConversationAsync(new ForkConversationCommand(
+            ConversationId.New(),
+            source,
+            "C:\\workspace",
+            HarnessTurnOptions.Default));
+        var fullForkHistory = await read.ReadConversationAsync(new ReadConversationCommand(fullFork.Address));
+        Assert.Equal(turnIds, fullForkHistory.Turns.Select(turn => turn.RemoteTurnId));
+
+        var sourceHistory = await read.ReadConversationAsync(new ReadConversationCommand(source));
+        Assert.Equal(turnIds, sourceHistory.Turns.Select(turn => turn.RemoteTurnId));
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => forking.ForkConversationAsync(new ForkConversationCommand(
+            ConversationId.New(),
+            source,
+            "C:\\workspace",
+            HarnessTurnOptions.Default,
+            LastTurnId: "missing-turn")));
+
+        var running = await execution.StartTurnAsync(new StartTurnCommand(
+            source,
+            [new TextContentPart("still running")],
+            "C:\\workspace",
+            HarnessTurnOptions.Default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => forking.ForkConversationAsync(new ForkConversationCommand(
+            ConversationId.New(),
+            source,
+            "C:\\workspace",
+            HarnessTurnOptions.Default,
+            LastTurnId: running.RemoteTurnId)));
+    }
+
+    [Fact]
     public async Task Codex_adapter_maps_neutral_commands_and_translates_stream_events()
     {
         var backend = new FakeCodexBackend();
@@ -156,6 +226,31 @@ public sealed class HarnessContractTests
         var delta = Assert.Single(observed.OfType<AssistantTextDeltaEvent>());
         Assert.Equal("streamed", delta.Delta);
         Assert.Equal("codex-thread", delta.RemoteConversationId);
+    }
+
+    [Fact]
+    public async Task Codex_adapter_preserves_bounded_and_full_fork_commands()
+    {
+        var backend = new FakeCodexBackend();
+        var harness = new CodexHarness(new StubCodexDiscovery(), backend);
+        await using var session = await harness.ConnectAsync(new HarnessConnectionOptions());
+        var forking = session.RequireFeature<IConversationForkFeature>(HarnessCapability.ForkConversation);
+        var source = new ConversationAddress(ConversationId.New(), HarnessId.Codex, "codex-source");
+
+        await forking.ForkConversationAsync(new ForkConversationCommand(
+            ConversationId.New(),
+            source,
+            "C:\\workspace",
+            HarnessTurnOptions.Default,
+            LastTurnId: "turn-middle"));
+        Assert.Equal("turn-middle", backend.LastThreadFork?.LastTurnId);
+
+        await forking.ForkConversationAsync(new ForkConversationCommand(
+            ConversationId.New(),
+            source,
+            "C:\\workspace",
+            HarnessTurnOptions.Default));
+        Assert.Null(backend.LastThreadFork?.LastTurnId);
     }
 
     [Fact]
@@ -287,6 +382,7 @@ public sealed class HarnessContractTests
         public event EventHandler<CodexAppServerNotification>? NotificationReceived;
 
         public CodexThreadStartOptions? LastThreadStart { get; private set; }
+        public CodexThreadForkRequest? LastThreadFork { get; private set; }
         public CodexTurnStartRequest? LastTurnStart { get; private set; }
 
         public void Raise(CodexAppServerNotification notification) =>
@@ -315,8 +411,11 @@ public sealed class HarnessContractTests
 
         public Task<CodexThreadForkResult> ForkThreadAsync(
             CodexThreadForkRequest request,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new CodexThreadForkResult("codex-fork"));
+            CancellationToken cancellationToken = default)
+        {
+            LastThreadFork = request;
+            return Task.FromResult(new CodexThreadForkResult("codex-fork"));
+        }
 
         public Task<CodexThreadRollbackResult> RollbackThreadAsync(
             CodexThreadRollbackRequest request,

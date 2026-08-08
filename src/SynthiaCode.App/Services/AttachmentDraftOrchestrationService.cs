@@ -101,7 +101,8 @@ public sealed class AttachmentDraftOrchestrationService
         string workspacePath,
         string? developerInstructions,
         string? baseInstructions,
-        IReadOnlyList<string>? workspaceRoots = null) =>
+        IReadOnlyList<string>? workspaceRoots = null,
+        string? lastTurnId = null) =>
         harnessTurnRequestFactory.CreateConversationFork(
             conversationId,
             source,
@@ -110,7 +111,8 @@ public sealed class AttachmentDraftOrchestrationService
             workspacePath,
             developerInstructions,
             baseInstructions,
-            workspaceRoots);
+            workspaceRoots,
+            lastTurnId);
 
     public StartTurnCommand CreateHarnessTurnStart(HarnessTurnRequestComposition composition) =>
         harnessTurnRequestFactory.CreateTurnStart(composition);

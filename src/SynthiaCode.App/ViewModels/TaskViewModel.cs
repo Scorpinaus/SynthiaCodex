@@ -212,6 +212,7 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
                 : Task.CompletedTask,
             parameter => parameter is CodexConversationTurn turn &&
                 !IsTurnRunning &&
+                turn.Status == CodexTurnStatus.Completed &&
                 turn.HasAssistantResponse &&
                 turn.CanEditPrompt);
         RemoveAttachmentCommand = removeAttachmentCommand = new RelayCommand(

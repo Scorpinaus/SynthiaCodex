@@ -86,7 +86,8 @@ public sealed record CodexThreadForkRequest(
     CodexApprovalsReviewer? ApprovalsReviewer = null,
     string? PermissionProfileId = null,
     string? DeveloperInstructions = null,
-    string? BaseInstructions = null);
+    string? BaseInstructions = null,
+    string? LastTurnId = null);
 
 public sealed record CodexThreadForkResult(
     string ThreadId,

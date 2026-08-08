@@ -79,7 +79,8 @@ public sealed record ForkConversationCommand(
     HarnessTurnOptions Options,
     string? DeveloperInstructions = null,
     string? BaseInstructions = null,
-    IReadOnlyList<string>? WorkspaceRoots = null);
+    IReadOnlyList<string>? WorkspaceRoots = null,
+    string? LastTurnId = null);
 
 public sealed record ForkConversationResult(ConversationAddress Address);
 

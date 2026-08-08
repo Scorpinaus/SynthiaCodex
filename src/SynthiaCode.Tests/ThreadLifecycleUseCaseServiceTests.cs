@@ -1,6 +1,7 @@
 using SynthiaCode.App.Services;
 using SynthiaCode.Application.Harnesses;
 using SynthiaCode.Core.Codex.AppServer;
+using SynthiaCode.Core.Harnesses;
 using SynthiaCode.Core.Settings;
 using SynthiaCode.Harnesses.InMemory;
 using SynthiaCode.Infrastructure.Codex;
@@ -94,6 +95,84 @@ public sealed class ThreadLifecycleUseCaseServiceTests
         Assert.False(settings.ProjectThreads.Single().IsArchived);
         await coordinator.DisposeAsync();
     }
+
+    [Theory]
+    [InlineData(CodexTurnStatus.Running, false, true)]
+    [InlineData(CodexTurnStatus.Failed, false, true)]
+    [InlineData(CodexTurnStatus.Completed, true, true)]
+    [InlineData(CodexTurnStatus.Completed, false, false)]
+    public async Task Fork_rejects_running_invalid_superseded_and_response_less_boundaries(
+        CodexTurnStatus status,
+        bool isSuperseded,
+        bool hasResponse)
+    {
+        await using var transport = new FakeAppServerTransport();
+        var workspace = new CodexThreadWorkspace();
+        var coordinator = CreateCoordinator(transport);
+        var service = CreateService(coordinator, new FakeSettingsStore(), new ThreadStore(), workspace);
+        var source = CreateForkSource(new CodexConversationTurnSnapshot
+        {
+            TurnId = "selected-turn",
+            UserPrompt = "prompt",
+            AssistantResponse = hasResponse ? "response" : string.Empty,
+            Status = status,
+            IsSuperseded = isSuperseded
+        });
+        workspace.Restore(source);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ForkAsync(CreateForkRequest(
+            source,
+            "selected-turn")));
+        await coordinator.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Fork_rejects_a_missing_last_turn_boundary()
+    {
+        await using var transport = new FakeAppServerTransport();
+        var workspace = new CodexThreadWorkspace();
+        var coordinator = CreateCoordinator(transport);
+        var service = CreateService(coordinator, new FakeSettingsStore(), new ThreadStore(), workspace);
+        var source = CreateForkSource(new CodexConversationTurnSnapshot
+        {
+            TurnId = "existing-turn",
+            UserPrompt = "prompt",
+            AssistantResponse = "response",
+            Status = CodexTurnStatus.Completed
+        });
+        workspace.Restore(source);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ForkAsync(CreateForkRequest(
+            source,
+            "missing-turn")));
+        await coordinator.DisposeAsync();
+    }
+
+    private static ProjectThreadState CreateForkSource(CodexConversationTurnSnapshot turn) => new()
+    {
+        ScopeKind = ThreadScopeKind.General,
+        ThreadId = "fork-source",
+        ConversationId = Guid.NewGuid(),
+        HarnessId = KnownHarnessIds.InMemory,
+        RemoteConversationId = "memory-fork-source",
+        Title = "Fork source",
+        WorkspacePath = Path.GetTempPath(),
+        ConversationTurns = [turn]
+    };
+
+    private static ThreadForkRequest CreateForkRequest(ProjectThreadState source, string lastTurnId) => new(
+        new AppSettings(),
+        source,
+        Path.GetTempPath(),
+        new HarnessConnectionOptions(Path.GetTempPath()),
+        new ForkConversationCommand(
+            ConversationId.New(),
+            source.GetConversationAddress(),
+            Path.GetTempPath(),
+            HarnessTurnOptions.Default,
+            LastTurnId: lastTurnId),
+        new ThreadInstructionSnapshot(null, null),
+        CreateWorktree: false);
 
     private static AppServerSessionCoordinator CreateCoordinator(FakeAppServerTransport transport) => new(
         new FakeCodexProcessService(transport),

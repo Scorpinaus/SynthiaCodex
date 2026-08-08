@@ -825,6 +825,9 @@ static async Task TestAppServerLifecycleRequestsAsync()
     var fork = ParseMessage(transport.ClientMessages[3]);
     AssertJsonString("thread/fork", fork, "method", "thread fork method");
     AssertJsonString("thr_a", fork, "params.threadId", "fork source id");
+    AssertTrue(
+        fork["params"] is JsonObject forkParams && !forkParams.ContainsKey("lastTurnId"),
+        "full thread fork omits lastTurnId");
     transport.ServerSend("""{"id":2,"result":{"thread":{"id":"thr_fork"}}}""");
     AssertEqual("thr_fork", (await forkTask).ThreadId, "forked thread id");
 

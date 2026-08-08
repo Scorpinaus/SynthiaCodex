@@ -161,16 +161,31 @@ public sealed class InMemoryHarnessSession : HarnessSessionBase,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var source = GetRequired(command.Source);
         var remoteId = $"memory-conversation-{Interlocked.Increment(ref nextConversationId)}";
         var address = new ConversationAddress(command.LocalConversationId, HarnessId.InMemory, remoteId);
-        var clone = new ConversationState(address)
-        {
-            Name = string.IsNullOrWhiteSpace(source.Name) ? null : $"Fork of {source.Name}"
-        };
         lock (stateGate)
         {
-            foreach (var turn in source.Turns)
+            var source = GetRequiredUnsafe(command.Source);
+            var lastTurnIndex = source.Turns.Count - 1;
+            if (!string.IsNullOrWhiteSpace(command.LastTurnId))
+            {
+                lastTurnIndex = source.Turns.FindIndex(turn =>
+                    string.Equals(turn.RemoteTurnId, command.LastTurnId, StringComparison.Ordinal));
+                if (lastTurnIndex < 0)
+                {
+                    throw new KeyNotFoundException($"In-memory turn '{command.LastTurnId}' was not found.");
+                }
+                if (source.Turns[lastTurnIndex].Status is ConversationTurnStatus.Idle or ConversationTurnStatus.Running)
+                {
+                    throw new InvalidOperationException("An in-progress turn cannot be used as a fork boundary.");
+                }
+            }
+
+            var clone = new ConversationState(address)
+            {
+                Name = string.IsNullOrWhiteSpace(source.Name) ? null : $"Fork of {source.Name}"
+            };
+            foreach (var turn in source.Turns.Take(lastTurnIndex + 1))
             {
                 clone.Turns.Add(turn.Clone());
             }

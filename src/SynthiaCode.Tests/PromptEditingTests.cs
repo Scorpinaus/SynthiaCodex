@@ -228,26 +228,19 @@ internal static class PromptEditingTests
         var forkRequest = ParseMessage(transport.ClientMessages[6]);
         Assert(ReadString(forkRequest, "method") == "thread/fork", "assistant response uses thread fork");
         Assert(ReadString(forkRequest, "params.threadId") == "thread-fork-source", "assistant response forks the selected source chat");
+        Assert(ReadString(forkRequest, "params.lastTurnId") == "turn-original", "assistant response serializes the exact inclusive lastTurnId boundary");
         var forkRequestId = ReadInt(forkRequest, "id") ?? throw new InvalidOperationException("Fork request id was missing.");
         transport.ServerSend(
             """{"id":REQUEST_ID,"result":{"thread":{"id":"thread-fork-result"}}}"""
                 .Replace("REQUEST_ID", forkRequestId.ToString(), StringComparison.Ordinal));
 
-        await transport.WaitForClientMessageCountAsync(8);
-        var rollbackRequest = ParseMessage(transport.ClientMessages[7]);
-        Assert(ReadString(rollbackRequest, "method") == "thread/rollback", "fork rolls back later turns only in the new chat");
-        Assert(ReadString(rollbackRequest, "params.threadId") == "thread-fork-result", "rollback targets the new chat");
-        Assert(ReadInt(rollbackRequest, "params.numTurns") == 1, "fork keeps the selected assistant response");
-        var rollbackRequestId = ReadInt(rollbackRequest, "id") ?? throw new InvalidOperationException("Rollback request id was missing.");
-        transport.ServerSend(
-            """
-            {"id":REQUEST_ID,"result":{"thread":{"id":"thread-fork-result","turns":[{"id":"turn-original","status":"completed","items":[{"type":"userMessage","content":[{"type":"text","text":"Original prompt"}]},{"type":"agentMessage","text":"Original answer"}]}]}}}
-            """
-                .Replace("REQUEST_ID", rollbackRequestId.ToString(), StringComparison.Ordinal));
-
         await WaitUntilAsync(
             () => viewModel.StatusMessage == "Conversation forked from the selected response",
             "response fork completion");
+        Assert(transport.ClientMessages.Count == 7, "response fork sends no post-fork rollback request");
+        Assert(
+            !transport.ClientMessages.Select(ParseMessage).Any(message => ReadString(message, "method") == "thread/rollback"),
+            "response fork never uses thread rollback");
         Assert(viewModel.SelectedThread?.ThreadId == "thread-fork-result", "forked response chat is selected");
         Assert(
             viewModel.TaskWorkspace.ConversationTurns.Count == 1,

@@ -751,6 +751,10 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             ["threadId"] = request.ThreadId,
             ["cwd"] = request.Cwd
         };
+        if (!string.IsNullOrWhiteSpace(request.LastTurnId))
+        {
+            parameters["lastTurnId"] = request.LastTurnId;
+        }
         if (request.Sandbox is not null)
         {
             parameters["sandbox"] = request.Sandbox.Value.ToProtocolValue();

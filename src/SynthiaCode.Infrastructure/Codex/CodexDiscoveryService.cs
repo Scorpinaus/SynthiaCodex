@@ -20,26 +20,80 @@ public sealed class CodexDiscoveryService(
         string? preferredExecutablePath = null,
         CancellationToken cancellationToken = default)
     {
+        if (!string.IsNullOrWhiteSpace(preferredExecutablePath))
+        {
+            var expandedPreferredPath = Environment.ExpandEnvironmentVariables(preferredExecutablePath);
+            if (File.Exists(expandedPreferredPath))
+            {
+                var preferredVersion = await TryReadVersionAsync(
+                        Path.GetFullPath(expandedPreferredPath),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(preferredVersion))
+                {
+                    return CreateInstallation(Path.GetFullPath(expandedPreferredPath), preferredVersion);
+                }
+            }
+        }
+
         var sawCandidate = false;
-        foreach (var executable in EnumerateExecutableCandidates(preferredExecutablePath))
+        CodexInstallation? firstRunnable = null;
+        CodexInstallation? newestRunnable = null;
+        Version? newestVersion = null;
+        foreach (var executable in EnumerateExecutableCandidates(preferredExecutablePath: null))
         {
             sawCandidate = true;
             var version = await TryReadVersionAsync(executable, cancellationToken).ConfigureAwait(false);
             if (!string.IsNullOrWhiteSpace(version))
             {
-                return new CodexInstallation(
-                    true,
-                    executable,
-                    version,
-                    $"Codex CLI {version}",
-                    "Codex executable was resolved from the configured path, the standalone install, PATH, or the OpenAI Codex app bin folder.");
+                var installation = CreateInstallation(executable, version);
+                firstRunnable ??= installation;
+                if (TryParseComparableVersion(version, out var parsedVersion) &&
+                    (newestVersion is null || parsedVersion > newestVersion))
+                {
+                    newestVersion = parsedVersion;
+                    newestRunnable = installation;
+                }
             }
+        }
+
+        if (newestRunnable is not null)
+        {
+            return newestRunnable;
+        }
+
+        if (firstRunnable is not null)
+        {
+            return firstRunnable;
         }
 
         return CodexInstallation.Missing(
             sawCandidate
                 ? "Codex executable candidates were found, but none could be run with `--version`."
                 : "Install Codex CLI or set a preferred executable path in settings.");
+    }
+
+    private static CodexInstallation CreateInstallation(string executable, string version) =>
+        new(
+            true,
+            executable,
+            version,
+            $"Codex CLI {version}",
+            "Codex executable was resolved from the configured path or selected as the newest runnable standalone, PATH, or OpenAI Codex app installation.");
+
+    private static bool TryParseComparableVersion(string versionText, out Version version)
+    {
+        const string prefix = "codex-cli ";
+        var value = versionText.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            ? versionText[prefix.Length..]
+            : versionText;
+        var prereleaseSeparator = value.IndexOf('-', StringComparison.Ordinal);
+        if (prereleaseSeparator >= 0)
+        {
+            value = value[..prereleaseSeparator];
+        }
+
+        return Version.TryParse(value, out version!);
     }
 
     private static IEnumerable<string> EnumerateExecutableCandidates(string? preferredExecutablePath)
@@ -125,6 +179,12 @@ public sealed class CodexDiscoveryService(
 
     private static IEnumerable<string> EnumerateKnownCodexBinDirectories()
     {
+        var appData = Environment.GetEnvironmentVariable("APPDATA");
+        if (!string.IsNullOrWhiteSpace(appData))
+        {
+            yield return Path.Combine(Environment.ExpandEnvironmentVariables(appData), "npm");
+        }
+
         var localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
         if (!string.IsNullOrWhiteSpace(localAppData))
         {

@@ -1,38 +1,76 @@
 # SynthiaCode: Current Architecture
 
 **Recorded:** 6 August 2026
+**Last code-verified:** 8 August 2026
 **Release:** 0.1.0
-**Phase:** Modern WPF redesign through Phase 21, with product extensions through generated-image, attachment, prompt-editing, chat-management, queued-dispatch hardening, Goal mode, and multi-folder local projects
+**Phase:** Modern WPF redesign through Phase 21, with product extensions through generated-image, attachment, prompt-editing, chat-management, queued-dispatch hardening, Goal mode, multi-folder local projects, and the provider-neutral harness boundary
 **Purpose:** Describe the current architecture, presentation shell, runtime and persistence boundaries, implemented desktop workflows, and release verification baseline.
 
 ## System shape
 
-The solution is a Windows-only WPF desktop application with four projects:
+The solution is a Windows-only WPF desktop application with seven projects:
 
 | Project | Responsibility | Dependencies |
 | --- | --- | --- |
-| `SynthiaCode.Core` | App-neutral contracts, settings records, thread state, Codex notification state, Git/worktree/terminal models | None |
+| `SynthiaCode.Core` | Provider-neutral harness models and events; settings, thread, attachment, Git, worktree, terminal, auth, logging, and Codex protocol-domain contracts; conversation reduction | None |
+| `SynthiaCode.Application` | Harness registry, capability-gated feature contracts, session lifecycle, and provider-neutral conversation operations | Core |
 | `SynthiaCode.Infrastructure` | Codex CLI/app-server transport, JSON settings, Git, worktrees, ConPTY terminal, auth, logging | Core |
-| `SynthiaCode.App` | WPF composition root, window, theme resources, UI services, commands, presentation state | Core and Infrastructure |
-| `SynthiaCode.Tests` | xUnit-discovered behavioral and integration-style test suite; the executable entry point remains only as a UTF-8 transport fixture | App, Core, and Infrastructure |
+| `SynthiaCode.Harnesses.Codex` | Adapter from neutral harness commands/events to Codex app-server types, operations, and notifications | Application, Core, and Infrastructure |
+| `SynthiaCode.Harnesses.InMemory` | Deterministic, process-free harness implementation used to prove and test the provider boundary | Application and Core |
+| `SynthiaCode.App` | WPF composition root, windows, theme resources, feature view models, UI services, and nonvisual application use cases | Application, Core, Codex harness, and Infrastructure |
+| `SynthiaCode.Tests` | xUnit-discovered behavioral and integration-style test suite; the executable entry point remains only as a UTF-8 transport fixture | All production projects plus the in-memory harness |
 
-The intended dependency direction is therefore:
+The actual project-reference graph is:
 
-```text
-Tests ────────────────> App ───────────────> Infrastructure ─────> Core
-  └────────────────────┴─────────────────────────────────────────> Core
+```mermaid
+flowchart LR
+    App["SynthiaCode.App"] --> Application["SynthiaCode.Application"]
+    App --> CodexHarness["SynthiaCode.Harnesses.Codex"]
+    App --> Infrastructure["SynthiaCode.Infrastructure"]
+    App --> Core["SynthiaCode.Core"]
+    CodexHarness --> Application
+    CodexHarness --> Infrastructure
+    CodexHarness --> Core
+    InMemory["SynthiaCode.Harnesses.InMemory"] --> Application
+    InMemory --> Core
+    Application --> Core
+    Infrastructure --> Core
+    Tests["SynthiaCode.Tests"] --> App
+    Tests --> InMemory
+    Tests --> CodexHarness
 ```
 
-`AppServices.Create()` is the manual composition root. It constructs the concrete infrastructure and application-workflow services, then supplies them to `MainViewModel`. There is no external dependency-injection container.
+`AppServices.Create()` is the manual composition root. It constructs concrete infrastructure, registers the production `CodexHarness`, creates the harness runtime and workflow services, then supplies them to `MainViewModel`. `SynthiaCode.Harnesses.InMemory` is referenced by tests but is not registered in the production app. There is no external dependency-injection container.
+
+The architecture is layered but deliberately pragmatic rather than a strict clean-architecture implementation. Core has no project dependencies. Application contains the portable harness runtime. Infrastructure contains operating-system and process adapters. Provider translation lives in a harness project. The App project owns WPF and still contains several WPF-free use-case services; moving those services into Application would be a future boundary refinement, not the current design.
+
+At runtime the major components form this topology:
+
+```mermaid
+flowchart TB
+    UI["WPF views and feature view models"] --> Shell["MainViewModel shell coordinator"]
+    Shell --> UseCases["Lifecycle, turn, queue, review, persistence use cases"]
+    UseCases --> HarnessOps["IHarnessOperations"]
+    HarnessOps --> Runtime["HarnessRuntimeCoordinator"]
+    Runtime --> CodexAdapter["CodexHarnessSession"]
+    CodexAdapter --> Session["AppServerSessionCoordinator"]
+    Session --> Client["CodexAppServerClient"]
+    Client --> Transport["UTF-8 stdio transport"]
+    Transport --> Codex["codex app-server child process"]
+    UseCases --> State["ThreadStore / conversation and queue workspaces"]
+    Shell --> Git["GitService / WorktreeService"]
+    Shell --> Terminal["ConPTY terminal sessions"]
+    Shell --> Storage["JSON settings / attachments / isolated CODEX_HOME / logs"]
+```
 
 ## Startup and shutdown
 
 1. `App.OnStartup` enforces a single process with a named mutex.
-2. `AppServices.Create` creates settings, Codex, auth, Git, worktree, terminal, theme, picker, interaction, and logging services.
+2. `AppServices.Create` creates settings, Codex, auth, Git, worktree, terminal, theme, picker, interaction, and logging services, then registers the Codex harness and its session runtime.
 3. `MainWindow` is constructed and shown before asynchronous initialization begins.
 4. `MainViewModel.InitializeAsync` loads settings, restores shell preferences, applies the theme, restores recent-project metadata, and runs Codex/auth diagnostics.
 5. App-server warm-up starts in the background after the shell reaches Ready.
-6. Window closing calls `MainViewModel.ShutdownAsync`, which cancels active turns, disposes terminal sessions, saves the active thread, and disposes the app-server client.
+6. Window closing calls `MainViewModel.ShutdownAsync`, which cancels active turns, disposes terminal and task resources, clears approvals, disposes skills and queue subscriptions, disposes harness sessions and the app-server client, and saves the active thread state.
 7. `App.OnExit` performs a final idempotent disposal and releases the mutex.
 
 This ordering deliberately keeps shell visibility independent of Codex app-server startup.
@@ -41,7 +79,7 @@ This ordering deliberately keeps shell visibility independent of Codex app-serve
 
 `MainViewModel` is the shell coordinator. `ProjectThreadViewModel`, `TaskViewModel`, `TerminalViewModel`, `DiagnosticsViewModel`, `AccountViewModel`, `GitViewModel`, `SkillsViewModel`, and `EffectiveCodexSettingsViewModel` own feature presentation state and commands. The shell supplies explicit operation delegates or immutable-on-read context callbacks and receives status/selection callbacks; feature view models do not reference or control one another.
 
-App-server lifecycle is exposed to presentation through `IAppServerSessionCoordinator`. Its implementation owns `CodexAppServerClient`, process transport startup, reconnect serialization, batched notifications, typed app-server operations, health transitions, and disposal. Protocol request/response JSON and delta-payload batching remain in the Codex Core/Infrastructure boundary rather than WPF presentation.
+App-server lifecycle is exposed to presentation through `IAppServerSessionCoordinator`. Its implementation owns `CodexAppServerClient`, process transport startup, reconnect serialization, batched notifications, typed app-server operations, health transitions, and disposal. It also implements the narrow Codex backend consumed by `CodexHarnessSession` and separate Codex-only feature interfaces for account, execution policy, skills, configuration, goals, reviews, and approvals. Protocol request/response JSON and delta-payload batching remain in the Codex Core/Infrastructure boundary rather than WPF presentation.
 
 `App.xaml` is now a resource-composition root. Theme colors live in matching light, graphite-dark, and system-color high-contrast dictionaries; foundations, typography, vector icons, buttons, inputs, navigation, and transient controls are split by concern. Feature views consume semantic dynamic resources, so changing theme dictionaries does not recreate the window or any feature view model.
 
@@ -61,7 +99,7 @@ Projectless General chats use the same thread lifecycle, transcript, search, pin
 
 `MainViewModel.cs` remains the shell coordinator. It owns UI validation, project/thread selection, cross-feature event routing, shell layout, theme/status projection, app-server warm-up, notification marshaling, and shutdown ordering.
 
-Application workflows no longer use `MainViewModel` as a hidden service layer:
+Application workflows no longer use `MainViewModel` as a hidden service layer. These services are WPF-free even though they currently live under `SynthiaCode.App/Services`:
 
 - `ThreadLifecycleUseCaseService` owns durable create, resume/fallback, fork, archive, rename, delete, pin, and worktree transitions;
 - `TurnExecutionUseCaseService` owns start, edit/rollback, steer, cancel, automatic-title, and conversation state transitions;
@@ -74,26 +112,65 @@ Application workflows no longer use `MainViewModel` as a hidden service layer:
 
 ## Runtime flows
 
+### Harness provider boundary
+
+The harness boundary separates portable conversation behavior from Codex protocol details:
+
+- `ConversationAddress` gives every conversation a stable local UUID, a normalized harness ID, and an optional provider-owned remote ID. Persistence stores all three and migrates legacy Codex-only thread records on load.
+- `HarnessDescriptor` advertises a bit-set of capabilities. A session registers typed common features such as create/resume/read conversation, rename/archive/fork/rollback, turn start/cancel/steer, and model catalog. `HarnessOperations` checks the advertised capability before resolving a feature, so an unsupported action fails at the application boundary rather than inside a provider. Approval records exist in the neutral contract, but the production approval workflow is still carried by the Codex-only side interface.
+- `HarnessRegistry` rejects duplicate provider IDs. `HarnessRuntimeCoordinator` probes and lazily connects at most one session per harness ID, forwards neutral events, serializes connection creation, and owns session disposal.
+- `CodexHarness` detects the CLI, asks the shared app-server coordinator to connect, maps neutral commands into Codex request records, and translates general notifications into `HarnessEvent` records. Provider JSON and Codex request types stop at this adapter/backend boundary for portable conversation operations.
+- `InMemoryHarness` implements the same common feature set without processes or persistence. It is a deterministic contract and workflow test double, not a production fallback.
+
+The portability work is intentionally incremental. Common conversation execution now travels through neutral commands and events, but `CodexThreadWorkspace`, `CodexThreadService`, and persisted transcript DTOs retain Codex-era names and shapes. Codex-only features still use narrow side interfaces on `IAppServerSessionCoordinator`; they are not advertised as portable harness capabilities until another provider can supply equivalent semantics.
+
 ### Codex task
 
-```text
-Composer command
-  -> TaskViewModel command
-  -> MainViewModel validation and request composition
-  -> TurnExecutionUseCaseService
-  -> IAppServerSessionCoordinator
-  -> CodexAppServerClient (Infrastructure)
-  -> app-server process transport
-  -> JSON-RPC notifications
-  -> 50 ms Infrastructure notification batcher for agent-message deltas
-  -> captured UI SynchronizationContext
-  -> MainViewModel notification projection
-  -> ConversationWorkflowController / CodexThreadWorkspace
-  -> observable response, activity, and raw-event surfaces
-  -> ThreadStatePersistenceUseCaseService / settings.json
+```mermaid
+sequenceDiagram
+    participant UI as TaskView / MainViewModel
+    participant UC as TurnExecutionUseCaseService
+    participant HO as HarnessOperations
+    participant HR as HarnessRuntimeCoordinator
+    participant CH as CodexHarnessSession
+    participant SC as AppServerSessionCoordinator
+    participant AS as codex app-server
+    participant WF as ConversationWorkflowController
+    participant PS as ThreadStatePersistenceUseCaseService
+
+    UI->>UC: StartTurnCommand + local pending turn
+    UC->>HO: StartTurnAsync
+    HO->>HR: resolve provider session
+    HR-->>HO: connected session
+    HO->>CH: capability-gated feature call
+    CH->>SC: mapped Codex turn/start
+    SC->>AS: line-delimited JSON-RPC over UTF-8 stdio
+    AS-->>SC: turn ID response and streamed notifications
+    SC-->>CH: ordered, delta-batched Codex notifications
+    CH-->>HR: provider-neutral HarnessEvent stream
+    HR-->>UI: routed provider event
+    UI->>WF: reduce event by conversation/turn identity
+    WF-->>UI: detached conversation snapshot
+    UI->>PS: persist after state transitions/completion
 ```
 
 Protocol request construction, response correlation, parsing, and transport failure handling remain inside Infrastructure. Core owns app-server request/result records and notification-derived thread state.
+
+The presentation layer subscribes to both event levels for different reasons. General thread/turn text, activity, context, diff, and completion updates travel through `CodexHarnessEventTranslator` and `HarnessRuntimeCoordinator` to `MainViewModel`. Raw Codex notifications are consumed directly only by provider-specific account, goal, approval-resolution, skills-invalidation, and review-lifecycle surfaces. This split prevents protocol types from leaking into portable conversation operations while preserving Codex features that have no neutral contract.
+
+### State ownership
+
+| State | Authoritative owner | Notes |
+| --- | --- | --- |
+| Saved projects, preferences, drafts, local transcript cache | `AppSettings` through `ISettingsStore` | One durable graph is snapshotted before coalesced atomic writes. |
+| Persisted/presentation thread mapping and active selection per scope | `ThreadStore` | Maps storage-only DTOs to observable clones and back. |
+| Loaded/running identities and active turn routing | `ConversationWorkflowController` | Holds runtime indexes and returns detached snapshots; it is not the durable store. |
+| Reduced transcript, activity, context usage, generated images, and latest diff | One `CodexThreadService` per thread in `CodexThreadWorkspace` | Events route by remote thread and turn IDs; bounded collections prevent unbounded repeatable history. |
+| Queued follow-ups | One `CodexFollowUpQueue` per thread in `CodexFollowUpQueueWorkspace` | Queue mutation and dispatch are isolated from whichever thread is selected in the UI. |
+| Remote Codex thread history and goals | `codex app-server` | Local state is a durable presentation/recovery cache and is reconciled on resume/read. |
+| Repository and terminal state | Git processes and per-thread ConPTY sessions | Presentation keeps projections and bounded terminal buffers, not an independent source of truth. |
+
+Snapshots crossing from workflow/reducer code into presentation are cloned and read-only by convention. Background notifications and queued dispatch route by captured thread identity, never by the currently selected chat.
 
 ### Dedicated code review
 
@@ -225,11 +302,66 @@ The composition root exposes a `CoalescingSettingsStore` around `JsonSettingsSto
 
 `JsonSettingsStore` serializes writes through a gate, flushes the complete settings graph to a write-through `settings.json.tmp`, and replaces `settings.json` with an overwrite move. Loading promotes a valid newer temporary file when an interrupted save left the primary missing or corrupt.
 
+The application has no separate database. Its durable and external storage locations are:
+
+| Data | Location / owner | Lifecycle |
+| --- | --- | --- |
+| Settings, projects, thread cache, queues, and drafts | `%LOCALAPPDATA%\SynthiaCode\settings.json` | Atomic replacement with interrupted-save recovery. |
+| Managed attachment snapshots | `%LOCALAPPDATA%\SynthiaCode\attachments` | Content-addressed objects plus bounded staging/orphan cleanup based on persisted references. |
+| General projectless workspace | `%LOCALAPPDATA%\SynthiaCode\workspaces\general` | Created on startup and constrained beneath app data. |
+| Codex configuration and state | `%LOCALAPPDATA%\SynthiaCode\codex-home` | Passed only to child Codex processes through `CODEX_HOME`; the parent environment is unchanged. |
+| Structured application log | `%LOCALAPPDATA%\SynthiaCode\logs\synthiacode.log.jsonl` | Append-only JSON Lines diagnostics; configuration contents are excluded. |
+| Assistant worktree registry | `<git-common-dir>\synthiacode\worktrees.json` | Records ownership so only SynthiaCode-created worktrees can be removed. |
+| Assistant worktree checkout | Sibling `<repository-name>.worktrees\<task-id>` | Created with a `codex/<task-id>` branch; cleanup requires registry ownership and direct-child containment. |
+
 Persisted and presented thread state are separate. `AppSettings.ProjectThreads` contains storage-only `PersistedProjectThread` DTOs. `ThreadStore` maps those records to observable `ProjectThreadState` objects for presentation and maps changes back on upsert. JSON property names were preserved, and a literal legacy-settings regression verifies backward-compatible loading without migration.
 
 Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 conversation turns. Each persisted turn retains at most 100 activity items plus attachment metadata, prompt-version state, and generated-image paths. Attachment references in drafts, queues, and turns participate in managed-store cleanup. At baseline, the local `settings.json` was 144,872 bytes. Every physical save emits `settings_saved` duration/size telemetry, while each coordinator batch emits logical request and coalesced-request counts. The synthetic burst baseline is 20 logical requests to one physical write.
 
+## Concurrency and failure model
+
+- WPF state changes are marshaled to the `SynchronizationContext` captured by `MainViewModel`; feature view models do not update observable UI state from transport threads.
+- `CodexAppServerClient` serializes writes, correlates outgoing responses, separately tracks incoming server requests, and fails pending work when the read loop or process connection fails.
+- `AppServerSessionCoordinator` serializes connection replacement and associates approval requests with one client generation. Responses from a stale connection are rejected.
+- Agent-message deltas are coalesced for 50 ms by thread, turn, and item. A non-delta notification flushes pending text first, preserving protocol order.
+- Harness connection creation is serialized and cached per provider. Turn reduction tolerates a notification arriving before the `turn/start` response binds the pending local turn.
+- Settings requests inside a 75 ms window share one immutable physical snapshot. Queue dispatch uses a per-thread semaphore and persists `Starting` before contacting the provider.
+- Git, worktree, Codex utility, app-server, and terminal processes are cancellable; owned hidden process trees are terminated during cancellation or disposal. Visible login/logout consoles are intentionally transferred to the user.
+- Shutdown is idempotent. It stops new UI actions, cancels active turns, releases terminal and queue resources, flushes pending notifications, disposes harness/provider sessions, then persists final local state.
+
+## Security and trust boundaries
+
+- The user-selected project, attached roots, app-data directory, Git repositories, and Codex child process are distinct trust boundaries. Paths are normalized before containment or ownership checks.
+- Workspace attachment references must remain within an attached root. External files/folders are snapshotted into managed storage; alternate data streams, reparse points, root/sibling escapes, unsafe relative paths, and over-limit content are rejected.
+- Git and worktree commands use `ProcessStartInfo.ArgumentList`. File operations resolve repository-contained paths. A hunk patch is parser-verified, capped at 8 MiB, and sent over standard input rather than a shell argument or temporary file.
+- Worktree deletion is allowed only for a registry-owned direct child of the repository's sibling worktree container; the primary checkout cannot be removed.
+- Codex runs with SynthiaCode's isolated `CODEX_HOME`. Permission mode is resolved once per request, managed requirements restrict available choices, and invalid or stale profiles fail closed.
+- Approval requests retain the client generation and original JSON-RPC ID type, accept exactly one response, and grant only the selected subset of the immutable request.
+- Effective configuration exposes a small allowlist. Raw configuration, MCP headers, environment values, authentication tokens, attachment source paths, and shared configuration contents do not enter presentation state or structured application telemetry.
+
+## Testing, build, and delivery
+
+`dotnet test SynthiaCode.sln` is the authoritative local gate on Windows with the .NET 10 SDK selected by `global.json`. The test project references every production layer plus the in-memory harness. Coverage combines pure contract/reducer/use-case tests, fake app-server transports, deterministic harness parity tests, temporary-repository Git/worktree tests, and WPF presentation tests hosted on a dedicated STA dispatcher. Test collections and process-level test parallelism are disabled because WPF application state, native terminal resources, and shared process fixtures require deterministic ownership.
+
+GitHub Actions restores and runs the Release test suite on `windows-latest`. Main-branch, tag, and manual workflows publish a self-contained `win-x64` portable folder; a tag matching the app project's semantic version also produces a ZIP and SHA-256 checksum GitHub release. The app project is `net10.0-windows`/WPF; the non-WPF Core, Application, harness, and Infrastructure libraries target `net10.0`.
+
+## Extension points and current seams
+
+To add another production agent provider, implement `IAgentHarness`, create a `HarnessSessionBase` session, register only the capabilities it actually supports, translate provider events into neutral `HarnessEvent` records, add it to `HarnessRegistry` in `AppServices.Create`, and cover contract, persistence, lifecycle, and workflow parity with the in-memory harness as the reference. Provider-only features should remain narrow side interfaces until their semantics are stable enough to add to the portable contract.
+
+The current seams are explicit:
+
+- Production registers only Codex even though `AppSettings.DefaultHarnessId` and per-thread harness identity are durable.
+- Conversation reduction and persisted transcript records still use Codex-named types; the neutral harness layer adapts into that proven reducer.
+- Goals, dedicated review, account/rate limits, skills, effective configuration, and permission profiles remain Codex-specific.
+- Several nonvisual use-case services live in the App assembly, and `MainViewModel` remains the large cross-feature shell coordinator.
+- The manual composition root requires code changes for provider registration; plugin discovery and dynamic loading are not implemented.
+
+These are current implementation boundaries, not hidden abstractions. New work should preserve capability checks, local/remote conversation identity, detached snapshot ownership, thread-keyed background routing, atomic persistence, and explicit disposal.
+
 ## Baseline measurements and constraints
+
+The next two tables are retained as the dated Phase 5B and release 0.1.0 optimization record. They are historical verification evidence, not live source-line or test-count telemetry for the post-release working tree.
 
 | Measure | Baseline |
 | --- | --- |
@@ -270,7 +402,7 @@ A no-build behavioral-runner invocation took approximately 12 seconds during the
 
 ## Ownership and lifecycle audit
 
-- App-server transport/client startup, pending-request failure, restart serialization, notification batching, and disposal belong to `AppServerSessionCoordinator`; thread reduction/routing belongs to the Codex Core boundary; WPF receives semantic state changes.
+- Harness discovery, capability checks, session caching, neutral event fan-out, and session disposal belong to the Application/harness boundary. App-server transport/client startup, pending-request failure, restart serialization, notification batching, and disposal belong to `AppServerSessionCoordinator`; common Codex notifications are translated before WPF receives semantic conversation events.
 - Terminal sessions belong to `TerminalViewModel`; shutdown disposes all sessions and logs bounded-buffer metrics.
 - Git and worktree commands use argument lists, retain repository/worktree ownership guards, and terminate process trees on cancellation. Hunk patches never enter shell arguments or temporary files; `GitService` accepts at most one parser-verified patch up to 8 MiB over redirected standard input.
 - Codex utility commands terminate their process tree on cancellation. Visible login/logout consoles are intentionally user-owned after launch.
@@ -279,4 +411,4 @@ A no-build behavioral-runner invocation took approximately 12 seconds during the
 
 ## Phase boundary
 
-Release 0.1.0 and the current post-release build include native active-context skill discovery/enablement and exact-path composer invocation, generated-image display/edit flows, managed and multi-root workspace attachments, projectless and multi-folder project chats, Goal mode, prompt editing/forking, chat management/search, queued follow-up hardening, multi-repository Git selection, all five Changes scopes, dedicated inline code review, structured reviewer findings, user-authored inline comments, hunk-level Git operations, and the Phase 21 Markdown surface. Arbitrary skill roots, native MCP administration, plugins/connectors, automations, detached review, push/PR workflows, and full worktree handoff/snapshot lifecycle remain outside the current boundary.
+Release 0.1.0 and the current post-release build include native active-context skill discovery/enablement and exact-path composer invocation, generated-image display/edit flows, managed and multi-root workspace attachments, projectless and multi-folder project chats, Goal mode, prompt editing/forking, chat management/search, queued follow-up hardening, multi-repository Git selection, all five Changes scopes, dedicated inline code review, structured reviewer findings, user-authored inline comments, hunk-level Git operations, the provider-neutral conversation harness boundary, and the Phase 21 Markdown surface. Production provider selection remains Codex-only. Arbitrary skill roots, native MCP administration, plugins/connectors, automations, detached review, push/PR workflows, dynamic harness loading, and full worktree handoff/snapshot lifecycle remain outside the current boundary.

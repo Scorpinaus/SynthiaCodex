@@ -49,6 +49,10 @@ public static class CodexHarnessEventTranslator
                 TranslateUsage(notification.Params, threadId, occurredAt),
             CodexAppServerNotificationKind.ThreadCompacted when threadId is not null =>
                 [new ContextCompactedEvent(HarnessId.Codex, threadId, turnId, occurredAt)],
+            CodexAppServerNotificationKind.ItemCompleted
+                when threadId is not null && turnId is not null &&
+                     ReadString(notification.Params, "item.type") == "agentMessage" =>
+                TranslateCompletedAgentMessage(notification, threadId, turnId, occurredAt),
             CodexAppServerNotificationKind.ItemStarted or
             CodexAppServerNotificationKind.ItemCompleted or
             CodexAppServerNotificationKind.McpToolCallProgress or
@@ -79,6 +83,23 @@ public static class CodexHarnessEventTranslator
             delta,
             timestamp)];
     }
+
+    private static IReadOnlyList<HarnessEvent> TranslateCompletedAgentMessage(
+        CodexAppServerNotification notification,
+        string threadId,
+        string turnId,
+        DateTimeOffset timestamp) =>
+        [new AssistantMessageCompletedEvent(
+            HarnessId.Codex,
+            threadId,
+            turnId,
+            notification.ItemId ?? "legacy-agent-message",
+            ReadString(notification.Params, "item.text") ??
+                ReadString(notification.Params, "item.message") ??
+                ReadString(notification.Params, "item.content") ??
+                string.Empty,
+            ReadString(notification.Params, "item.phase"),
+            timestamp)];
 
     private static IReadOnlyList<HarnessEvent> TranslateUsage(
         JsonObject parameters,

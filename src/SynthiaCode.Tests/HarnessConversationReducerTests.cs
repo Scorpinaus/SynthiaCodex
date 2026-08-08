@@ -107,4 +107,114 @@ public sealed class HarnessConversationReducerTests
         Assert.Contains(turn.Activity, item => item.ActivityKey == "activity-1");
         Assert.Contains(completed.Snapshot.RawEvents, item => item == nameof(TurnCompletedEvent));
     }
+
+    [Fact]
+    public void Completed_agent_message_supplies_a_final_only_response()
+    {
+        var (service, timestamp) = CreateRunningTurn();
+
+        service.ApplyEvent(new AssistantMessageCompletedEvent(
+            HarnessId.Codex,
+            "codex-conversation",
+            "codex-turn",
+            "final-only",
+            "Final only response",
+            "final_answer",
+            timestamp.AddMilliseconds(1)));
+        CompleteTurn(service, timestamp.AddMilliseconds(2));
+
+        var turn = Assert.Single(service.ConversationTurns);
+        Assert.Equal("Final only response", turn.AssistantResponse);
+        Assert.Equal("Final only response", service.FinalResponse);
+    }
+
+    [Fact]
+    public void Completed_agent_message_replaces_streamed_text_without_duplication()
+    {
+        var (service, timestamp) = CreateRunningTurn();
+
+        service.ApplyEvent(new AssistantTextDeltaEvent(
+            HarnessId.Codex,
+            "codex-conversation",
+            "codex-turn",
+            "streamed",
+            "Streamed draft",
+            timestamp.AddMilliseconds(1)));
+        service.ApplyEvent(new AssistantMessageCompletedEvent(
+            HarnessId.Codex,
+            "codex-conversation",
+            "codex-turn",
+            "streamed",
+            "Authoritative final",
+            "final_answer",
+            timestamp.AddMilliseconds(2)));
+        CompleteTurn(service, timestamp.AddMilliseconds(3));
+
+        var turn = Assert.Single(service.ConversationTurns);
+        Assert.Equal("Authoritative final", turn.AssistantResponse);
+        Assert.Equal("Authoritative final", service.FinalResponse);
+    }
+
+    [Fact]
+    public void Commentary_agent_message_is_activity_not_final_response()
+    {
+        var (service, timestamp) = CreateRunningTurn();
+
+        service.ApplyEvent(new AssistantTextDeltaEvent(
+            HarnessId.Codex,
+            "codex-conversation",
+            "codex-turn",
+            "commentary",
+            "Working",
+            timestamp.AddMilliseconds(1)));
+        service.ApplyEvent(new AssistantMessageCompletedEvent(
+            HarnessId.Codex,
+            "codex-conversation",
+            "codex-turn",
+            "commentary",
+            "Working through it",
+            "commentary",
+            timestamp.AddMilliseconds(2)));
+        Assert.Empty(service.FinalResponse);
+
+        service.ApplyEvent(new AssistantMessageCompletedEvent(
+            HarnessId.Codex,
+            "codex-conversation",
+            "codex-turn",
+            "final",
+            "Visible answer",
+            "final_answer",
+            timestamp.AddMilliseconds(3)));
+        CompleteTurn(service, timestamp.AddMilliseconds(4));
+
+        var turn = Assert.Single(service.ConversationTurns);
+        Assert.Equal("Visible answer", turn.AssistantResponse);
+        var commentary = Assert.Single(
+            turn.Activity,
+            item => item.Kind == CodexTimelineItemKind.AssistantCommentary);
+        Assert.Contains("Working through it", commentary.Detail, StringComparison.Ordinal);
+    }
+
+    private static (CodexThreadService Service, DateTimeOffset Timestamp) CreateRunningTurn()
+    {
+        var timestamp = DateTimeOffset.UtcNow;
+        var service = new CodexThreadService();
+        service.Restore("codex-conversation", null, null, null);
+        service.BeginTurn("hello");
+        service.ApplyEvent(new TurnStartedEvent(
+            HarnessId.Codex,
+            "codex-conversation",
+            "codex-turn",
+            timestamp));
+        return (service, timestamp);
+    }
+
+    private static void CompleteTurn(CodexThreadService service, DateTimeOffset timestamp) =>
+        service.ApplyEvent(new TurnCompletedEvent(
+            HarnessId.Codex,
+            "codex-conversation",
+            "codex-turn",
+            ConversationTurnStatus.Completed,
+            null,
+            timestamp));
 }

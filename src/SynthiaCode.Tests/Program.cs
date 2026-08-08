@@ -71,7 +71,7 @@ internal static class LegacyBehavioralTests
     ("codex runtime environment creates and applies isolated home", TestCodexRuntimeEnvironmentAsync),
     ("codex diagnostic SQLite cleanup is bounded and targeted", TestCodexDiagnosticStoreMaintenanceAsync),
     ("codex discovery skips unusable path candidates", TestCodexDiscoverySkipsUnusablePathCandidatesAsync),
-    ("codex discovery prefers the standalone install over PATH", TestCodexDiscoveryPrefersStandaloneInstallAsync),
+    ("codex discovery selects the newest automatic installation", TestCodexDiscoverySelectsNewestAutomaticInstallationAsync),
     ("codex discovery checks OpenAI local app bin", TestCodexDiscoveryChecksOpenAiLocalAppBinAsync),
     ("app-server client writes initialize handshake", TestAppServerInitializeWritesHandshakeAsync),
     ("app-server process transport preserves UTF-8", TestAppServerProcessTransportPreservesUtf8Async),
@@ -1420,49 +1420,60 @@ static async Task TestCodexDiscoverySkipsUnusablePathCandidatesAsync()
     }
 }
 
-static async Task TestCodexDiscoveryPrefersStandaloneInstallAsync()
+static async Task TestCodexDiscoverySelectsNewestAutomaticInstallationAsync()
 {
     using var temp = TempWorkspace.Create();
     var localAppData = temp.CreateDirectory("LocalAppData");
+    var appData = temp.CreateDirectory("AppData");
     var standaloneBin = Path.Combine(localAppData, "Programs", "OpenAI", "Codex", "bin");
-    var pathBin = temp.CreateDirectory("NpmBin");
+    var npmBin = Path.Combine(appData, "npm");
+    var emptyPath = temp.CreateDirectory("EmptyPath");
     Directory.CreateDirectory(standaloneBin);
+    Directory.CreateDirectory(npmBin);
     var standaloneCodex = Path.Combine(standaloneBin, "codex.cmd");
-    var pathCodex = Path.Combine(pathBin, "codex.cmd");
+    var npmCodex = Path.Combine(npmBin, "codex.cmd");
     var previousPath = Environment.GetEnvironmentVariable("PATH");
+    var previousAppData = Environment.GetEnvironmentVariable("APPDATA");
     var previousLocalAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
 
     File.WriteAllText(
         standaloneCodex,
         """
         @echo off
-        echo codex-cli standalone
+        echo codex-cli 0.146.0
         exit /b 0
         """);
     File.WriteAllText(
-        pathCodex,
+        npmCodex,
         """
         @echo off
-        echo codex-cli npm-path
+        echo codex-cli 0.147.0
         exit /b 0
         """);
 
     try
     {
+        Environment.SetEnvironmentVariable("APPDATA", appData);
         Environment.SetEnvironmentVariable("LOCALAPPDATA", localAppData);
-        Environment.SetEnvironmentVariable("PATH", pathBin);
+        Environment.SetEnvironmentVariable("PATH", emptyPath);
         var logger = new TestLogger();
         var service = new CodexDiscoveryService(logger);
 
         var detected = await service.DetectAsync();
 
-        AssertTrue(detected.IsFound, "standalone codex is found");
-        AssertEqual(Path.GetFullPath(standaloneCodex), detected.ExecutablePath, "standalone codex path");
-        AssertEqual("codex-cli standalone", detected.Version, "standalone codex version");
+        AssertTrue(detected.IsFound, "newest codex is found");
+        AssertEqual(Path.GetFullPath(npmCodex), detected.ExecutablePath, "newest codex path");
+        AssertEqual("codex-cli 0.147.0", detected.Version, "newest codex version");
+
+        var explicitlyConfigured = await service.DetectAsync(standaloneCodex);
+
+        AssertEqual(Path.GetFullPath(standaloneCodex), explicitlyConfigured.ExecutablePath, "explicit codex path");
+        AssertEqual("codex-cli 0.146.0", explicitlyConfigured.Version, "explicit codex version");
     }
     finally
     {
         Environment.SetEnvironmentVariable("PATH", previousPath);
+        Environment.SetEnvironmentVariable("APPDATA", previousAppData);
         Environment.SetEnvironmentVariable("LOCALAPPDATA", previousLocalAppData);
     }
 }

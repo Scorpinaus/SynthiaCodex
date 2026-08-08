@@ -158,6 +158,74 @@ public sealed class HarnessContractTests
         Assert.Equal("codex-thread", delta.RemoteConversationId);
     }
 
+    [Fact]
+    public void Codex_translator_preserves_authoritative_agent_messages_and_phases()
+    {
+        var timestamp = DateTimeOffset.UtcNow;
+
+        var finalOnly = Assert.Single(CodexHarnessEventTranslator.Translate(Notification(
+            CodexAppServerNotificationMethods.ItemCompleted,
+            "final-only",
+            "Final only",
+            "final_answer"),
+            timestamp));
+        var finalOnlyMessage = Assert.IsType<AssistantMessageCompletedEvent>(finalOnly);
+        Assert.Equal("final-only", finalOnlyMessage.MessageId);
+        Assert.Equal("Final only", finalOnlyMessage.Text);
+        Assert.Equal("final_answer", finalOnlyMessage.Phase);
+
+        var streamed = Assert.Single(CodexHarnessEventTranslator.Translate(
+            CodexAppServerNotification.Decode(new AppServerNotification(
+                CodexAppServerNotificationMethods.AgentMessageDelta,
+                new JsonObject
+                {
+                    ["threadId"] = "codex-thread",
+                    ["turnId"] = "codex-turn",
+                    ["itemId"] = "streamed",
+                    ["delta"] = "Streamed draft"
+                })),
+            timestamp.AddMilliseconds(1)));
+        var streamedDelta = Assert.IsType<AssistantTextDeltaEvent>(streamed);
+        var streamedCompletion = Assert.Single(CodexHarnessEventTranslator.Translate(Notification(
+            CodexAppServerNotificationMethods.ItemCompleted,
+            "streamed",
+            "Authoritative final",
+            "final_answer"),
+            timestamp.AddMilliseconds(2)));
+        var completedStream = Assert.IsType<AssistantMessageCompletedEvent>(streamedCompletion);
+        Assert.Equal(streamedDelta.MessageId, completedStream.MessageId);
+        Assert.Equal("Authoritative final", completedStream.Text);
+
+        var commentary = Assert.Single(CodexHarnessEventTranslator.Translate(Notification(
+            CodexAppServerNotificationMethods.ItemCompleted,
+            "commentary",
+            "Working through it",
+            "commentary"),
+            timestamp.AddMilliseconds(3)));
+        var commentaryMessage = Assert.IsType<AssistantMessageCompletedEvent>(commentary);
+        Assert.Equal("commentary", commentaryMessage.Phase);
+        Assert.Equal("Working through it", commentaryMessage.Text);
+
+        static CodexAppServerNotification Notification(
+            string method,
+            string itemId,
+            string text,
+            string phase) => CodexAppServerNotification.Decode(new AppServerNotification(
+                method,
+                new JsonObject
+                {
+                    ["threadId"] = "codex-thread",
+                    ["turnId"] = "codex-turn",
+                    ["item"] = new JsonObject
+                    {
+                        ["type"] = "agentMessage",
+                        ["id"] = itemId,
+                        ["text"] = text,
+                        ["phase"] = phase
+                    }
+                }));
+    }
+
     private static void AssertOperationalFeatureContract(IHarnessSession session)
     {
         AssertFeature<IConversationCreationFeature>(session, HarnessCapability.CreateConversation);

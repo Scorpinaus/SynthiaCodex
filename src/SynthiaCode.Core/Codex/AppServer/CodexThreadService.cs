@@ -399,8 +399,25 @@ public sealed class CodexThreadService
                     ActiveTurnId = delta.RemoteTurnId;
                     ActiveTurnStatus = CodexTurnStatus.Running;
                     var responseTurn = BindPendingTurn(delta.RemoteTurnId!);
-                    responseTurn.AssistantResponse += UnicodeTextNormalizer.RepairLegacyMojibake(delta.Delta);
-                    RefreshCompatibilityResponse();
+                    ApplyAgentMessageDelta(
+                        responseTurn,
+                        delta.RemoteTurnId!,
+                        delta.MessageId,
+                        delta.Delta,
+                        phase: null);
+                    break;
+
+                case AssistantMessageCompletedEvent messageCompleted:
+                    ActiveThreadId ??= messageCompleted.RemoteConversationId;
+                    ActiveTurnId = messageCompleted.RemoteTurnId;
+                    ActiveTurnStatus = CodexTurnStatus.Running;
+                    var messageTurn = BindPendingTurn(messageCompleted.RemoteTurnId!);
+                    ApplyCompletedAgentMessage(
+                        messageTurn,
+                        messageCompleted.RemoteTurnId!,
+                        messageCompleted.MessageId,
+                        messageCompleted.Text,
+                        messageCompleted.Phase);
                     break;
 
                 case TurnDiffChangedEvent changed:
@@ -474,6 +491,7 @@ public sealed class CodexThreadService
                         completed.Error ?? ActiveTurnStatus.ToString(),
                         completed);
                     RefreshCompatibilityResponse();
+                    ReleaseAgentMessageState(completedTurn);
                     break;
 
                 case AuthenticationRequiredEvent authentication:
@@ -853,14 +871,17 @@ public sealed class CodexThreadService
     {
         var delta = ReadString(notification.Params, "delta") ?? ReadString(notification.Params, "text") ?? string.Empty;
         AddTimeline(CodexTimelineItemKind.AgentMessageDelta, "Agent message", delta, notification);
-        if (string.IsNullOrEmpty(delta) || GetOrCreateAgentMessage(notification) is not { } state)
+        if (string.IsNullOrEmpty(delta) || GetNotificationTurn(notification) is not { } turn)
         {
             return;
         }
 
-        state.Phase = ReadMessagePhase(notification.Params) ?? state.Phase;
-        state.Text.Append(delta);
-        UpdateAgentMessagePresentation(state);
+        ApplyAgentMessageDelta(
+            turn,
+            ResolveAgentMessageTurnKey(turn, notification.TurnId),
+            notification.ItemId ?? "legacy-agent-message",
+            delta,
+            ReadMessagePhase(notification.Params));
     }
 
     private void RememberAgentMessagePhase(CodexAppServerNotification notification)
@@ -879,15 +900,49 @@ public sealed class CodexThreadService
 
     private void ApplyCompletedAgentMessage(CodexAppServerNotification notification)
     {
-        if (GetOrCreateAgentMessage(notification) is not { } state)
+        if (GetNotificationTurn(notification) is not { } turn)
         {
             return;
         }
 
-        state.Phase = ReadMessagePhase(notification.Params) ?? state.Phase;
         var authoritativeText = ReadString(notification.Params, "item.text") ??
             ReadString(notification.Params, "item.message") ??
             ReadString(notification.Params, "item.content");
+        ApplyCompletedAgentMessage(
+            turn,
+            ResolveAgentMessageTurnKey(turn, notification.TurnId),
+            notification.ItemId ?? "legacy-agent-message",
+            authoritativeText,
+            ReadMessagePhase(notification.Params));
+    }
+
+    private void ApplyAgentMessageDelta(
+        CodexConversationTurn turn,
+        string turnKey,
+        string itemId,
+        string delta,
+        string? phase)
+    {
+        if (string.IsNullOrEmpty(delta))
+        {
+            return;
+        }
+
+        var state = GetOrCreateAgentMessage(turn, turnKey, itemId);
+        state.Phase = NormalizeMessagePhase(phase) ?? state.Phase;
+        state.Text.Append(delta);
+        UpdateAgentMessagePresentation(state);
+    }
+
+    private void ApplyCompletedAgentMessage(
+        CodexConversationTurn turn,
+        string turnKey,
+        string itemId,
+        string? authoritativeText,
+        string? phase)
+    {
+        var state = GetOrCreateAgentMessage(turn, turnKey, itemId);
+        state.Phase = NormalizeMessagePhase(phase) ?? state.Phase;
         if (!string.IsNullOrWhiteSpace(authoritativeText))
         {
             state.Text.Clear();
@@ -908,6 +963,14 @@ public sealed class CodexThreadService
             ? turn.TurnId
             : ReadString(notification.Params, "turnId") ?? "pending";
         var itemId = notification.ItemId ?? "legacy-agent-message";
+        return GetOrCreateAgentMessage(turn, turnKey, itemId);
+    }
+
+    private AgentMessageState GetOrCreateAgentMessage(
+        CodexConversationTurn turn,
+        string turnKey,
+        string itemId)
+    {
         var key = $"{turnKey}\u001f{itemId}";
         if (agentMessages.TryGetValue(key, out var existing))
         {
@@ -919,6 +982,9 @@ public sealed class CodexThreadService
         agentMessages[key] = created;
         return created;
     }
+
+    private static string ResolveAgentMessageTurnKey(CodexConversationTurn turn, string? turnId) =>
+        !string.IsNullOrWhiteSpace(turn.TurnId) ? turn.TurnId : turnId ?? "pending";
 
     private void UpdateAgentMessagePresentation(AgentMessageState state)
     {
@@ -982,8 +1048,11 @@ public sealed class CodexThreadService
     private static string? ReadMessagePhase(JsonObject parameters)
     {
         var phase = ReadString(parameters, "item.phase") ?? ReadString(parameters, "phase");
-        return phase is "commentary" or "final_answer" ? phase : null;
+        return NormalizeMessagePhase(phase);
     }
+
+    private static string? NormalizeMessagePhase(string? phase) =>
+        phase is "commentary" or "final_answer" ? phase : null;
 
     private void ProjectItemActivity(CodexAppServerNotification notification, bool completed)
     {

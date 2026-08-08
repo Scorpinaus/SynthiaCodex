@@ -42,6 +42,33 @@ public sealed class GitService(IAppLogger logger) : IGitService
         return new GitRepositoryState(true, root, branch, files, null);
     }
 
+    public async Task<GitBranchCatalog> GetBranchCatalogAsync(
+        string workingDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        var state = await GetRepositoryStateAsync(workingDirectory, cancellationToken).ConfigureAwait(false);
+        if (!state.IsRepository || string.IsNullOrWhiteSpace(state.RootPath))
+        {
+            throw new InvalidOperationException(state.ErrorMessage ?? "Branch selection requires a Git repository.");
+        }
+
+        var root = state.RootPath;
+        var branchesResult = await RunAsync(
+            root,
+            ["for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes"],
+            [0],
+            cancellationToken).ConfigureAwait(false);
+        var branches = ParseBranches(branchesResult.StandardOutput);
+        var currentBranch = branches.FirstOrDefault(branch =>
+            string.Equals(branch, state.Branch, StringComparison.Ordinal));
+        var headResult = await RunAsync(
+            root,
+            ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+            [0, 1, 128],
+            cancellationToken).ConfigureAwait(false);
+        return new GitBranchCatalog(root, currentBranch, branches, headResult.ExitCode == 0);
+    }
+
     public async Task<GitReviewCatalog> GetReviewCatalogAsync(
         string workingDirectory,
         CancellationToken cancellationToken = default)
@@ -299,14 +326,17 @@ public sealed class GitService(IAppLogger logger) : IGitService
         return files.OrderBy(file => file.Path, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
-    internal static IReadOnlyList<string> ParseReviewBranches(string output, string? currentBranch) =>
+    internal static IReadOnlyList<string> ParseBranches(string output) =>
         output
             .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(branch =>
-                !branch.EndsWith("/HEAD", StringComparison.Ordinal) &&
-                !string.Equals(branch, currentBranch, StringComparison.Ordinal))
+            .Where(branch => !branch.EndsWith("/HEAD", StringComparison.Ordinal))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(branch => branch, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    internal static IReadOnlyList<string> ParseReviewBranches(string output, string? currentBranch) =>
+        ParseBranches(output)
+            .Where(branch => !string.Equals(branch, currentBranch, StringComparison.Ordinal))
             .ToArray();
 
     internal static IReadOnlyList<GitReviewCommit> ParseReviewCommits(string output)

@@ -195,7 +195,7 @@ The current-release scan separates stable user outcomes from protocol availabili
 | Persistent Goal mode | A server-owned per-chat objective loads above the composer and supports set, edit, pause, resume, clear, status, usage, reconnect refresh, and matching push updates | **Full** | SynthiaCode displays a runtime-provided token budget but does not expose budget editing in this first slice. |
 | Manual context compaction | Compaction lifecycle and token-usage updates render and persist | **Partial** | Automatic compaction remains server-owned, but SynthiaCode has no explicit `thread/compact/start` action for users who want to compact now. |
 | Long-running/background work | Runs continue while SynthiaCode remains open; persistent Goal mode, reconnect, and shutdown handling are implemented | **Partial** | No prevent-sleep setting, Activity inbox, OS completion notifications, or cloud continuation. |
-| Local worktrees | Assistant-owned Git worktrees can be created, used per chat, listed, and safely removed | **Partial** | No branch picker, Local/Worktree handoff, managed snapshots/restore, permanent worktrees, `.worktreeinclude`, setup scripts, or configurable retention/root. |
+| Local worktrees | Assistant-owned Git worktrees can be created from a selected starting branch, used per chat, listed, and safely removed | **Partial** | No Local/Worktree handoff, managed snapshots/restore, permanent worktrees, `.worktreeinclude`, setup scripts, or configurable retention/root. |
 
 ### Models, permissions, and account
 
@@ -427,7 +427,7 @@ P0 attachments and image input moved from **Missing** to **Near**:
 3. **Attachments and image input (managed external core implemented):** add installed-runtime managed file/folder mention smoke coverage, attachment-specific permission preflight/narrowing, interactive folder review/exclusions, bounded thumbnail decoding, and app-server history attachment materialization. Optional live external roots remain deferred.
 4. **Interactive Git review (comparison scopes and core interactions implemented):** add detached review delivery and confidence presentation if the app-server exposes typed confidence. Exact Commit, merge-base Branch, and persisted latest-turn diff scopes now share the multi-repository Changes renderer; historical scopes are read-only.
 5. **Push and pull requests:** add native branch push and GitHub PR creation/status.
-6. **Worktree lifecycle:** add starting-branch selection, setup scripts/actions, Local/Worktree handoff, snapshots/restore, and retention settings.
+6. **Worktree lifecycle:** add setup scripts/actions, Local/Worktree handoff, snapshots/restore, and retention settings.
 
 ### P1 — Make parallel and long-running work first class
 

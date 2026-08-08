@@ -297,6 +297,96 @@ public sealed class WpfUserInteractionService : IUserInteractionService
         return picker.ShowDialog() == true ? picker.Selection : null;
     }
 
+    public string? SelectWorktreeStartPoint(GitBranchCatalog catalog)
+    {
+        var startPoints = catalog.Branches.ToList();
+        if (!startPoints.Contains(catalog.DefaultStartPoint, StringComparer.Ordinal))
+        {
+            startPoints.Insert(0, catalog.DefaultStartPoint);
+        }
+
+        var selector = new ComboBox
+        {
+            ItemsSource = startPoints,
+            SelectedItem = catalog.DefaultStartPoint,
+            MinWidth = 380,
+            MaxDropDownHeight = 320,
+            Padding = new Thickness(8, 5, 8, 5),
+            IsTextSearchEnabled = true
+        };
+        AutomationProperties.SetName(selector, "Starting branch");
+
+        var cancel = new Button
+        {
+            Content = "Cancel",
+            IsCancel = true,
+            MinWidth = 80,
+            Margin = new Thickness(0, 0, 8, 0)
+        };
+        var accept = new Button
+        {
+            Content = "Create worktree chat",
+            IsDefault = true,
+            MinWidth = 144
+        };
+        AutomationProperties.SetName(accept, "Create worktree chat");
+
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 18, 0, 0)
+        };
+        actions.Children.Add(cancel);
+        actions.Children.Add(accept);
+
+        var content = new StackPanel
+        {
+            Margin = new Thickness(22),
+            MaxWidth = 560
+        };
+        content.Children.Add(new TextBlock
+        {
+            Text = "Choose the Git branch to use as the starting point for the new worktree.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 12)
+        });
+        content.Children.Add(selector);
+        content.Children.Add(new TextBlock
+        {
+            Text = catalog.RepositoryRoot,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 10, 0, 0)
+        });
+        content.Children.Add(actions);
+
+        var dialog = new Window
+        {
+            Title = "New chat in worktree",
+            Content = content,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+        dialog.SetResourceReference(Window.BackgroundProperty, "PanelBrush");
+        dialog.SetResourceReference(Window.ForegroundProperty, "InkBrush");
+        cancel.SetResourceReference(FrameworkElement.StyleProperty, "CompactButton");
+        accept.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
+        if (System.Windows.Application.Current?.MainWindow is { IsVisible: true } owner)
+        {
+            dialog.Owner = owner;
+        }
+        else
+        {
+            dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        }
+
+        accept.Click += (_, _) => dialog.DialogResult = true;
+        dialog.Loaded += (_, _) => selector.Focus();
+        return dialog.ShowDialog() == true ? selector.SelectedItem as string : null;
+    }
+
     public ProjectFolderEditSelection? EditProjectFolders(RecentProject project)
     {
         var editor = new ProjectFoldersWindow(project, new WpfFolderPicker());

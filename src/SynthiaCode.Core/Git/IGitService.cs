@@ -8,6 +8,25 @@ public interface IGitService
         string workingDirectory,
         CancellationToken cancellationToken = default);
 
+    async Task<GitBranchCatalog> GetBranchCatalogAsync(
+        string workingDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        var reviewCatalog = await GetReviewCatalogAsync(workingDirectory, cancellationToken).ConfigureAwait(false);
+        var branches = new[] { reviewCatalog.CurrentBranch }
+            .Concat(reviewCatalog.BaseBranches)
+            .Where(branch => !string.IsNullOrWhiteSpace(branch))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var currentBranch = branches.FirstOrDefault(branch =>
+            string.Equals(branch, reviewCatalog.CurrentBranch, StringComparison.Ordinal));
+        return new GitBranchCatalog(
+            reviewCatalog.RepositoryRoot,
+            currentBranch,
+            branches,
+            currentBranch is not null || reviewCatalog.Commits.Count > 0);
+    }
+
     Task<string> GetDiffAsync(
         string repositoryRoot,
         GitChangedFile file,

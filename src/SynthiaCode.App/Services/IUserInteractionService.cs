@@ -31,6 +31,8 @@ public interface IUserInteractionService
 
     CodexReviewTarget? SelectCodeReviewTarget(GitReviewCatalog catalog);
 
+    string? SelectWorktreeStartPoint(GitBranchCatalog catalog) => catalog.DefaultStartPoint;
+
     ProjectTrustDecision PromptForProjectTrust(string projectPath);
 
     ProjectFolderEditSelection? EditProjectFolders(RecentProject project);

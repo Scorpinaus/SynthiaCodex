@@ -119,6 +119,7 @@ internal static class LegacyBehavioralTests
     ("worktree service refuses unowned cleanup", TestWorktreeServiceRefusesUnownedCleanupAsync),
     ("worktree service removes owned clean worktree", TestWorktreeServiceRemovesOwnedCleanWorktreeAsync),
     ("view model starts worktree task in isolated cwd", TestViewModelStartsWorktreeTaskInIsolatedCwdAsync),
+    ("canceling worktree branch selection has no creation side effects", TestViewModelCancelsWorktreeBranchSelectionAsync),
     ("conpty terminal starts powershell in requested cwd", TestConPtyTerminalStartsInRequestedCwdAsync),
     ("bounded text buffer retains newest terminal output", TestBoundedTextBufferRetainsNewestOutputAsync),
     ("view model starts terminal in active worktree", TestViewModelStartsTerminalInActiveWorktreeAsync),
@@ -2710,18 +2711,20 @@ static async Task TestViewModelStartsWorktreeTaskInIsolatedCwdAsync()
     var worktreePath = temp.CreateDirectory("Repo.worktrees\\thr-worktree");
     var transport = new FakeAppServerTransport();
     var worktrees = new FakeWorktreeService(repository, worktreePath);
+    var git = new FakeGitService(repository) { Branches = ["main", "feature/branch-picker"] };
+    var interaction = new FakeUserInteractionService { WorktreeStartPointSelection = "feature/branch-picker" };
     var viewModel = CreateMainViewModel(
         transport,
         repository,
         AuthReadiness.LikelySignedIn,
-        worktreeService: worktrees);
+        worktreeService: worktrees,
+        userInteractionService: interaction,
+        gitService: git);
     await viewModel.InitializeAsync();
     viewModel.BrowseProjectCommand.Execute(null);
     await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "worktree project selected");
 
-    viewModel.NewThreadWorkspaceMode = "New worktree";
-    viewModel.PromptText = "Make an isolated change.";
-    viewModel.SubmitPromptCommand.Execute(null);
+    viewModel.ProjectWorkspace.NewWorktreeThreadForProjectCommand.Execute(repository);
     await transport.WaitForClientMessageCountAsync(1);
     transport.ServerSend("""{"id":0,"result":{"userAgent":"test"}}""");
     await transport.WaitForClientMessageCountAsync(3);
@@ -2730,6 +2733,11 @@ static async Task TestViewModelStartsWorktreeTaskInIsolatedCwdAsync()
 
     AssertEqual("worktree", viewModel.SelectedThread!.Mode, "thread worktree mode");
     AssertEqual(Path.GetFullPath(worktreePath), viewModel.ActiveWorkspacePath, "active worktree path label");
+    AssertEqual("main", interaction.WorktreeBranchCatalogs.Single().DefaultStartPoint, "current branch is the picker default");
+    AssertEqual("feature/branch-picker", worktrees.CreateRequests.Single().StartPoint, "selected start point reaches worktree creation");
+    AssertEqual(2, git.BranchCatalogRequestCount, "branch catalog is refreshed once for stale-selection validation");
+    viewModel.PromptText = "Make an isolated change.";
+    viewModel.SubmitPromptCommand.Execute(null);
     await transport.WaitForClientMessageCountAsync(4);
     var startTurn = ParseMessage(transport.ClientMessages[3]);
 
@@ -2737,6 +2745,48 @@ static async Task TestViewModelStartsWorktreeTaskInIsolatedCwdAsync()
     transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn_worktree"}}}""");
     transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thr_worktree","turn":{"id":"turn_worktree","status":"completed"}}}""");
     await WaitUntilAsync(() => !viewModel.IsTurnRunning, "worktree turn completed");
+    await viewModel.DisposeAsync();
+}
+
+static async Task TestViewModelCancelsWorktreeBranchSelectionAsync()
+{
+    using var temp = TempWorkspace.Create();
+    var repository = temp.CreateDirectory("Repo");
+    var transport = new FakeAppServerTransport();
+    var settingsStore = new FakeSettingsStore();
+    var worktrees = new FakeWorktreeService(repository, Path.Combine(temp.Root, "Repo.worktrees", "canceled"));
+    var git = new FakeGitService(repository);
+    var interaction = new FakeUserInteractionService { CancelWorktreeStartPointSelection = true };
+    var viewModel = CreateMainViewModel(
+        transport,
+        repository,
+        AuthReadiness.LikelySignedIn,
+        settingsStore: settingsStore,
+        worktreeService: worktrees,
+        userInteractionService: interaction,
+        gitService: git);
+    await viewModel.InitializeAsync();
+    viewModel.BrowseProjectCommand.Execute(null);
+    await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "canceled worktree project selected");
+    var recentProjectCount = settingsStore.SavedSettings.RecentProjects.Count;
+    var threadStartCount = transport.ClientMessages.Count(message =>
+        ResolvePath(ParseMessage(message), "method")?.GetValue<string>() == "thread/start");
+
+    viewModel.ProjectWorkspace.NewWorktreeThreadForProjectCommand.Execute(repository);
+    await WaitUntilAsync(
+        () => viewModel.StatusMessage.Contains("canceled", StringComparison.OrdinalIgnoreCase),
+        "worktree branch selection canceled");
+
+    AssertEqual(0, worktrees.CreateRequests.Count, "cancellation creates no worktree");
+    AssertEqual(0, settingsStore.SavedSettings.ProjectThreads.Count, "cancellation persists no thread");
+    AssertEqual(recentProjectCount, settingsStore.SavedSettings.RecentProjects.Count, "cancellation does not change project settings");
+    AssertEqual(
+        threadStartCount,
+        transport.ClientMessages.Count(message =>
+            ResolvePath(ParseMessage(message), "method")?.GetValue<string>() == "thread/start"),
+        "cancellation starts no Codex thread");
+    AssertEqual(1, interaction.WorktreeBranchCatalogs.Count, "cancellation occurs in the branch picker");
+    AssertEqual("Current checkout", viewModel.NewThreadWorkspaceMode, "cancellation restores current-checkout creation mode");
     await viewModel.DisposeAsync();
 }
 
@@ -3106,7 +3156,8 @@ static MainViewModel CreateMainViewModel(
     ITerminalService? terminalService = null,
     IAppLogger? logger = null,
     IUserInteractionService? userInteractionService = null,
-    IAttachmentStore? attachmentStore = null)
+    IAttachmentStore? attachmentStore = null,
+    IGitService? gitService = null)
 {
     var installation = new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation");
     var effectiveLogger = logger ?? new TestLogger();
@@ -3120,7 +3171,7 @@ static MainViewModel CreateMainViewModel(
         new FakeCodexDiscoveryService(installation),
         appServerSessionCoordinator,
         new FakeAuthService(new AuthenticationState(readiness, readiness.ToString(), "Test auth state.", @"C:\Users\Test\.codex")),
-        new FakeGitService(projectPath),
+        gitService ?? new FakeGitService(projectPath),
         worktreeService ?? new FakeWorktreeService(projectPath, Path.Combine(projectPath, ".test-worktree")),
         new RecentProjectService(),
         new FakeFolderPicker(projectPath),
@@ -3463,14 +3514,39 @@ internal sealed class FakeFolderPicker(string projectPath) : IFolderPicker
 
 internal sealed class FakeGitService(string repositoryRoot) : IGitService
 {
+    public string? CurrentBranch { get; set; } = "main";
+
+    public IReadOnlyList<string> Branches { get; set; } = ["main"];
+
+    public bool HasHead { get; set; } = true;
+
+    public int BranchCatalogRequestCount { get; private set; }
+
+    public Queue<GitBranchCatalog> BranchCatalogResponses { get; } = [];
+
     public Task<GitRepositoryState> GetRepositoryStateAsync(string workingDirectory, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(new GitRepositoryState(true, repositoryRoot, "main", [], null));
+        return Task.FromResult(new GitRepositoryState(true, repositoryRoot, CurrentBranch, [], null));
     }
 
     public Task<GitReviewCatalog> GetReviewCatalogAsync(string workingDirectory, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new GitReviewCatalog(repositoryRoot, "main", [], []));
+        Task.FromResult(new GitReviewCatalog(
+            repositoryRoot,
+            CurrentBranch ?? string.Empty,
+            Branches.Where(branch => !string.Equals(branch, CurrentBranch, StringComparison.Ordinal)).ToArray(),
+            []));
+
+    public Task<GitBranchCatalog> GetBranchCatalogAsync(string workingDirectory, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        BranchCatalogRequestCount++;
+        if (BranchCatalogResponses.TryDequeue(out var response))
+        {
+            return Task.FromResult(response);
+        }
+        return Task.FromResult(new GitBranchCatalog(repositoryRoot, CurrentBranch, Branches, HasHead));
+    }
 
     public Task<string> GetDiffAsync(string repositoryRoot, GitChangedFile file, bool staged, CancellationToken cancellationToken = default) =>
         Task.FromResult("test diff");
@@ -3495,11 +3571,22 @@ internal sealed class FakeWorktreeService(string repositoryRoot, string worktree
 {
     private readonly List<AssistantWorktree> worktrees = [];
 
+    public List<WorktreeCreateRequest> CreateRequests { get; } = [];
+
+    public List<(string RepositoryRoot, string WorktreePath)> RemoveRequests { get; } = [];
+
+    public Exception? CreateError { get; set; }
+
     public Task<AssistantWorktree> CreateAsync(
         WorktreeCreateRequest request,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        CreateRequests.Add(request);
+        if (CreateError is not null)
+        {
+            return Task.FromException<AssistantWorktree>(CreateError);
+        }
         var created = new AssistantWorktree(
             Path.GetFullPath(repositoryRoot),
             Path.GetFullPath(worktreePath),
@@ -3525,6 +3612,7 @@ internal sealed class FakeWorktreeService(string repositoryRoot, string worktree
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        RemoveRequests.Add((requestedRepositoryRoot, requestedWorktreePath));
         worktrees.RemoveAll(item => string.Equals(item.Path, requestedWorktreePath, StringComparison.OrdinalIgnoreCase));
         return Task.CompletedTask;
     }
@@ -3618,6 +3706,12 @@ internal sealed class FakeUserInteractionService : IUserInteractionService
     public CodexReviewTarget? ReviewTargetSelection { get; set; } =
         CodexReviewTarget.UncommittedChanges();
 
+    public string? WorktreeStartPointSelection { get; set; }
+
+    public bool CancelWorktreeStartPointSelection { get; set; }
+
+    public List<GitBranchCatalog> WorktreeBranchCatalogs { get; } = [];
+
     public ProjectTrustDecision TrustDecision { get; set; } = ProjectTrustDecision.Cancel;
 
     public List<string> ProjectTrustPromptPaths { get; } = [];
@@ -3646,6 +3740,14 @@ internal sealed class FakeUserInteractionService : IUserInteractionService
 
     public CodexReviewTarget? SelectCodeReviewTarget(GitReviewCatalog catalog) =>
         ReviewTargetSelection;
+
+    public string? SelectWorktreeStartPoint(GitBranchCatalog catalog)
+    {
+        WorktreeBranchCatalogs.Add(catalog);
+        return CancelWorktreeStartPointSelection
+            ? null
+            : WorktreeStartPointSelection ?? catalog.DefaultStartPoint;
+    }
 
     public ProjectTrustDecision PromptForProjectTrust(string projectPath)
     {

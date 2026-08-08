@@ -43,6 +43,30 @@ public sealed class ThreadLifecycleUseCaseService
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        string? repositoryRoot = null;
+        string? startPoint = null;
+        if (request.CreateWorktree)
+        {
+            if (request.Scope.Kind != ThreadScopeKind.Project || string.IsNullOrWhiteSpace(request.Scope.ProjectPath))
+            {
+                throw new InvalidOperationException("Only project threads can create a Git worktree.");
+            }
+
+            var catalog = await git.GetBranchCatalogAsync(request.Scope.ProjectPath, cancellationToken).ConfigureAwait(false);
+            repositoryRoot = catalog.RepositoryRoot;
+            startPoint = string.IsNullOrWhiteSpace(request.WorktreeStartPoint)
+                ? "HEAD"
+                : request.WorktreeStartPoint.Trim();
+            var exists = string.Equals(startPoint, "HEAD", StringComparison.Ordinal)
+                ? catalog.HasHead
+                : catalog.Branches.Contains(startPoint, StringComparer.Ordinal);
+            if (!exists)
+            {
+                throw new InvalidOperationException(
+                    $"The selected starting branch '{startPoint}' no longer exists. Choose another branch and try again.");
+            }
+        }
+
         var started = await harnesses.StartConversationAsync(
             request.HarnessId,
             request.ConnectionOptions,
@@ -52,33 +76,90 @@ public sealed class ThreadLifecycleUseCaseService
         AssistantWorktree? worktree = null;
         if (request.CreateWorktree)
         {
-            if (request.Scope.Kind != ThreadScopeKind.Project || string.IsNullOrWhiteSpace(request.Scope.ProjectPath))
+            try
             {
-                throw new InvalidOperationException("Only project threads can create a Git worktree.");
+                worktree = await worktrees.CreateAsync(new WorktreeCreateRequest(
+                    repositoryRoot!,
+                    request.WorktreeTaskId,
+                    threadId,
+                    startPoint), cancellationToken).ConfigureAwait(false);
             }
+            catch (Exception worktreeError)
+            {
+                try
+                {
+                    await harnesses.SetConversationArchivedAsync(
+                        request.ConnectionOptions,
+                        started.Address,
+                        archived: true,
+                        CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception cleanupError)
+                {
+                    throw new AggregateException(
+                        "Worktree creation failed and the incomplete chat could not be archived.",
+                        worktreeError,
+                        cleanupError);
+                }
 
-            var repository = await git.GetRepositoryStateAsync(request.Scope.ProjectPath, cancellationToken).ConfigureAwait(false);
-            if (!repository.IsRepository || string.IsNullOrWhiteSpace(repository.RootPath))
-            {
-                throw new InvalidOperationException("A new worktree requires a detected Git repository.");
+                throw;
             }
-            worktree = await worktrees.CreateAsync(new WorktreeCreateRequest(
-                repository.RootPath,
-                request.WorktreeTaskId,
-                threadId), cancellationToken).ConfigureAwait(false);
         }
 
-        var created = await CreateAsync(new ThreadCreateRequest(
-            request.Settings,
-            request.Scope,
-            threadId,
-            request.Title,
-            worktree?.Path ?? request.WorkspacePath,
-            worktree?.Branch,
-            request.Instructions,
-            request.IsTitlePlaceholder,
-            started.Address), cancellationToken).ConfigureAwait(false);
-        return new ThreadStartUseCaseResult(created.State, worktree);
+        try
+        {
+            var created = await CreateAsync(new ThreadCreateRequest(
+                request.Settings,
+                request.Scope,
+                threadId,
+                request.Title,
+                worktree?.Path ?? request.WorkspacePath,
+                worktree?.Branch,
+                request.Instructions,
+                request.IsTitlePlaceholder,
+                started.Address), cancellationToken).ConfigureAwait(false);
+            return new ThreadStartUseCaseResult(created.State, worktree);
+        }
+        catch (Exception persistenceError) when (request.CreateWorktree)
+        {
+            var cleanupErrors = new List<Exception>();
+            if (worktree is not null)
+            {
+                try
+                {
+                    await worktrees.RemoveAsync(
+                        worktree.RepositoryRoot,
+                        worktree.Path,
+                        CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception cleanupError)
+                {
+                    cleanupErrors.Add(cleanupError);
+                }
+            }
+
+            try
+            {
+                await harnesses.SetConversationArchivedAsync(
+                    request.ConnectionOptions,
+                    started.Address,
+                    archived: true,
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception cleanupError)
+            {
+                cleanupErrors.Add(cleanupError);
+            }
+
+            if (cleanupErrors.Count > 0)
+            {
+                throw new AggregateException(
+                    "Chat persistence failed and one or more incomplete resources could not be cleaned up.",
+                    new[] { persistenceError }.Concat(cleanupErrors));
+            }
+
+            throw;
+        }
     }
 
     public async Task<ThreadResumeUseCaseResult> ResumeAsync(
@@ -492,7 +573,8 @@ public sealed record ThreadStartUseCaseRequest(
     ThreadInstructionSnapshot Instructions,
     bool IsTitlePlaceholder,
     bool CreateWorktree,
-    string WorktreeTaskId);
+    string WorktreeTaskId,
+    string? WorktreeStartPoint = null);
 public sealed record ThreadStartUseCaseResult(ProjectThreadState State, AssistantWorktree? Worktree);
 public sealed record ThreadResumeUseCaseResult(
     string ThreadId,

@@ -69,6 +69,15 @@ public sealed record GitReviewCatalog(
     IReadOnlyList<string> BaseBranches,
     IReadOnlyList<GitReviewCommit> Commits);
 
+public sealed record GitBranchCatalog(
+    string RepositoryRoot,
+    string? CurrentBranch,
+    IReadOnlyList<string> Branches,
+    bool HasHead)
+{
+    public string DefaultStartPoint => CurrentBranch ?? "HEAD";
+}
+
 public enum GitDiffScope
 {
     Unstaged,

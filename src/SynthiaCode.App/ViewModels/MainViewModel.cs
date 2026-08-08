@@ -1340,9 +1340,21 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        var createWorktree = scope.Kind == ThreadScopeKind.Project &&
+            string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal);
         try
         {
             var workspacePath = GetWorkspacePath(scope);
+            var worktreeStartPoint = createWorktree
+                ? await SelectWorktreeStartPointAsync(scope).ConfigureAwait(true)
+                : null;
+            if (createWorktree && worktreeStartPoint is null)
+            {
+                NewThreadWorkspaceMode = "Current checkout";
+                StatusMessage = "Worktree chat creation canceled";
+                return;
+            }
+
             var instructionSnapshot = ResolveDefaultInstructionSnapshot();
             await EnsureHarnessSessionAsync(ResolveHarnessId(), workspacePath).ConfigureAwait(true);
             var result = await threadLifecycle.StartAsync(new ThreadStartUseCaseRequest(
@@ -1355,9 +1367,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 CreateConversationStartCommand(workspacePath, instructionSnapshot, scope.ProjectPath),
                 new ThreadInstructionSnapshot(instructionSnapshot.DeveloperInstructions, instructionSnapshot.BaseInstructions),
                 IsTitlePlaceholder: true,
-                CreateWorktree: scope.Kind == ThreadScopeKind.Project &&
-                    string.Equals(NewThreadWorkspaceMode, "New worktree", StringComparison.Ordinal),
-                WorktreeTaskId: $"thread-{ProjectThreads.Count + 1}")).ConfigureAwait(true);
+                CreateWorktree: createWorktree,
+                WorktreeTaskId: $"thread-{ProjectThreads.Count + 1}",
+                WorktreeStartPoint: worktreeStartPoint)).ConfigureAwait(true);
             conversationWorkflow.MarkLoaded(result.State.ThreadId);
             RefreshProjectThreads(result.State.ThreadId);
             StatusMessage = scope.Kind == ThreadScopeKind.General
@@ -1368,6 +1380,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception ex)
         {
+            if (createWorktree)
+            {
+                NewThreadWorkspaceMode = "Current checkout";
+            }
             StatusMessage = ex.Message;
             logger.Log(AppLogLevel.Error, "thread_create_failed", "Could not create a Codex thread.", exception: ex);
         }
@@ -2588,6 +2604,26 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         conversationWorkflow.MarkLoaded(activated.ThreadId);
         activeThreadLoaded = true;
         return activated.ThreadId;
+    }
+
+    private async Task<string?> SelectWorktreeStartPointAsync(ThreadScopeKey scope)
+    {
+        if (scope.Kind != ThreadScopeKind.Project || string.IsNullOrWhiteSpace(scope.ProjectPath))
+        {
+            throw new InvalidOperationException("Only project chats can use a Git worktree.");
+        }
+
+        StatusMessage = "Loading Git branches";
+        var catalog = await gitService.GetBranchCatalogAsync(scope.ProjectPath).ConfigureAwait(true);
+        var selection = userInteractionService.SelectWorktreeStartPoint(catalog);
+        if (selection is null)
+        {
+            return null;
+        }
+
+        return string.IsNullOrWhiteSpace(selection)
+            ? throw new InvalidOperationException("Select a starting branch for the new worktree.")
+            : selection.Trim();
     }
 
     private async Task CancelTurnAsync()

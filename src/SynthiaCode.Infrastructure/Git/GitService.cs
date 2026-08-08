@@ -28,7 +28,8 @@ public sealed class GitService(IAppLogger logger) : IGitService
         var root = Path.GetFullPath(rootResult.StandardOutput.Trim());
         var branchResult = await RunAsync(root, ["symbolic-ref", "--quiet", "--short", "HEAD"], [0, 1, 128], cancellationToken)
             .ConfigureAwait(false);
-        var branch = branchResult.ExitCode == 0
+        var isDetachedHead = branchResult.ExitCode != 0;
+        var branch = !isDetachedHead
             ? branchResult.StandardOutput.Trim()
             : await GetDetachedHeadLabelAsync(root, cancellationToken).ConfigureAwait(false);
 
@@ -39,7 +40,7 @@ public sealed class GitService(IAppLogger logger) : IGitService
             cancellationToken).ConfigureAwait(false);
         var files = ParsePorcelainStatus(statusResult.StandardOutput);
 
-        return new GitRepositoryState(true, root, branch, files, null);
+        return new GitRepositoryState(true, root, branch, files, null, isDetachedHead);
     }
 
     public async Task<GitBranchCatalog> GetBranchCatalogAsync(
@@ -291,6 +292,102 @@ public sealed class GitService(IAppLogger logger) : IGitService
         return new GitCommitResult(id.StandardOutput.Trim(), summary);
     }
 
+    public async Task<GitPushPlan> GetPushPlanAsync(
+        string repositoryRoot,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureRepositoryRoot(repositoryRoot);
+        var root = Path.GetFullPath(repositoryRoot);
+        var branchResult = await RunAsync(
+            root,
+            ["symbolic-ref", "--quiet", "--short", "HEAD"],
+            [0, 1, 128],
+            cancellationToken).ConfigureAwait(false);
+        var branch = branchResult.StandardOutput.Trim();
+        if (branchResult.ExitCode != 0 || string.IsNullOrWhiteSpace(branch))
+        {
+            throw new InvalidOperationException("Push requires a named branch; detached HEAD cannot be pushed.");
+        }
+        if (!await HasHeadAsync(root, cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException($"Branch '{branch}' has no commits to push.");
+        }
+
+        var localRef = $"refs/heads/{branch}";
+        var upstreamResult = await RunAsync(
+            root,
+            ["for-each-ref", "--format=%(upstream:remotename)%00%(upstream:remoteref)", localRef],
+            [0],
+            cancellationToken).ConfigureAwait(false);
+        var upstream = upstreamResult.StandardOutput.Trim('\r', '\n').Split('\0');
+        if (upstream.Length >= 2 &&
+            !string.IsNullOrWhiteSpace(upstream[0]) &&
+            !string.IsNullOrWhiteSpace(upstream[1]))
+        {
+            var remoteRef = upstream[1].Trim();
+            if (!remoteRef.StartsWith("refs/heads/", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"The upstream configured for branch '{branch}' is not a remote branch. Configure a branch upstream before pushing.");
+            }
+            return new GitPushPlan(root, branch, upstream[0].Trim(), remoteRef, CreatesUpstream: false);
+        }
+
+        var remoteResult = await RunAsync(root, ["remote"], [0], cancellationToken).ConfigureAwait(false);
+        var remotes = remoteResult.StandardOutput
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (remotes.Length == 0)
+        {
+            throw new InvalidOperationException(
+                $"No Git remotes are configured. Add a remote before pushing branch '{branch}'.");
+        }
+        if (remotes.Length > 1)
+        {
+            throw new InvalidOperationException(
+                $"Branch '{branch}' has no upstream and multiple remotes are configured ({string.Join(", ", remotes)}). " +
+                "Configure an upstream before pushing.");
+        }
+
+        return new GitPushPlan(root, branch, remotes[0], localRef, CreatesUpstream: true);
+    }
+
+    public async Task<GitPushResult> PushAsync(
+        string repositoryRoot,
+        GitPushPlan plan,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        EnsureRepositoryRoot(repositoryRoot);
+        var root = Path.GetFullPath(repositoryRoot);
+        if (!string.Equals(root, Path.GetFullPath(plan.RepositoryRoot), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The confirmed push target does not match the selected repository.");
+        }
+
+        var currentPlan = await GetPushPlanAsync(root, cancellationToken).ConfigureAwait(false);
+        if (!PushPlansMatch(plan, currentPlan))
+        {
+            throw new InvalidOperationException(
+                "The branch or remote changed after confirmation. Refresh Git status and confirm the push again.");
+        }
+
+        var arguments = plan.CreatesUpstream
+            ? new[] { "push", "--set-upstream", "--", plan.Remote, plan.Branch }
+            : new[] { "push", "--", plan.Remote, $"HEAD:{plan.RemoteRef}" };
+        try
+        {
+            await RunAsync(root, arguments, [0], cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new InvalidOperationException(CreatePushFailureMessage(plan, exception.Message));
+        }
+
+        return new GitPushResult(root, plan.Branch, plan.Remote, plan.RemoteBranch, plan.CreatesUpstream);
+    }
+
     internal static IReadOnlyList<GitChangedFile> ParsePorcelainStatus(string output)
     {
         if (string.IsNullOrEmpty(output))
@@ -361,6 +458,48 @@ public sealed class GitService(IAppLogger logger) : IGitService
         var result = await RunAsync(repositoryRoot, ["rev-parse", "--short", "HEAD"], [0, 128], cancellationToken)
             .ConfigureAwait(false);
         return result.ExitCode == 0 ? $"detached at {result.StandardOutput.Trim()}" : "No commits yet";
+    }
+
+    private static bool PushPlansMatch(GitPushPlan confirmed, GitPushPlan current) =>
+        string.Equals(confirmed.RepositoryRoot, current.RepositoryRoot, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(confirmed.Branch, current.Branch, StringComparison.Ordinal) &&
+        string.Equals(confirmed.Remote, current.Remote, StringComparison.Ordinal) &&
+        string.Equals(confirmed.RemoteRef, current.RemoteRef, StringComparison.Ordinal) &&
+        confirmed.CreatesUpstream == current.CreatesUpstream;
+
+    private static string CreatePushFailureMessage(GitPushPlan plan, string detail)
+    {
+        if (detail.Contains("non-fast-forward", StringComparison.OrdinalIgnoreCase) ||
+            detail.Contains("[rejected]", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Push was rejected because {plan.Remote}/{plan.RemoteBranch} contains changes that are not in {plan.Branch}. " +
+                "Integrate the remote changes before trying again.";
+        }
+        if (detail.Contains("authentication failed", StringComparison.OrdinalIgnoreCase) ||
+            detail.Contains("could not read username", StringComparison.OrdinalIgnoreCase) ||
+            detail.Contains("permission denied", StringComparison.OrdinalIgnoreCase) ||
+            detail.Contains("access denied", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Git could not authenticate to remote '{plan.Remote}'. Check the credentials configured for Git and try again.";
+        }
+        if (detail.Contains("repository not found", StringComparison.OrdinalIgnoreCase) ||
+            detail.Contains("does not appear to be a git repository", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Remote '{plan.Remote}' was not found or access was denied. Check the remote configuration and permissions.";
+        }
+        if (detail.Contains("could not resolve host", StringComparison.OrdinalIgnoreCase) ||
+            detail.Contains("failed to connect", StringComparison.OrdinalIgnoreCase) ||
+            detail.Contains("unable to access", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Git could not reach remote '{plan.Remote}'. Check the network and remote configuration, then try again.";
+        }
+        if (detail.Contains("not installed or could not be started", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Git is not installed or could not be started.";
+        }
+
+        return $"Git could not push branch '{plan.Branch}' to '{plan.Remote}/{plan.RemoteBranch}'. " +
+            "Use the integrated terminal for additional Git diagnostics.";
     }
 
     private async Task<bool> HasHeadAsync(string repositoryRoot, CancellationToken cancellationToken)

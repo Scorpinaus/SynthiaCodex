@@ -55,4 +55,15 @@ public interface IGitService
         CancellationToken cancellationToken = default);
 
     Task<GitCommitResult> CommitAsync(string repositoryRoot, string message, CancellationToken cancellationToken = default);
+
+    Task<GitPushPlan> GetPushPlanAsync(
+        string repositoryRoot,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Native Git push is not supported by this service.");
+
+    Task<GitPushResult> PushAsync(
+        string repositoryRoot,
+        GitPushPlan plan,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Native Git push is not supported by this service.");
 }

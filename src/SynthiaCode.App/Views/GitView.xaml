@@ -486,10 +486,11 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
-            <TextBlock Text="Commit staged changes" Style="{StaticResource SectionLabel}" />
+            <TextBlock Text="Commit or push" Style="{StaticResource SectionLabel}" />
             <Grid Grid.Row="1">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBox Text="{Binding Git.CommitMessage, UpdateSourceTrigger=PropertyChanged}"
@@ -505,6 +506,14 @@
                         MinWidth="84"
                         Margin="8,0,0,0"
                         VerticalAlignment="Top" />
+                <Button Grid.Column="2"
+                        Content="Push"
+                        Command="{Binding Git.PushCommand}"
+                        Style="{StaticResource CompactButton}"
+                        MinWidth="72"
+                        Margin="5,0,0,0"
+                        VerticalAlignment="Top"
+                        AutomationProperties.Name="Push current branch" />
             </Grid>
         </Grid>
 

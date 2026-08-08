@@ -19,6 +19,8 @@ public interface IUserInteractionService
 {
     bool ConfirmDestructiveAction(string title, string message);
 
+    bool ConfirmAction(string title, string message) => ConfirmDestructiveAction(title, message);
+
     string? PromptForText(string title, string message, string initialValue);
 
     void OpenInEditor(string path);

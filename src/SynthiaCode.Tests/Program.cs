@@ -161,6 +161,7 @@ internal static class LegacyBehavioralTests
         .. StructuredReviewFindingsTests.All,
         .. InlineReviewCommentsTests.All,
         .. HunkGitOperationsTests.All,
+        .. GitPushTests.All,
         .. HistoricalDiffScopesTests.All
     ];
 

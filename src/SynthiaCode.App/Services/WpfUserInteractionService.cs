@@ -19,6 +19,14 @@ public sealed class WpfUserInteractionService : IUserInteractionService
             MessageBoxImage.Warning,
             MessageBoxResult.No) == MessageBoxResult.Yes;
 
+    public bool ConfirmAction(string title, string message) =>
+        MessageBox.Show(
+            message,
+            title,
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question,
+            MessageBoxResult.No) == MessageBoxResult.Yes;
+
     public string? PromptForText(string title, string message, string initialValue)
     {
         var input = new TextBox

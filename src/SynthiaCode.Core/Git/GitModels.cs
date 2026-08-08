@@ -48,13 +48,37 @@ public sealed record GitRepositoryState(
     string? RootPath,
     string? Branch,
     IReadOnlyList<GitChangedFile> ChangedFiles,
-    string? ErrorMessage)
+    string? ErrorMessage,
+    bool IsDetachedHead = false)
 {
+    public bool HasNamedBranch => IsRepository && !IsDetachedHead && !string.IsNullOrWhiteSpace(Branch);
+
     public static GitRepositoryState NotRepository(string message) =>
         new(false, null, null, [], message);
 }
 
 public sealed record GitCommitResult(string CommitId, string Summary);
+
+public sealed record GitPushPlan(
+    string RepositoryRoot,
+    string Branch,
+    string Remote,
+    string RemoteRef,
+    bool CreatesUpstream)
+{
+    private const string HeadsPrefix = "refs/heads/";
+
+    public string RemoteBranch => RemoteRef.StartsWith(HeadsPrefix, StringComparison.Ordinal)
+        ? RemoteRef[HeadsPrefix.Length..]
+        : RemoteRef;
+}
+
+public sealed record GitPushResult(
+    string RepositoryRoot,
+    string Branch,
+    string Remote,
+    string RemoteBranch,
+    bool CreatedUpstream);
 
 public sealed record GitReviewCommit(string Sha, string ShortSha, string Title)
 {

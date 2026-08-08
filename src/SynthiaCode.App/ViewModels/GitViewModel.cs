@@ -172,6 +172,7 @@ public sealed class GitViewModel : ObservableObject
     private readonly AsyncRelayCommand unstageHunkCommand;
     private readonly AsyncRelayCommand discardHunkCommand;
     private readonly AsyncRelayCommand commitCommand;
+    private readonly AsyncRelayCommand pushCommand;
     private readonly RelayCommand openEditorCommand;
     private readonly RelayCommand revealExplorerCommand;
     private readonly RelayCommand beginAddCommentCommand;
@@ -239,6 +240,7 @@ public sealed class GitViewModel : ObservableObject
             CanUnstageHunk);
         DiscardHunkCommand = discardHunkCommand = new AsyncRelayCommand(DiscardHunkAsync, CanDiscardHunk);
         CommitCommand = commitCommand = new AsyncRelayCommand(CommitAsync, CanCommit);
+        PushCommand = pushCommand = new AsyncRelayCommand(PushAsync, CanPush);
         OpenEditorCommand = openEditorCommand = new RelayCommand(OpenInEditor, CanOpenProjectTarget);
         RevealExplorerCommand = revealExplorerCommand = new RelayCommand(RevealInExplorer, CanOpenProjectTarget);
         BeginAddCommentCommand = beginAddCommentCommand = new RelayCommand(BeginAddComment, CanBeginAddComment);
@@ -276,6 +278,7 @@ public sealed class GitViewModel : ObservableObject
     public ICommand UnstageHunkCommand { get; }
     public ICommand DiscardHunkCommand { get; }
     public ICommand CommitCommand { get; }
+    public ICommand PushCommand { get; }
     public ICommand OpenEditorCommand { get; }
     public ICommand RevealExplorerCommand { get; }
     public ICommand BeginAddCommentCommand { get; }
@@ -621,6 +624,7 @@ public sealed class GitViewModel : ObservableObject
         unstageHunkCommand.RaiseCanExecuteChanged();
         discardHunkCommand.RaiseCanExecuteChanged();
         commitCommand.RaiseCanExecuteChanged();
+        pushCommand.RaiseCanExecuteChanged();
         openEditorCommand.RaiseCanExecuteChanged();
         revealExplorerCommand.RaiseCanExecuteChanged();
         beginAddCommentCommand.RaiseCanExecuteChanged();
@@ -1214,6 +1218,53 @@ public sealed class GitViewModel : ObservableObject
         }
     }
 
+    private async Task PushAsync()
+    {
+        var pushRoot = repositoryRoot!;
+        IsBusy = true;
+        try
+        {
+            var plan = await gitService.GetPushPlanAsync(pushRoot).ConfigureAwait(true);
+            if (!PushTargetMatchesDisplay(pushRoot, plan.Branch))
+            {
+                StatusMessage = "The displayed repository or branch changed. Refresh Git status and try again.";
+                return;
+            }
+            var upstreamDescription = plan.CreatesUpstream
+                ? "will be created"
+                : "already configured";
+            if (!userInteractionService.ConfirmAction(
+                    "Push Git branch",
+                    $"Branch: {plan.Branch}\nRemote: {plan.Remote}\nRemote branch: {plan.RemoteBranch}\n" +
+                    $"Upstream: {upstreamDescription}\n\nPush this branch?"))
+            {
+                StatusMessage = "Push cancelled";
+                return;
+            }
+            if (!PushTargetMatchesDisplay(pushRoot, plan.Branch))
+            {
+                StatusMessage = "The displayed repository or branch changed after confirmation. Refresh Git status and try again.";
+                return;
+            }
+
+            var result = await gitService.PushAsync(pushRoot, plan).ConfigureAwait(true);
+            await RefreshAsync().ConfigureAwait(true);
+            StatusMessage = result.CreatedUpstream
+                ? $"Pushed {result.Branch} to {result.Remote}/{result.RemoteBranch} and set the upstream"
+                : $"Pushed {result.Branch} to {result.Remote}/{result.RemoteBranch}";
+            reportStatus($"Git branch {result.Branch} pushed to {result.Remote}");
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = exception.Message;
+            logger.Log(AppLogLevel.Warning, "git_push_failed", "Could not push the Git branch.");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     private async Task RunMutationAsync(Func<Task> operation, string successMessage)
     {
         IsBusy = true;
@@ -1354,6 +1405,12 @@ public sealed class GitViewModel : ObservableObject
         SelectedDiffScope.Scope is GitDiffScope.Unstaged or GitDiffScope.Staged;
     private bool CanCommit() => !isShuttingDown() && !IsBusy && IsRepository && !string.IsNullOrWhiteSpace(CommitMessage) &&
         SelectedRepository?.State.ChangedFiles.Any(file => file.IsStaged) == true;
+    private bool CanPush() => !isShuttingDown() && !IsBusy && IsRepository &&
+        SelectedRepository?.State.HasNamedBranch == true;
+    private bool PushTargetMatchesDisplay(string root, string branchName) =>
+        SelectedRepository is { State.HasNamedBranch: true } selected &&
+        PathsEqual(selected.RootPath, root) &&
+        string.Equals(selected.State.Branch, branchName, StringComparison.Ordinal);
     private bool CanOpenProjectTarget() => !isShuttingDown() && !string.IsNullOrWhiteSpace(contextProvider().ProjectPath);
     private bool CanBeginAddComment(object? parameter) =>
         !isShuttingDown() && !IsBusy && IsRepository && SelectedFile is not null && SelectedDiffScope.Scope != GitDiffScope.LastTurn &&

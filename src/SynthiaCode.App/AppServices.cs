@@ -59,6 +59,7 @@ public sealed class AppServices
         CodeReviewUseCaseService codeReviewService,
         FollowUpQueueUseCaseService followUpQueueService,
         ProjectWorkspaceOperations projectWorkspaceOperations,
+        IProjectTrustService projectTrustService,
         AttachmentDraftOrchestrationService attachmentDraftService,
         ISpeechRecognitionService speechRecognitionService)
     {
@@ -88,6 +89,7 @@ public sealed class AppServices
         CodeReviewService = codeReviewService;
         FollowUpQueueService = followUpQueueService;
         ProjectWorkspaceOperations = projectWorkspaceOperations;
+        ProjectTrustService = projectTrustService;
         AttachmentDraftService = attachmentDraftService;
         SpeechRecognitionService = speechRecognitionService;
     }
@@ -140,6 +142,8 @@ public sealed class AppServices
     public FollowUpQueueUseCaseService FollowUpQueueService { get; }
 
     public ProjectWorkspaceOperations ProjectWorkspaceOperations { get; }
+
+    public IProjectTrustService ProjectTrustService { get; }
 
     public AttachmentDraftOrchestrationService AttachmentDraftService { get; }
 
@@ -209,6 +213,10 @@ public sealed class AppServices
             followUpQueues);
         var projectWorkspaceOperations = new ProjectWorkspaceOperations(
             gitService, worktreeService, recentProjectService, generalWorkspaceService);
+        var projectTrustService = new ProjectTrustService(
+            appServerSessionCoordinator,
+            userInteractionService,
+            logger);
         var attachmentDraftService = new AttachmentDraftOrchestrationService(
             attachmentStore,
             workspaceAttachmentResolver,
@@ -245,6 +253,7 @@ public sealed class AppServices
             codeReviewService,
             followUpQueueService,
             projectWorkspaceOperations,
+            projectTrustService,
             attachmentDraftService,
             speechRecognitionService);
     }

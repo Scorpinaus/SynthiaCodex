@@ -34,6 +34,7 @@ public static class SettingsStorageMapper
             DefaultHarnessId = AppSettingsHarnessMigration.NormalizeHarnessId(source.DefaultHarnessId),
             IsProjectRailOpen = source.IsProjectRailOpen,
             IsDetailsPaneOpen = source.IsDetailsPaneOpen,
+            LastSelectedProjectPath = source.LastSelectedProjectPath,
             RecentProjects = [.. source.RecentProjects.Select(CloneRecentProject)],
             ProjectThreads = [.. source.ProjectThreads.Select(CloneThread)],
             ComposerAttachmentDrafts = [.. source.ComposerAttachmentDrafts.Select(CloneDraft)]

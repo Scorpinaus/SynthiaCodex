@@ -570,6 +570,99 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             origins);
     }
 
+    public async Task<CodexProjectTrustLevel> ReadProjectTrustAsync(
+        string projectPath,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedPath = NormalizeProjectTrustPath(projectPath);
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var result = await SendRequestAsync(
+            "config/read",
+            new JsonObject
+            {
+                ["cwd"] = null,
+                ["includeLayers"] = false
+            },
+            cancellationToken).ConfigureAwait(false) as JsonObject;
+        var config = result?["config"] as JsonObject
+            ?? throw new CodexAppServerProtocolException(
+                "config/read response did not include result.config.");
+        if (!config.TryGetPropertyValue("projects", out var projectsNode) || projectsNode is null)
+        {
+            return CodexProjectTrustLevel.Unknown;
+        }
+        if (projectsNode is not JsonObject projects)
+        {
+            throw new CodexAppServerProtocolException(
+                "config/read response included a non-object config.projects value.");
+        }
+
+        foreach (var (configuredPath, configuredValue) in projects)
+        {
+            if (!ProjectTrustPathsEqual(configuredPath, normalizedPath))
+            {
+                continue;
+            }
+            if (configuredValue is not JsonObject project)
+            {
+                throw new CodexAppServerProtocolException(
+                    "config/read response included an invalid project trust entry.");
+            }
+            if (!project.TryGetPropertyValue("trust_level", out var trustNode) || trustNode is null)
+            {
+                return CodexProjectTrustLevel.Unknown;
+            }
+            if (trustNode is not JsonValue trustValue ||
+                !trustValue.TryGetValue<string>(out var trustLevel))
+            {
+                throw new CodexAppServerProtocolException(
+                    "config/read response included a non-string project trust level.");
+            }
+
+            return trustLevel switch
+            {
+                "trusted" => CodexProjectTrustLevel.Trusted,
+                "untrusted" => CodexProjectTrustLevel.Untrusted,
+                _ => throw new CodexAppServerProtocolException(
+                    $"config/read response included unsupported project trust level '{trustLevel}'.")
+            };
+        }
+
+        return CodexProjectTrustLevel.Unknown;
+    }
+
+    public async Task WriteProjectTrustAsync(
+        string projectPath,
+        CodexProjectTrustLevel trustLevel,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedPath = NormalizeProjectTrustPath(projectPath);
+        var wireValue = trustLevel switch
+        {
+            CodexProjectTrustLevel.Trusted => "trusted",
+            CodexProjectTrustLevel.Untrusted => "untrusted",
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(trustLevel),
+                trustLevel,
+                "Only explicit project trust decisions can be persisted.")
+        };
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var result = await SendRequestAsync(
+            "config/value/write",
+            new JsonObject
+            {
+                ["keyPath"] = $"projects.{JsonSerializer.Serialize(normalizedPath)}.trust_level",
+                ["value"] = wireValue,
+                ["mergeStrategy"] = "upsert"
+            },
+            cancellationToken).ConfigureAwait(false) as JsonObject;
+        if (ReadString(result, "status") is not ("ok" or "okOverridden"))
+        {
+            throw new CodexAppServerProtocolException(
+                "config/value/write response did not include a supported result.status.");
+        }
+    }
+
     public async Task<CodexExecutionPolicyRequirements> ReadExecutionPolicyRequirementsAsync(
         CancellationToken cancellationToken = default)
     {
@@ -2005,6 +2098,36 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         "guardian_subagent" or "guardiansubagent" => CodexApprovalsReviewer.GuardianSubagentLegacy,
         _ => null
     };
+
+    private static string NormalizeProjectTrustPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new ArgumentException("A project path is required.", nameof(path));
+        }
+
+        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+    }
+
+    private static bool ProjectTrustPathsEqual(string configuredPath, string normalizedPath)
+    {
+        if (string.Equals(configuredPath, normalizedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        try
+        {
+            return string.Equals(
+                NormalizeProjectTrustPath(configuredPath),
+                normalizedPath,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
+        {
+            return false;
+        }
+    }
 
     private static IReadOnlyList<CodexSandbox> ParseSandboxArray(JsonArray? values)
     {

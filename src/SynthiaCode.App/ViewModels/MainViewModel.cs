@@ -38,6 +38,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly FollowUpQueueUseCaseService followUpQueue;
     private readonly IGitService gitService;
     private readonly ProjectWorkspaceOperations projectWorkspaceOperations;
+    private readonly IProjectTrustService projectTrustService;
     private readonly IAppLogger logger;
     private readonly AttachmentDraftOrchestrationService attachmentDraftService;
     private readonly bool enableGoalMode;
@@ -112,6 +113,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         FollowUpQueueUseCaseService followUpQueue,
         IGitService gitService,
         ProjectWorkspaceOperations projectWorkspaceOperations,
+        IProjectTrustService projectTrustService,
         AttachmentDraftOrchestrationService attachmentDraftService,
         ISharedCodexConfigurationService sharedCodexConfigurationService,
         ISpeechRecognitionService? speechRecognitionService = null,
@@ -132,6 +134,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         this.followUpQueue = followUpQueue;
         this.gitService = gitService;
         this.projectWorkspaceOperations = projectWorkspaceOperations;
+        this.projectTrustService = projectTrustService;
         this.attachmentDraftService = attachmentDraftService;
         this.enableGoalMode = enableGoalMode;
         CodexConfiguration = new CodexConfigurationViewModel(
@@ -971,6 +974,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         RestorePersistedThreadState();
         await DiagnosticsViewModel.RefreshAsync().ConfigureAwait(true);
         StatusMessage = "Ready";
+        if (!string.IsNullOrWhiteSpace(settings.LastSelectedProjectPath))
+        {
+            if (Directory.Exists(settings.LastSelectedProjectPath))
+            {
+                await SelectProjectAsync(settings.LastSelectedProjectPath).ConfigureAwait(true);
+            }
+            else
+            {
+                StatusMessage = "The last selected project path no longer exists";
+            }
+        }
         appServerWarmUpTask = WarmUpAppServerAsync(appServerWarmUpCancellation.Token);
     }
 
@@ -1070,21 +1084,37 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        var snapshot = SettingsStorageMapper.Clone(settings);
         var wasSelected = ProjectFolderSet.PathsEqual(SelectedProjectPath, project.Path);
+        var primaryPath = selection.PrimaryPath;
+        if (wasSelected)
+        {
+            var authorization = await projectTrustService
+                .AuthorizeAsync(primaryPath, currentCodex)
+                .ConfigureAwait(true);
+            if (!authorization.IsAuthorized)
+            {
+                StatusMessage = authorization.IsCanceled
+                    ? "Project folder update canceled"
+                    : authorization.FailureMessage ?? "Project folder update was denied";
+                return;
+            }
+            primaryPath = authorization.NormalizedPath;
+        }
+
+        var snapshot = SettingsStorageMapper.Clone(settings);
         try
         {
             var result = projectWorkspaceOperations.UpdateProjectFolders(
                 settings,
                 new ProjectFolderUpdateRequest(
                     project.Path,
-                    selection.PrimaryPath,
+                    primaryPath,
                     selection.FolderPaths));
-            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
 
             if (wasSelected)
             {
                 SelectedProjectPath = result.Project.Path;
+                settings.LastSelectedProjectPath = result.Project.Path;
                 RestorePersistedThreadState();
                 Terminal.RefreshContext();
                 NotifyCodexContextChanged();
@@ -1094,6 +1124,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 RefreshRecentProjects();
             }
 
+            await settingsStore.SaveAsync(settings).ConfigureAwait(true);
             await Git.RefreshAsync().ConfigureAwait(true);
             StatusMessage = result.Project.FolderPaths.Count == 1
                 ? $"Updated {result.Project.Name}"
@@ -1104,6 +1135,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             settings.RecentProjects = snapshot.RecentProjects;
             settings.ProjectThreads = snapshot.ProjectThreads;
             settings.ComposerAttachmentDrafts = snapshot.ComposerAttachmentDrafts;
+            settings.LastSelectedProjectPath = snapshot.LastSelectedProjectPath;
             if (wasSelected)
             {
                 SelectedProjectPath = project.Path;
@@ -1216,6 +1248,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task SelectProjectAsync(string path)
     {
+        var authorization = await projectTrustService
+            .AuthorizeAsync(path, currentCodex)
+            .ConfigureAwait(true);
+        if (!authorization.IsAuthorized)
+        {
+            StatusMessage = authorization.IsCanceled
+                ? "Project selection canceled"
+                : authorization.FailureMessage ?? "Project selection was denied";
+            return;
+        }
+
         CaptureAttachmentDraft(SelectedProjectPath, activeThreadId);
         CaptureReviewCommentDraft(SelectedProjectPath, activeThreadId);
         await settingsStore.SaveAsync(settings).ConfigureAwait(true);
@@ -1228,7 +1271,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             isRestoringAttachmentDraft = false;
         }
-        SelectedProjectPath = Path.GetFullPath(path);
+        SelectedProjectPath = authorization.NormalizedPath;
+        settings.LastSelectedProjectPath = authorization.NormalizedPath;
         activeThreadId = null;
         activeTurnId = null;
         activeThreadLoaded = false;
@@ -1266,6 +1310,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             CaptureAttachmentDraft(SelectedProjectPath, activeThreadId);
             CaptureReviewCommentDraft(SelectedProjectPath, activeThreadId);
             SelectedProjectPath = null;
+            settings.LastSelectedProjectPath = null;
             activeThreadId = null;
             activeTurnId = null;
             activeThreadLoaded = false;
@@ -3975,6 +4020,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             CaptureAttachmentDraft(SelectedProjectPath, activeThreadId);
             CaptureReviewCommentDraft(SelectedProjectPath, activeThreadId);
             SelectedProjectPath = null;
+            settings.LastSelectedProjectPath = null;
             activeThreadId = null;
             activeTurnId = null;
             activeThreadLoaded = false;

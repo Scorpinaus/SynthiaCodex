@@ -51,6 +51,8 @@ public sealed class AppSettings
 
     public bool IsDetailsPaneOpen { get; set; }
 
+    public string? LastSelectedProjectPath { get; set; }
+
     public List<RecentProject> RecentProjects { get; set; } = [];
 
     public List<PersistedProjectThread> ProjectThreads { get; set; } = [];

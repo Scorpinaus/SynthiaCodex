@@ -351,6 +351,7 @@ internal static class HunkGitOperationsTests
         public void ShowImagePreview(string path) { }
         public GeneratedImageEditSelection? SelectGeneratedImageEdit(string path) => null;
         public SynthiaCode.Core.Codex.AppServer.CodexReviewTarget? SelectCodeReviewTarget(GitReviewCatalog catalog) => null;
+        public ProjectTrustDecision PromptForProjectTrust(string projectPath) => ProjectTrustDecision.Cancel;
         public ProjectFolderEditSelection? EditProjectFolders(RecentProject project) => null;
         public void RevealInExplorer(string path) { }
     }

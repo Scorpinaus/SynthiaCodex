@@ -54,6 +54,18 @@ public interface ICodexConfigurationFeature
         CancellationToken cancellationToken = default);
 }
 
+public interface ICodexProjectTrustFeature
+{
+    Task<CodexProjectTrustLevel> ReadProjectTrustAsync(
+        string projectPath,
+        CancellationToken cancellationToken = default);
+
+    Task WriteProjectTrustAsync(
+        string projectPath,
+        CodexProjectTrustLevel trustLevel,
+        CancellationToken cancellationToken = default);
+}
+
 public interface ICodexGoalFeature
 {
     Task<CodexThreadGoal> SetThreadGoalAsync(

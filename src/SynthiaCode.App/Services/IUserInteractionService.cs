@@ -8,6 +8,13 @@ public sealed record ProjectFolderEditSelection(
     string PrimaryPath,
     IReadOnlyList<string> FolderPaths);
 
+public enum ProjectTrustDecision
+{
+    TrustProject,
+    OpenUntrusted,
+    Cancel
+}
+
 public interface IUserInteractionService
 {
     bool ConfirmDestructiveAction(string title, string message);
@@ -23,6 +30,8 @@ public interface IUserInteractionService
     GeneratedImageEditSelection? SelectGeneratedImageEdit(string path);
 
     CodexReviewTarget? SelectCodeReviewTarget(GitReviewCatalog catalog);
+
+    ProjectTrustDecision PromptForProjectTrust(string projectPath);
 
     ProjectFolderEditSelection? EditProjectFolders(RecentProject project);
 

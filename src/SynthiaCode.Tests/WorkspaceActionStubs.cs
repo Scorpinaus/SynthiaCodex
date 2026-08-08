@@ -163,6 +163,7 @@ internal static class WorkspaceActionStubs
         IAppLogger logger,
         IGeneralWorkspaceService generalWorkspaceService,
         IAttachmentStore? attachmentStore = null,
+        IProjectTrustService? projectTrustService = null,
         bool enableGoalMode = false)
     {
         var resolver = new WorkspaceAttachmentResolver();
@@ -191,9 +192,24 @@ internal static class WorkspaceActionStubs
             userInteractionService, themeService, codexCliUtilityRunner, terminalService, logger,
             workflow, lifecycle, persistence, turns, reviews, queue, gitService,
             new ProjectWorkspaceOperations(gitService, worktreeService, recentProjectService, generalWorkspaceService),
+            projectTrustService ?? new AllowAllProjectTrustService(),
             attachments,
             new SharedCodexConfigurationService(Path.Combine(Path.GetTempPath(), "synthiacode-tests-codex-home")),
             enableGoalMode: enableGoalMode);
+    }
+
+    private sealed class AllowAllProjectTrustService : IProjectTrustService
+    {
+        public Task<ProjectTrustAuthorizationResult> AuthorizeAsync(
+            string projectPath,
+            CodexInstallation installation,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return global::System.Threading.Tasks.Task.FromResult(ProjectTrustAuthorizationResult.Authorized(
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectPath)),
+                CodexProjectTrustLevel.Trusted));
+        }
     }
 
     public static TaskConversationActionStub Task(

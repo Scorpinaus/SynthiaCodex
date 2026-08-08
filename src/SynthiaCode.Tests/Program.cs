@@ -136,6 +136,7 @@ internal static class LegacyBehavioralTests
         .. AttachmentInputTests.All,
         .. ApprovalProtocolTests.All,
         .. PermissionModeTests.All,
+        .. ProjectTrustTests.All,
         .. ApprovalPresentationTests.All,
         .. AccountFeatureTests.All,
         .. ContextWindowIndicatorTests.All,
@@ -3614,6 +3615,10 @@ internal sealed class FakeUserInteractionService : IUserInteractionService
     public CodexReviewTarget? ReviewTargetSelection { get; set; } =
         CodexReviewTarget.UncommittedChanges();
 
+    public ProjectTrustDecision TrustDecision { get; set; } = ProjectTrustDecision.Cancel;
+
+    public List<string> ProjectTrustPromptPaths { get; } = [];
+
     public bool ConfirmDestructiveAction(string title, string message) => true;
 
     public string? PromptForText(string title, string message, string initialValue) => null;
@@ -3638,6 +3643,12 @@ internal sealed class FakeUserInteractionService : IUserInteractionService
 
     public CodexReviewTarget? SelectCodeReviewTarget(GitReviewCatalog catalog) =>
         ReviewTargetSelection;
+
+    public ProjectTrustDecision PromptForProjectTrust(string projectPath)
+    {
+        ProjectTrustPromptPaths.Add(projectPath);
+        return TrustDecision;
+    }
 
     public ProjectFolderEditSelection? EditProjectFolders(RecentProject project) =>
         ProjectFolderSelection;

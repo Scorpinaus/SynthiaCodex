@@ -113,6 +113,103 @@ public sealed class WpfUserInteractionService : IUserInteractionService
         return dialog.ShowDialog() == true ? input.Text.Trim() : null;
     }
 
+    public ProjectTrustDecision PromptForProjectTrust(string projectPath)
+    {
+        var decision = ProjectTrustDecision.Cancel;
+        var trust = new Button
+        {
+            Content = "Trust project",
+            IsDefault = true,
+            MinWidth = 112,
+            Margin = new Thickness(0, 0, 8, 0)
+        };
+        var openUntrusted = new Button
+        {
+            Content = "Open untrusted",
+            MinWidth = 120,
+            Margin = new Thickness(0, 0, 8, 0)
+        };
+        var cancel = new Button
+        {
+            Content = "Cancel",
+            IsCancel = true,
+            MinWidth = 80
+        };
+        AutomationProperties.SetName(trust, "Trust project");
+        AutomationProperties.SetName(openUntrusted, "Open untrusted");
+
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 20, 0, 0)
+        };
+        actions.Children.Add(trust);
+        actions.Children.Add(openUntrusted);
+        actions.Children.Add(cancel);
+
+        var content = new StackPanel
+        {
+            Margin = new Thickness(22),
+            MaxWidth = 560
+        };
+        content.Children.Add(new TextBlock
+        {
+            Text = "Project-scoped Codex configuration, rules, hooks, and credentials can affect how Codex runs. Only trust projects whose contents you know.",
+            TextWrapping = TextWrapping.Wrap
+        });
+        content.Children.Add(new TextBlock
+        {
+            Text = projectPath,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 14, 0, 0)
+        });
+        content.Children.Add(new TextBlock
+        {
+            Text = "Open untrusted skips project-local Codex configuration, hooks, and rules.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 14, 0, 0)
+        });
+        content.Children.Add(actions);
+
+        var dialog = new Window
+        {
+            Title = "Trust this project?",
+            Content = content,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+        dialog.SetResourceReference(Window.BackgroundProperty, "PanelBrush");
+        dialog.SetResourceReference(Window.ForegroundProperty, "InkBrush");
+        trust.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
+        openUntrusted.SetResourceReference(FrameworkElement.StyleProperty, "CompactButton");
+        cancel.SetResourceReference(FrameworkElement.StyleProperty, "CompactButton");
+        if (System.Windows.Application.Current?.MainWindow is { IsVisible: true } owner)
+        {
+            dialog.Owner = owner;
+        }
+        else
+        {
+            dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        }
+
+        trust.Click += (_, _) =>
+        {
+            decision = ProjectTrustDecision.TrustProject;
+            dialog.DialogResult = true;
+        };
+        openUntrusted.Click += (_, _) =>
+        {
+            decision = ProjectTrustDecision.OpenUntrusted;
+            dialog.DialogResult = true;
+        };
+
+        dialog.ShowDialog();
+        return decision;
+    }
+
     public void OpenInEditor(string path)
     {
         var target = File.Exists(path) || Directory.Exists(path)

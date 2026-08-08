@@ -568,6 +568,8 @@ internal static class ThreadRenameTests
 
         public CodexReviewTarget? SelectCodeReviewTarget(GitReviewCatalog catalog) => null;
 
+        public ProjectTrustDecision PromptForProjectTrust(string projectPath) => ProjectTrustDecision.Cancel;
+
         public ProjectFolderEditSelection? EditProjectFolders(RecentProject project) => null;
 
         public void RevealInExplorer(string path)

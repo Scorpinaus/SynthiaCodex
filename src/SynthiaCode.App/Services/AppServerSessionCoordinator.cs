@@ -45,6 +45,11 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
 
     public AppServerNotificationBatchMetrics NotificationMetrics => notificationBatcher.Metrics;
 
+    public Task EnsureProjectTrustSessionConnectedAsync(
+        CodexInstallation installation,
+        CancellationToken cancellationToken = default) =>
+        EnsureConnectedAsync(installation, cancellationToken);
+
     public async Task EnsureConnectedAsync(CodexInstallation installation, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
@@ -232,6 +237,30 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
             .ConfigureAwait(false);
         EnsureCurrentClient(configurationClient, "Configuration was returned by a stale app-server connection.");
         return result;
+    }
+
+    public async Task<CodexProjectTrustLevel> ReadProjectTrustAsync(
+        string projectPath,
+        CancellationToken cancellationToken = default)
+    {
+        var configurationClient = GetConnectedClient();
+        var result = await configurationClient
+            .ReadProjectTrustAsync(projectPath, cancellationToken)
+            .ConfigureAwait(false);
+        EnsureCurrentClient(configurationClient, "Project trust was returned by a stale app-server connection.");
+        return result;
+    }
+
+    public async Task WriteProjectTrustAsync(
+        string projectPath,
+        CodexProjectTrustLevel trustLevel,
+        CancellationToken cancellationToken = default)
+    {
+        var configurationClient = GetConnectedClient();
+        await configurationClient
+            .WriteProjectTrustAsync(projectPath, trustLevel, cancellationToken)
+            .ConfigureAwait(false);
+        EnsureCurrentClient(configurationClient, "Project trust was written by a stale app-server connection.");
     }
 
     public async Task RespondToServerRequestAsync(

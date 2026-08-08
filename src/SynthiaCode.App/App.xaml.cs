@@ -51,6 +51,7 @@ public partial class App : System.Windows.Application
             services.FollowUpQueueService,
             services.GitService,
             services.ProjectWorkspaceOperations,
+            services.ProjectTrustService,
             services.AttachmentDraftService,
             services.SharedCodexConfigurationService,
             services.SpeechRecognitionService);

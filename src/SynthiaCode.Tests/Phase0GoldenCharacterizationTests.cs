@@ -136,7 +136,6 @@ public sealed class Phase0GoldenCharacterizationTests
             new HarnessOperations(harnessRuntime),
             conversations,
             settingsStore,
-            threadWorkspace,
             queues);
         const string threadId = "thread-queue-golden";
         var state = new ProjectThreadState
@@ -164,20 +163,23 @@ public sealed class Phase0GoldenCharacterizationTests
                 new QueuedTurnOptionsSnapshot { WorkspacePath = temp.Root, WorkspaceRoots = [temp.Root] },
                 [],
                 []));
+            var queued = Assert.Single(queue.GetSnapshots(threadId));
             var dispatchTask = queue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
                 settingsStore.SavedSettings,
                 threadId,
-                (item, _) => Task.FromResult(new PreparedHarnessTurn(
-                    new HarnessConnectionOptions(temp.Root),
-                    new StartTurnCommand(
-                        new ConversationAddress(new ConversationId(state.ConversationId), HarnessId.Codex, threadId),
-                        [new TextContentPart(item.Text)],
-                        temp.Root,
-                        new HarnessTurnOptions(ExecutionPolicy: new HarnessExecutionPolicy(
-                            WorkspaceAccessMode.WorkspaceWrite,
-                            ApprovalInteractionMode.Prompt,
-                            ":workspace")),
-                        [temp.Root])))));
+                FollowUpDispatchPreparation.Ready(
+                    queued.Id,
+                    new PreparedHarnessTurn(
+                        new HarnessConnectionOptions(temp.Root),
+                        new StartTurnCommand(
+                            new ConversationAddress(new ConversationId(state.ConversationId), HarnessId.Codex, threadId),
+                            [new TextContentPart(queued.Text)],
+                            temp.Root,
+                            new HarnessTurnOptions(ExecutionPolicy: new HarnessExecutionPolicy(
+                                WorkspaceAccessMode.WorkspaceWrite,
+                                ApprovalInteractionMode.Prompt,
+                                ":workspace")),
+                            [temp.Root])))));
             var request = await WaitForRequestAsync(transport, "turn/start");
             transport.ServerSend(
                 $"{{\"id\":{request["id"]!.ToJsonString()},\"result\":{{\"turn\":{{\"id\":\"turn-queue-golden\"}}}}}}");

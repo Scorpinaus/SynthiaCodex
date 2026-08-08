@@ -1,3 +1,4 @@
+using SynthiaCode.Application.Conversations;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Harnesses.Codex;
 
@@ -9,7 +10,7 @@ namespace SynthiaCode.App.Services;
 /// </summary>
 public sealed class CodeReviewUseCaseService(
     ICodexReviewFeature reviewFeature,
-    ConversationWorkflowController conversations)
+    IConversationWorkspace conversations)
 {
     public async Task<CodeReviewExecutionResult> StartAsync(
         CodeReviewExecutionRequest request,
@@ -22,8 +23,10 @@ public sealed class CodeReviewUseCaseService(
         }
         ArgumentNullException.ThrowIfNull(request.Target);
 
-        conversations.BeginTurn(request.ThreadId, request.Target.DisplayLabel);
-        request.PendingStarted?.Invoke(conversations.GetSnapshot(request.ThreadId));
+        conversations.BeginTurn(
+            request.ThreadId,
+            request.Target.DisplayLabel,
+            operation: ConversationOperationKind.CodeReview);
         try
         {
             var started = await reviewFeature.StartReviewAsync(
@@ -54,7 +57,6 @@ public sealed class CodeReviewUseCaseService(
                 started.TurnId,
                 bound.Status,
                 conversations.GetSnapshot(request.ThreadId));
-            request.ReviewStarted?.Invoke(result);
             return result;
         }
         catch (Exception ex)
@@ -68,9 +70,7 @@ public sealed class CodeReviewUseCaseService(
 
 public sealed record CodeReviewExecutionRequest(
     string ThreadId,
-    CodexReviewTarget Target,
-    Action<ConversationWorkspaceSnapshot>? PendingStarted = null,
-    Action<CodeReviewExecutionResult>? ReviewStarted = null);
+    CodexReviewTarget Target);
 
 public sealed record CodeReviewExecutionResult(
     string ThreadId,

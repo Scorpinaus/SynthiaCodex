@@ -171,16 +171,16 @@ internal static class WorkspaceActionStubs
             new CodexHarness(codexDiscoveryService, appServerSessionCoordinator)
         ]));
         var harnessOperations = new HarnessOperations(harnessRuntime);
-        var lifecycle = new ThreadLifecycleUseCaseService(
-            harnessOperations, gitService, worktreeService, threadStore, threadWorkspace, settingsStore);
-        var persistence = new ThreadStatePersistenceUseCaseService(settingsStore, threadStore, threadWorkspace);
         var queues = new CodexFollowUpQueueWorkspace();
-        var workflow = new ConversationWorkflowController(threadStore, threadWorkspace, queues);
-        var turns = new TurnExecutionUseCaseService(
-            harnessOperations, workflow, lifecycle, persistence);
-        var reviews = new CodeReviewUseCaseService(appServerSessionCoordinator, workflow);
-        var queue = new FollowUpQueueUseCaseService(
-            harnessOperations, workflow, settingsStore, threadWorkspace, queues);
+        var conversations = new ConversationFeatureFacade(
+            harnessOperations,
+            gitService,
+            worktreeService,
+            settingsStore,
+            threadStore,
+            threadWorkspace,
+            queues);
+        var reviews = new CodeReviewUseCaseService(appServerSessionCoordinator, conversations.Workspace);
         var attachments = new AttachmentDraftOrchestrationService(
             attachmentStore,
             resolver,
@@ -190,7 +190,7 @@ internal static class WorkspaceActionStubs
             settingsStore, codexDiscoveryService, appServerSessionCoordinator, harnessRuntime,
             authService, folderPicker,
             userInteractionService, themeService, codexCliUtilityRunner, terminalService, logger,
-            workflow, lifecycle, persistence, turns, reviews, queue, gitService,
+            conversations, reviews, gitService,
             new ProjectWorkspaceOperations(gitService, worktreeService, recentProjectService, generalWorkspaceService),
             projectTrustService ?? new AllowAllProjectTrustService(),
             attachments,

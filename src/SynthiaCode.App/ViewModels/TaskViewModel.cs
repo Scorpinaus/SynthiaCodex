@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows.Input;
 using SynthiaCode.App.Services;
+using SynthiaCode.Application.Conversations;
 using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Codex.AppServer;
 

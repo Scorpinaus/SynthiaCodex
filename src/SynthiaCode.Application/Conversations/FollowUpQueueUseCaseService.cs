@@ -6,7 +6,7 @@ using SynthiaCode.Core.Git;
 using SynthiaCode.Core.Harnesses;
 using SynthiaCode.Core.Settings;
 
-namespace SynthiaCode.App.Services;
+namespace SynthiaCode.Application.Conversations;
 
 /// <summary>
 /// Owns queued follow-up mutation, durable snapshots, steering, and serialized dispatch.
@@ -17,7 +17,6 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
     private readonly IHarnessOperations harnesses;
     private readonly ConversationWorkflowController conversations;
     private readonly ISettingsStore settingsStore;
-    private readonly CodexThreadWorkspace threadWorkspace;
     private readonly CodexFollowUpQueueWorkspace queues;
     private readonly object dispatchSync = new();
     private readonly Dictionary<string, FollowUpDispatchOperation> dispatchOperations = new(StringComparer.Ordinal);
@@ -28,13 +27,11 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
         IHarnessOperations harnesses,
         ConversationWorkflowController conversations,
         ISettingsStore settingsStore,
-        CodexThreadWorkspace threadWorkspace,
         CodexFollowUpQueueWorkspace queues)
     {
         this.harnesses = harnesses;
         this.conversations = conversations;
         this.settingsStore = settingsStore;
-        this.threadWorkspace = threadWorkspace;
         this.queues = queues;
     }
 
@@ -308,13 +305,13 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
                 conversations.IsRunning(request.ThreadId) ||
                 !queues.ThreadIds.Contains(request.ThreadId) ||
                 queues.GetRequired(request.ThreadId).Items.FirstOrDefault() is not
-                    { State: QueuedFollowUpState.Pending } item)
+                    { State: QueuedFollowUpState.Pending } item ||
+                !string.Equals(item.Id, request.Preparation.FollowUpId, StringComparison.Ordinal))
             {
                 return QueuedFollowUpDispatchResult.NotStarted;
             }
 
             var queue = queues.GetRequired(request.ThreadId);
-            var service = threadWorkspace.GetRequired(request.ThreadId);
             var snapshot = item.Snapshot();
             var originalIndex = queue.IndexOf(item.Id);
             queue.MarkStarting(snapshot.Id);
@@ -348,12 +345,19 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
                     string.Equals(thread.ThreadId, request.ThreadId, StringComparison.Ordinal))
                     ?? throw new InvalidOperationException(
                         $"Thread '{request.ThreadId}' is no longer available.");
-                var prepared = await request.PrepareStartRequest(
-                    snapshot.Clone(),
-                    cancellationToken).ConfigureAwait(false);
+                if (!request.Preparation.IsReady)
+                {
+                    throw new InvalidOperationException(
+                        request.Preparation.ErrorMessage ?? "The queued follow-up could not be prepared.");
+                }
+                var prepared = request.Preparation.Turn!;
                 cancellationToken.ThrowIfCancellationRequested();
                 var effectivePrompt = prepared.UserPrompt ?? snapshot.Text;
-                service.BeginTurn(effectivePrompt, snapshot.Attachments);
+                conversations.BeginTurn(
+                    request.ThreadId,
+                    effectivePrompt,
+                    snapshot.Attachments,
+                    ConversationOperationKind.QueuedFollowUp);
                 persistedThread.Preview = string.IsNullOrWhiteSpace(snapshot.Text)
                     ? snapshot.ReviewComments.Count == 1 ? "1 inline review comment" : $"{snapshot.ReviewComments.Count} inline review comments"
                     : snapshot.Text;
@@ -361,8 +365,8 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
                     prepared.ConnectionOptions,
                     prepared.Command,
                     cancellationToken).ConfigureAwait(false);
-                var bound = service.BindPendingTurn(started.RemoteTurnId);
-                threadWorkspace.RegisterTurn(request.ThreadId, started.RemoteTurnId);
+                var bound = conversations.BindPendingTurn(request.ThreadId, started.RemoteTurnId);
+                conversations.RegisterTurn(request.ThreadId, started.RemoteTurnId);
                 conversations.RegisterTurnStarted(request.ThreadId, started.RemoteTurnId, bound.Status);
 
                 try
@@ -405,7 +409,7 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
             }
             catch (OperationCanceledException)
             {
-                service.FailPendingTurn("Queued follow-up start was cancelled.");
+                conversations.FailPendingTurn(request.ThreadId, "Queued follow-up start was cancelled.");
                 return await MarkNeedsAttentionAndPersistAsync(
                     request,
                     queue,
@@ -417,7 +421,7 @@ public sealed class FollowUpQueueUseCaseService : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                service.FailPendingTurn(ex.Message);
+                conversations.FailPendingTurn(request.ThreadId, ex.Message);
                 return await MarkNeedsAttentionAndPersistAsync(
                     request,
                     queue,
@@ -514,7 +518,21 @@ public sealed record FollowUpEnqueueUseCaseRequest(
 public sealed record FollowUpDispatchUseCaseRequest(
     AppSettings Settings,
     string ThreadId,
-    Func<QueuedFollowUpSnapshot, CancellationToken, Task<PreparedHarnessTurn>> PrepareStartRequest);
+    FollowUpDispatchPreparation Preparation);
+
+public sealed record FollowUpDispatchPreparation(
+    string FollowUpId,
+    PreparedHarnessTurn? Turn,
+    string? ErrorMessage)
+{
+    public bool IsReady => Turn is not null && string.IsNullOrWhiteSpace(ErrorMessage);
+
+    public static FollowUpDispatchPreparation Ready(string followUpId, PreparedHarnessTurn turn) =>
+        new(followUpId, turn, null);
+
+    public static FollowUpDispatchPreparation Failed(string followUpId, string errorMessage) =>
+        new(followUpId, null, errorMessage);
+}
 
 public sealed record PreparedHarnessTurn(
     HarnessConnectionOptions ConnectionOptions,

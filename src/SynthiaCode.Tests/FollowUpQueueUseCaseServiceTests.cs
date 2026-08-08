@@ -46,20 +46,17 @@ public sealed class FollowUpQueueUseCaseServiceTests
             new QueuedTurnOptionsSnapshot { WorkspacePath = Path.GetTempPath() },
             [],
             []));
-        var prepareCalls = 0;
+        var queued = Assert.Single(context.Queue.GetSnapshots(context.ThreadId));
 
         var result = await context.Queue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
             context.Settings,
             context.ThreadId,
-            (item, _) =>
-            {
-                prepareCalls++;
-                return Task.FromResult(CreatePreparedTurn(context.ThreadId, item));
-            }));
+            FollowUpDispatchPreparation.Ready(
+                queued.Id,
+                CreatePreparedTurn(context.ThreadId, queued))));
 
         Assert.True(result.Dispatch.Attempted);
         Assert.False(result.Dispatch.RemoteTurnStarted);
-        Assert.Equal(0, prepareCalls);
         Assert.Equal(QueuedFollowUpState.NeedsAttention, context.Queue.GetSnapshots(context.ThreadId).Single().State);
         Assert.DoesNotContain(transport.ClientMessages, message =>
             string.Equals(JsonNode.Parse(message)?["method"]?.GetValue<string>(), "turn/start", StringComparison.Ordinal));
@@ -81,11 +78,14 @@ public sealed class FollowUpQueueUseCaseServiceTests
             new QueuedTurnOptionsSnapshot { WorkspacePath = Path.GetTempPath() },
             [],
             []));
+        var queued = Assert.Single(context.Queue.GetSnapshots(context.ThreadId));
 
         var dispatch = context.Queue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
             context.Settings,
             context.ThreadId,
-            (item, _) => Task.FromResult(CreatePreparedTurn(context.ThreadId, item))));
+            FollowUpDispatchPreparation.Ready(
+                queued.Id,
+                CreatePreparedTurn(context.ThreadId, queued))));
         var request = await WaitForRequestAsync(transport, "turn/start");
         transport.ServerSend($"{{\"id\":{request["id"]!.ToJsonString()},\"result\":{{\"turn\":{{\"id\":\"turn-queue\"}}}}}}");
 
@@ -123,24 +123,27 @@ public sealed class FollowUpQueueUseCaseServiceTests
             [],
             [],
             [comment]));
+        var queued = Assert.Single(context.Queue.GetSnapshots(context.ThreadId));
         var effectivePrompt = GitInlineCommentPromptFormatter.AppendToPrompt(string.Empty, [comment]);
 
         var dispatch = context.Queue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
             context.Settings,
             context.ThreadId,
-            (item, _) => Task.FromResult(new PreparedHarnessTurn(
-                new HarnessConnectionOptions(item.Options.WorkspacePath),
-                new StartTurnCommand(
-                    new ConversationAddress(
-                        new ConversationId(AppSettingsHarnessMigration.CreateDeterministicConversationId(
-                            KnownHarnessIds.Codex,
-                            context.ThreadId)),
-                        HarnessId.Codex,
-                        context.ThreadId),
-                    [new TextContentPart(effectivePrompt)],
-                    item.Options.WorkspacePath,
-                    HarnessTurnOptions.Default),
-                effectivePrompt))));
+            FollowUpDispatchPreparation.Ready(
+                queued.Id,
+                new PreparedHarnessTurn(
+                    new HarnessConnectionOptions(queued.Options.WorkspacePath),
+                    new StartTurnCommand(
+                        new ConversationAddress(
+                            new ConversationId(AppSettingsHarnessMigration.CreateDeterministicConversationId(
+                                KnownHarnessIds.Codex,
+                                context.ThreadId)),
+                            HarnessId.Codex,
+                            context.ThreadId),
+                        [new TextContentPart(effectivePrompt)],
+                        queued.Options.WorkspacePath,
+                        HarnessTurnOptions.Default),
+                    effectivePrompt))));
         var request = await WaitForRequestAsync(transport, "turn/start");
         transport.ServerSend($"{{\"id\":{request["id"]!.ToJsonString()},\"result\":{{\"turn\":{{\"id\":\"turn-inline-comment\"}}}}}}");
 
@@ -156,7 +159,7 @@ public sealed class FollowUpQueueUseCaseServiceTests
     }
 
     [Fact]
-    public async Task Dispatch_awaits_preflight_immediately_before_harness_start()
+    public async Task Dispatch_rejects_a_stale_preparation_before_harness_start()
     {
         await using var transport = new FakeAppServerTransport();
         var context = CreateContext(transport, new FakeSettingsStore(), "queue-preflight-order");
@@ -168,31 +171,19 @@ public sealed class FollowUpQueueUseCaseServiceTests
             new QueuedTurnOptionsSnapshot { WorkspacePath = Path.GetTempPath() },
             [],
             []));
-        var calls = new List<string>();
-        var releasePreflight = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var queued = Assert.Single(context.Queue.GetSnapshots(context.ThreadId));
 
-        var dispatch = context.Queue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
+        var result = await context.Queue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
             context.Settings,
             context.ThreadId,
-            async (item, cancellationToken) =>
-            {
-                calls.Add("preflight");
-                await releasePreflight.Task.WaitAsync(cancellationToken);
-                return CreatePreparedTurn(context.ThreadId, item);
-            }));
+            FollowUpDispatchPreparation.Ready(
+                "stale-follow-up-id",
+                CreatePreparedTurn(context.ThreadId, queued))));
 
-        await WaitUntilAsync(() => calls.Count == 1);
-        Assert.Equal(["preflight"], calls);
+        Assert.False(result.Dispatch.Attempted);
+        Assert.Single(context.Queue.GetSnapshots(context.ThreadId));
         Assert.DoesNotContain(transport.ClientMessages, message =>
             string.Equals(JsonNode.Parse(message)?["method"]?.GetValue<string>(), "turn/start", StringComparison.Ordinal));
-
-        releasePreflight.SetResult();
-        var request = await WaitForRequestAsync(transport, "turn/start");
-        Assert.Equal(["preflight"], calls);
-        transport.ServerSend($"{{\"id\":{request["id"]!.ToJsonString()},\"result\":{{\"turn\":{{\"id\":\"turn-preflight\"}}}}}}");
-
-        var result = await dispatch;
-        Assert.True(result.Dispatch.RemoteTurnStarted);
         await context.Queue.DisposeAsync();
         await context.HarnessRuntime.DisposeAsync();
         await context.Coordinator.DisposeAsync();
@@ -224,7 +215,6 @@ public sealed class FollowUpQueueUseCaseServiceTests
             new HarnessOperations(harnessRuntime),
             conversations,
             settingsStore,
-            workspace,
             queues);
         var settings = new AppSettings();
         var state = new ProjectThreadState

@@ -7,7 +7,7 @@ using SynthiaCode.Core.Settings;
 using SynthiaCode.Core.Worktrees;
 using System.IO;
 
-namespace SynthiaCode.App.Services;
+namespace SynthiaCode.Application.Conversations;
 
 /// <summary>
 /// Application use cases that change durable harness-conversation lifecycle state. It has no
@@ -607,3 +607,4 @@ public sealed record ThreadActivationUseCaseResult(
     public static ThreadActivationUseCaseResult Replaced(string threadId, Exception resumeError) =>
         new(threadId, true, [], resumeError);
 }
+

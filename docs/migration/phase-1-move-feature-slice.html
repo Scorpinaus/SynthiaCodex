@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>SynthiaCode Migration - Phase 1: Move One Complete Feature Slice</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f3f5f1;
+      --surface: #fffef9;
+      --surface-strong: #ffffff;
+      --ink: #18221e;
+      --muted: #5c6862;
+      --line: #d5dbd5;
+      --accent: #285f8f;
+      --accent-soft: #dfedf8;
+      --success: #257144;
+      --success-soft: #e0f3e6;
+      --warning: #98600d;
+      --warning-soft: #fff0d2;
+      --danger: #9c3832;
+      --code: #edf1ed;
+      --shadow: 0 18px 50px rgb(30 48 38 / 10%);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #101512;
+        --surface: #171e1a;
+        --surface-strong: #1d2721;
+        --ink: #e8eee9;
+        --muted: #a9b5ae;
+        --line: #354139;
+        --accent: #8bc7fa;
+        --accent-soft: #17344d;
+        --success: #83dba5;
+        --success-soft: #173823;
+        --warning: #ffc66d;
+        --warning-soft: #402d10;
+        --danger: #ff9f97;
+        --code: #111914;
+        --shadow: 0 18px 50px rgb(0 0 0 / 28%);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 30rem),
+        var(--page);
+      color: var(--ink);
+      font: 16px/1.65 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: var(--accent); text-underline-offset: 0.18em; }
+    code {
+      padding: 0.12rem 0.34rem;
+      border-radius: 0.32rem;
+      background: var(--code);
+      font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+      font-size: 0.9em;
+    }
+    h1, h2, h3 { line-height: 1.14; text-wrap: balance; }
+    h1 { max-width: 860px; margin: 0; font-size: clamp(2.35rem, 6.6vw, 5.1rem); letter-spacing: -0.055em; }
+    h2 { margin: 0 0 1rem; font-size: clamp(1.65rem, 4vw, 2.45rem); letter-spacing: -0.035em; }
+    h3 { margin: 0 0 0.55rem; font-size: 1.06rem; }
+    p { text-wrap: pretty; }
+    .shell { width: min(1140px, calc(100% - 2rem)); margin: 0 auto; }
+    .hero { padding: clamp(3.5rem, 8vw, 6.7rem) 0 2.6rem; }
+    .eyebrow {
+      margin: 0 0 0.7rem;
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 850;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .lede { max-width: 780px; margin: 1.25rem 0 0; color: var(--muted); font-size: clamp(1.04rem, 2vw, 1.24rem); }
+    .meta, .phase-links { display: flex; flex-wrap: wrap; gap: 0.65rem; margin-top: 1.45rem; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 2rem;
+      padding: 0.25rem 0.78rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--surface) 88%, transparent);
+      color: var(--muted);
+      font-size: 0.86rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .pill.success { border-color: color-mix(in srgb, var(--success) 38%, var(--line)); background: var(--success-soft); color: var(--success); }
+    .scoreboard { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.9rem; margin: 1rem 0 4rem; }
+    .score, .card, .check, .flow-node {
+      border: 1px solid var(--line);
+      border-radius: 0.95rem;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .score { padding: 1.2rem; }
+    .score strong { display: block; font-size: clamp(1.5rem, 3.5vw, 2.4rem); line-height: 1; letter-spacing: -0.04em; }
+    .score span { display: block; margin-top: 0.55rem; color: var(--muted); font-size: 0.87rem; }
+    .layout { display: grid; grid-template-columns: 225px minmax(0, 1fr); gap: clamp(2rem, 6vw, 5rem); }
+    nav { position: sticky; top: 1rem; align-self: start; padding: 1rem; border-left: 2px solid var(--line); }
+    nav strong { display: block; margin-bottom: 0.5rem; font-size: 0.76rem; letter-spacing: 0.09em; text-transform: uppercase; }
+    nav a { display: block; padding: 0.3rem 0; color: var(--muted); text-decoration: none; }
+    nav a:hover { color: var(--accent); }
+    main section { margin-bottom: 4.6rem; scroll-margin-top: 1.5rem; }
+    .section-intro { max-width: 760px; margin-top: -0.35rem; color: var(--muted); }
+    .checklist, .cards, .timeline { display: grid; gap: 0.85rem; margin-top: 1.3rem; }
+    .check { display: grid; grid-template-columns: 1.6rem 1fr; gap: 0.8rem; padding: 1rem 1.1rem; box-shadow: none; }
+    .check-mark { color: var(--success); font-weight: 900; }
+    .check p, .card p, .timeline p { margin: 0.25rem 0 0; color: var(--muted); }
+    .card { padding: 1.18rem; box-shadow: none; }
+    .card.application { border-left: 4px solid var(--accent); }
+    .card.guard { border-left: 4px solid var(--success); }
+    .card.lesson { border-left: 4px solid var(--warning); }
+    .tag {
+      display: inline-block;
+      margin-bottom: 0.5rem;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 850;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      align-items: stretch;
+      gap: 1.8rem;
+      margin-top: 1.4rem;
+    }
+    .flow-node { position: relative; min-height: 9rem; padding: 1rem; box-shadow: none; }
+    .flow-node:not(:last-child)::after {
+      content: "\2192";
+      position: absolute;
+      right: -1.45rem;
+      top: 50%;
+      color: var(--accent);
+      font-size: 1.45rem;
+      font-weight: 800;
+      transform: translateY(-50%);
+    }
+    .flow-node small { display: block; margin-bottom: 0.45rem; color: var(--accent); font-weight: 800; text-transform: uppercase; }
+    .flow-node p { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.9rem; }
+    .table-wrap { margin-top: 1.2rem; overflow-x: auto; border: 1px solid var(--line); border-radius: 0.9rem; }
+    table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: 0.92rem; }
+    th, td { padding: 0.9rem 1rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--surface-strong); color: var(--muted); font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .timeline { counter-reset: entry; }
+    .timeline article { position: relative; padding: 0 0 1.2rem 2.6rem; border-left: 2px solid var(--line); }
+    .timeline article::before {
+      counter-increment: entry;
+      content: counter(entry);
+      position: absolute;
+      left: -1.05rem;
+      top: -0.1rem;
+      display: grid;
+      width: 2rem;
+      height: 2rem;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--warning-soft);
+      color: var(--warning);
+      font-size: 0.78rem;
+      font-weight: 900;
+    }
+    .timeline article:last-child { padding-bottom: 0; }
+    .lesson-line { margin-top: 0.5rem !important; color: var(--ink) !important; }
+    .lesson-line strong { color: var(--warning); }
+    details { margin-top: 1rem; border: 1px solid var(--line); border-radius: 0.8rem; background: var(--surface); }
+    summary { cursor: pointer; padding: 0.85rem 1rem; font-weight: 780; }
+    pre { margin: 0; padding: 1rem; overflow: auto; border-top: 1px solid var(--line); background: var(--code); font-size: 0.84rem; }
+    footer { margin-top: 4rem; padding: 2rem 0 3rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.88rem; }
+    @media (max-width: 900px) {
+      .scoreboard, .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow-node::after { display: none; }
+    }
+    @media (max-width: 760px) {
+      .scoreboard, .flow, .layout { grid-template-columns: 1fr; }
+      nav { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-left: 0; border-top: 2px solid var(--line); }
+      nav strong { grid-column: 1 / -1; }
+    }
+    @media print {
+      body { background: white; color: black; }
+      nav { display: none; }
+      .layout { display: block; }
+      .score, .card, .check, .flow-node, table, details { box-shadow: none; break-inside: avoid; }
+      a { color: black; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero shell">
+    <p class="eyebrow">SynthiaCode architecture migration</p>
+    <h1>Phase 1: Move One Complete Feature Slice</h1>
+    <p class="lede">Conversation lifecycle, execution, persistence, queue orchestration, and runtime state now live together in Application behind one feature facade.</p>
+    <div class="meta">
+      <span class="pill success">&#10003; Complete</span>
+      <span class="pill"><time datetime="2026-08-08">8 August 2026</time></span>
+      <span class="pill">Release configuration</span>
+      <span class="pill">Behavior preserved</span>
+    </div>
+    <div class="phase-links" aria-label="Migration phases">
+      <a class="pill" href="phase-0-restore-confidence.html">&#8592; Phase 0 baseline</a>
+      <a class="pill" href="../current-architecture.md">Current architecture</a>
+    </div>
+  </header>
+
+  <div class="shell scoreboard" aria-label="Phase 1 results">
+    <div class="score"><strong>7</strong><span>Application conversation files</span></div>
+    <div class="score"><strong>1</strong><span>Facade injected into MainViewModel</span></div>
+    <div class="score"><strong>307/307</strong><span>Behavioral cases passed</span></div>
+    <div class="score"><strong>376/376</strong><span>Full Release gate passed</span></div>
+  </div>
+
+  <div class="shell layout">
+    <nav aria-label="On this page">
+      <strong>Phase 1 record</strong>
+      <a href="#objectives">Objectives</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#changes">Changes</a>
+      <a href="#contracts">Contracts</a>
+      <a href="#mistakes">Mistakes</a>
+      <a href="#lessons">Lessons</a>
+      <a href="#verification">Verification</a>
+      <a href="#files">Files</a>
+      <a href="#handoff">Handoff</a>
+    </nav>
+
+    <main>
+      <section id="objectives">
+        <p class="eyebrow">Committed scope</p>
+        <h2>Objectives completed</h2>
+        <div class="checklist">
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Move one complete slice</h3><p><code>ConversationWorkflowController</code>, turn execution, thread lifecycle, persistence, and queue orchestration moved from App into Application.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Establish one state owner</h3><p><code>IConversationWorkspace</code> is the contract for conversation identity, reduction, active-turn state, and detached snapshots.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Remove UI callbacks from requests</h3><p>Turn, queue-dispatch, and review requests use application events, immutable preparations, and returned results instead of presentation delegates.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Simplify MainViewModel composition</h3><p><code>MainViewModel</code> receives one <code>IConversationFeatureFacade</code> instead of five workflow services.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Preserve side features</h3><p>Codex goals, dedicated reviews, and skills remain App-side features while the portable conversation boundary settles.</p></div></div>
+        </div>
+      </section>
+
+      <section id="architecture">
+        <p class="eyebrow">New dependency direction</p>
+        <h2>The slice has one front door and one state owner</h2>
+        <p class="section-intro">Presentation still decides what to display. Application now decides how a conversation operation changes runtime state and what detached state crosses the boundary.</p>
+        <div class="flow" role="img" aria-label="WPF presentation calls the conversation facade, which composes use cases that update the conversation workspace and invoke harness and persistence ports.">
+          <div class="flow-node"><small>Presentation</small><strong>MainViewModel</strong><p>Validation, selection, UI projection, Codex side features.</p></div>
+          <div class="flow-node"><small>Application facade</small><strong>IConversationFeatureFacade</strong><p>Single injected boundary for the conversation feature.</p></div>
+          <div class="flow-node"><small>Application use cases</small><strong>Lifecycle, turns, queue, persistence</strong><p>Workflow ordering and durable transactions.</p></div>
+          <div class="flow-node"><small>State owner</small><strong>IConversationWorkspace</strong><p>Serialized reduction, runtime identity, terminal ordering, detached snapshots.</p></div>
+        </div>
+      </section>
+
+      <section id="changes">
+        <p class="eyebrow">Implementation</p>
+        <h2>What changed</h2>
+        <div class="cards">
+          <article class="card application">
+            <span class="tag">Application ownership</span>
+            <h3>A cohesive <code>Conversations</code> feature folder</h3>
+            <p>The controller and four use-case services moved physically and by namespace into <code>SynthiaCode.Application.Conversations</code>. Application builds independently without WPF or App references.</p>
+          </article>
+          <article class="card application">
+            <span class="tag">Facade</span>
+            <h3>Internal services are hidden from composition consumers</h3>
+            <p><code>ConversationFeatureFacade</code> constructs lifecycle, execution, persistence, and queue services, forwards workspace events, and owns queue disposal. <code>AppServices</code> exposes the facade rather than each service.</p>
+          </article>
+          <article class="card application">
+            <span class="tag">State ownership</span>
+            <h3>Conversation reduction is serialized</h3>
+            <p>The workspace gates runtime indexes and reducer snapshots together. A completion is recorded as terminal so a delayed <code>turn/start</code> continuation cannot mark that turn running again.</p>
+          </article>
+          <article class="card application">
+            <span class="tag">Queue integrity</span>
+            <h3>Dispatch preparation is data, not a callback</h3>
+            <p>The caller prepares a <code>FollowUpDispatchPreparation</code> once. Application verifies that its follow-up ID is still at the queue head before beginning a durable dispatch transaction, rejecting stale work before provider contact.</p>
+          </article>
+          <article class="card guard">
+            <span class="tag">Presentation</span>
+            <h3>Events replace timing-sensitive UI hooks</h3>
+            <p>Pending, failed, and started transitions carry detached snapshots and operation origin. The UI clears direct-turn attachments on the accepted pending transition without clearing queue, review, or prompt-edit drafts.</p>
+          </article>
+          <article class="card guard">
+            <span class="tag">Scope discipline</span>
+            <h3>Codex-only surfaces stayed separate</h3>
+            <p><code>CodeReviewUseCaseService</code> now consumes <code>IConversationWorkspace</code> but remains in App. Goals and skills were not pulled into the portable facade merely because they share a screen.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="contracts">
+        <p class="eyebrow">Boundary contracts</p>
+        <h2>Callbacks out, results and events in</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Before</th><th>After</th><th>Reason</th></tr></thead>
+            <tbody>
+              <tr><td><code>TurnExecutionRequest</code> carried pending/started UI callbacks.</td><td><code>TurnExecutionResult</code> plus workspace events.</td><td>Application owns state transitions; presentation observes them.</td></tr>
+              <tr><td>Queue dispatch accepted an asynchronous preparation delegate.</td><td><code>FollowUpDispatchPreparation</code> carries an ID-bound prepared turn or error.</td><td>The transaction validates identity and never invokes UI logic inside its lock.</td></tr>
+              <tr><td><code>CodeReviewExecutionRequest</code> carried pending/started callbacks.</td><td>Review returns a result and publishes workspace events through its shared owner.</td><td>The Codex side feature reuses conversation state without owning presentation behavior.</td></tr>
+              <tr><td><code>MainViewModel</code> received five workflow services.</td><td>It receives one <code>IConversationFeatureFacade</code>.</td><td>Constructor shape now reflects one feature slice, not its internal implementation.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="mistakes">
+        <p class="eyebrow">Honest migration log</p>
+        <h2>Mistakes and corrections</h2>
+        <div class="timeline">
+          <article>
+            <h3>The first move stopped at compile errors</h3>
+            <p><code>TaskViewModel</code> lacked the new namespace import, and ten tests still constructed the old queue/service shapes.</p>
+            <p class="lesson-line"><strong>Correction:</strong> treated compiler failures as a dependency inventory, rewired production first, then updated characterization fixtures without weakening assertions.</p>
+          </article>
+          <article>
+            <h3>An architecture assertion used the wrong xUnit shape</h3>
+            <p>The first reflection test used <code>Assert.Single(collection.Where(...))</code>, which triggered analyzer <code>xUnit2031</code> under warnings-as-errors.</p>
+            <p class="lesson-line"><strong>Correction:</strong> used the predicate overload so the architecture guard remains warning-free.</p>
+          </article>
+          <article>
+            <h3>Attachment cleanup was attached to the wrong event</h3>
+            <p>Clearing attachments only after the remote turn-start response delayed UI acknowledgment behind automatic rename and broke the captured-context characterization.</p>
+            <p class="lesson-line"><strong>Correction:</strong> clear only direct-turn attachments on the accepted pending transition; operation origin prevents queue, review, and edit drafts from being erased.</p>
+          </article>
+          <article>
+            <h3>Re-reading the latest snapshot did not fully solve fast completion</h3>
+            <p>A response and completion can resume on different continuations. The first fix reconciled returned state in <code>MainViewModel</code>, but a narrow window still allowed start registration after completion and concurrent snapshot enumeration.</p>
+            <p class="lesson-line"><strong>Correction:</strong> serialized reducer access in <code>IConversationWorkspace</code> and made terminal turn state monotonic. The rapid follow-up case then passed repeatedly and in the full suite.</p>
+          </article>
+          <article>
+            <h3>The architecture document had its phase label pinned by a release test</h3>
+            <p>The first full gate passed 375 tests and failed one metadata assertion because the document correctly said Phase 1 while the test still expected the old Phase 21 label.</p>
+            <p class="lesson-line"><strong>Correction:</strong> rebaselined the metadata contract to the explicit Architecture migration Phase 1 heading.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="lessons">
+        <p class="eyebrow">What carries forward</p>
+        <h2>Lessons for later slices</h2>
+        <div class="cards">
+          <article class="card lesson"><h3>A state owner must own serialization too</h3><p>Collecting methods behind an interface is insufficient if response continuations and provider events can reduce the same mutable state concurrently.</p></article>
+          <article class="card lesson"><h3>Events describe accepted transitions</h3><p>Presentation should react to an accepted pending/start/completion event, then reconcile long-running returned results with the current workspace rather than assuming the result is newest.</p></article>
+          <article class="card lesson"><h3>Identity belongs beside prepared work</h3><p>Queue preparation without the follow-up ID is vulnerable to head changes. Carrying identity lets Application reject stale work before external effects.</p></article>
+          <article class="card lesson"><h3>Move one vertical slice, not every adjacent feature</h3><p>Keeping goals, reviews, and skills as explicit side features reduced scope while still proving the facade and workspace pattern end to end.</p></article>
+        </div>
+      </section>
+
+      <section id="verification">
+        <p class="eyebrow">Evidence</p>
+        <h2>Verification gate</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Gate</th><th>Result</th></tr></thead>
+            <tbody>
+              <tr><td>Application standalone Release build</td><td>0 warnings, 0 errors</td></tr>
+              <tr><td>Phase 1 conversation-slice tests</td><td>4 / 4 passed</td></tr>
+              <tr><td>Rapid follow-up stress reruns</td><td>10 consecutive targeted runs passed after the terminal-ordering fix</td></tr>
+              <tr><td>Full behavioral suite</td><td>307 / 307 passed in 35 s</td></tr>
+              <tr><td>Authoritative full Release test gate</td><td>376 / 376 passed, 0 warnings</td></tr>
+              <tr><td>Patch hygiene</td><td><code>git diff --check</code> passed</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <details>
+          <summary>Authoritative command</summary>
+          <pre><code>dotnet test SynthiaCode.sln -c Release --no-restore
+
+Passed: 376  Failed: 0  Skipped: 0  Total: 376</code></pre>
+        </details>
+      </section>
+
+      <section id="files">
+        <p class="eyebrow">Change inventory</p>
+        <h2>Primary files</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Area</th><th>Files</th></tr></thead>
+            <tbody>
+              <tr><td>Application contracts</td><td><a href="../../src/SynthiaCode.Application/Conversations/IConversationWorkspace.cs"><code>IConversationWorkspace.cs</code></a>, <a href="../../src/SynthiaCode.Application/Conversations/ConversationFeatureFacade.cs"><code>ConversationFeatureFacade.cs</code></a></td></tr>
+              <tr><td>Application workflow</td><td><a href="../../src/SynthiaCode.Application/Conversations/ConversationWorkflowController.cs"><code>ConversationWorkflowController.cs</code></a>, <a href="../../src/SynthiaCode.Application/Conversations/TurnExecutionUseCaseService.cs"><code>TurnExecutionUseCaseService.cs</code></a>, <a href="../../src/SynthiaCode.Application/Conversations/ThreadLifecycleUseCaseService.cs"><code>ThreadLifecycleUseCaseService.cs</code></a>, <a href="../../src/SynthiaCode.Application/Conversations/ThreadStatePersistenceUseCaseService.cs"><code>ThreadStatePersistenceUseCaseService.cs</code></a>, <a href="../../src/SynthiaCode.Application/Conversations/FollowUpQueueUseCaseService.cs"><code>FollowUpQueueUseCaseService.cs</code></a></td></tr>
+              <tr><td>App composition</td><td><a href="../../src/SynthiaCode.App/AppServices.cs"><code>AppServices.cs</code></a>, <a href="../../src/SynthiaCode.App/App.xaml.cs"><code>App.xaml.cs</code></a>, <a href="../../src/SynthiaCode.App/ViewModels/MainViewModel.cs"><code>MainViewModel.cs</code></a>, <a href="../../src/SynthiaCode.App/Services/CodeReviewUseCaseService.cs"><code>CodeReviewUseCaseService.cs</code></a></td></tr>
+              <tr><td>Guards and characterization</td><td><a href="../../src/SynthiaCode.Tests/Phase1ConversationSliceTests.cs"><code>Phase1ConversationSliceTests.cs</code></a>, <a href="../../src/SynthiaCode.Tests/TurnExecutionUseCaseServiceTests.cs"><code>TurnExecutionUseCaseServiceTests.cs</code></a>, <a href="../../src/SynthiaCode.Tests/FollowUpQueueUseCaseServiceTests.cs"><code>FollowUpQueueUseCaseServiceTests.cs</code></a>, <a href="../../src/SynthiaCode.Tests/Phase0GoldenCharacterizationTests.cs"><code>Phase0GoldenCharacterizationTests.cs</code></a></td></tr>
+              <tr><td>Architecture record</td><td><a href="../current-architecture.md"><code>current-architecture.md</code></a>, this changelog</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="handoff">
+        <p class="eyebrow">Phase boundary</p>
+        <h2>What Phase 1 deliberately did not absorb</h2>
+        <p class="section-intro">Provider-specific goals, dedicated review semantics, skills, account state, permissions, and effective configuration remain outside the portable conversation facade. The next phase can extract or redesign another complete slice while using this phase's facade, state-owner, event, and terminal-ordering rules as the reference.</p>
+        <div class="card guard">
+          <h3>Stable handoff</h3>
+          <p>The architecture boundary is now executable: one facade enters the conversation feature, one workspace owns its mutable runtime state, and callback-free requests keep presentation behavior out of Application transactions.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer>
+    <div class="shell">SynthiaCode migration record &middot; Phase 1 &middot; Generated from verified repository state on <time datetime="2026-08-08">8 August 2026</time>.</div>
+  </footer>
+</body>
+</html>

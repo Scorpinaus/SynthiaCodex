@@ -45,8 +45,15 @@ public sealed class TurnExecutionUseCaseServiceTests
             new ThreadInstructionSnapshot(null, null),
             IsTitlePlaceholder: true));
         conversations.MarkLoaded("thread-turn");
-        var startedPublished = new TaskCompletionSource<TurnExecutionResult>(
+        var startedPublished = new TaskCompletionSource<ConversationWorkspaceChangedEvent>(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        conversations.Changed += (_, change) =>
+        {
+            if (change.Kind == ConversationWorkspaceChangeKind.TurnStarted)
+            {
+                startedPublished.TrySetResult(change);
+            }
+        };
 
         var execution = turns.StartAsync(new TurnExecutionRequest(
             settings,
@@ -60,13 +67,12 @@ public sealed class TurnExecutionUseCaseServiceTests
                 [new TextContentPart("First real prompt")],
                 Path.GetTempPath(),
                 HarnessTurnOptions.Default),
-            "First real prompt",
-            TurnStarted: result => startedPublished.TrySetResult(result)));
+            "First real prompt"));
         var turnRequest = await WaitForRequestAsync(transport, "turn/start");
         transport.ServerSend($"{{\"id\":{turnRequest["id"]!.ToJsonString()},\"result\":{{\"turn\":{{\"id\":\"turn-1\"}}}}}}");
 
         var published = await startedPublished.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        Assert.Equal(CodexTurnStatus.Running, published.Status);
+        Assert.Equal(CodexTurnStatus.Running, published.TurnStatus);
         Assert.True(conversations.IsRunning("thread-turn"));
         var renameRequest = await WaitForRequestAsync(transport, "thread/name/set");
         Assert.False(execution.IsCompleted);

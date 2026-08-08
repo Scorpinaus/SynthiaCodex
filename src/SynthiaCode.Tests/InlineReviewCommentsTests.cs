@@ -228,7 +228,12 @@ internal static class InlineReviewCommentsTests
     {
         var root = FindRepositoryRoot();
         var main = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "ViewModels", "MainViewModel.cs"));
-        var queue = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Services", "FollowUpQueueUseCaseService.cs"));
+        var queue = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "SynthiaCode.Application",
+            "Conversations",
+            "FollowUpQueueUseCaseService.cs"));
         var enqueueStart = main.IndexOf("new FollowUpEnqueueUseCaseRequest(", StringComparison.Ordinal);
         var enqueueEnd = enqueueStart < 0
             ? -1

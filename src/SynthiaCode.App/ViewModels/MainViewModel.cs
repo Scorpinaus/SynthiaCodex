@@ -3,6 +3,7 @@ using System.IO;
 using System.Reflection;
 using System.Text.Json.Nodes;
 using System.Windows.Input;
+using SynthiaCode.Application.Conversations;
 using SynthiaCode.Application.Harnesses;
 using SynthiaCode.App.Services;
 using SynthiaCode.Core.Attachments;
@@ -30,18 +31,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly IFolderPicker folderPicker;
     private readonly IUserInteractionService userInteractionService;
     private readonly IThemeService themeService;
-    private readonly ConversationWorkflowController conversationWorkflow;
-    private readonly ThreadLifecycleUseCaseService threadLifecycle;
-    private readonly ThreadStatePersistenceUseCaseService threadStatePersistence;
-    private readonly TurnExecutionUseCaseService turnExecution;
+    private readonly IConversationFeatureFacade conversationFeature;
     private readonly CodeReviewUseCaseService codeReview;
-    private readonly FollowUpQueueUseCaseService followUpQueue;
     private readonly IGitService gitService;
     private readonly ProjectWorkspaceOperations projectWorkspaceOperations;
     private readonly IProjectTrustService projectTrustService;
     private readonly IAppLogger logger;
     private readonly AttachmentDraftOrchestrationService attachmentDraftService;
     private readonly bool enableGoalMode;
+    private IConversationWorkspace conversationWorkflow => conversationFeature.Workspace;
     private readonly CancellationTokenSource appServerWarmUpCancellation = new();
     private readonly SynchronizationContext? synchronizationContext;
     private readonly AsyncRelayCommand submitPromptCommand;
@@ -105,12 +103,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ICodexCliUtilityRunner codexCliUtilityRunner,
         ITerminalService terminalService,
         IAppLogger logger,
-        ConversationWorkflowController conversationWorkflow,
-        ThreadLifecycleUseCaseService threadLifecycle,
-        ThreadStatePersistenceUseCaseService threadStatePersistence,
-        TurnExecutionUseCaseService turnExecution,
+        IConversationFeatureFacade conversationFeature,
         CodeReviewUseCaseService codeReview,
-        FollowUpQueueUseCaseService followUpQueue,
         IGitService gitService,
         ProjectWorkspaceOperations projectWorkspaceOperations,
         IProjectTrustService projectTrustService,
@@ -126,17 +120,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         this.userInteractionService = userInteractionService;
         this.themeService = themeService;
         this.logger = logger;
-        this.conversationWorkflow = conversationWorkflow;
-        this.threadLifecycle = threadLifecycle;
-        this.threadStatePersistence = threadStatePersistence;
-        this.turnExecution = turnExecution;
+        this.conversationFeature = conversationFeature;
         this.codeReview = codeReview;
-        this.followUpQueue = followUpQueue;
         this.gitService = gitService;
         this.projectWorkspaceOperations = projectWorkspaceOperations;
         this.projectTrustService = projectTrustService;
         this.attachmentDraftService = attachmentDraftService;
         this.enableGoalMode = enableGoalMode;
+        synchronizationContext = SynchronizationContext.Current;
+        conversationFeature.Changed += OnConversationFeatureChanged;
         CodexConfiguration = new CodexConfigurationViewModel(
             sharedCodexConfigurationService,
             GetActiveWorkspacePathIfAvailable,
@@ -145,7 +137,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             () => IsShuttingDown,
             message => StatusMessage = message,
             logger);
-        synchronizationContext = SynchronizationContext.Current;
         Skills = new SkillsViewModel(
             appServerSessionCoordinator,
             GetActiveWorkspacePathIfAvailable,
@@ -1357,7 +1348,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
             var instructionSnapshot = ResolveDefaultInstructionSnapshot();
             await EnsureHarnessSessionAsync(ResolveHarnessId(), workspacePath).ConfigureAwait(true);
-            var result = await threadLifecycle.StartAsync(new ThreadStartUseCaseRequest(
+            var result = await conversationFeature.StartThreadAsync(new ThreadStartUseCaseRequest(
                 settings,
                 scope,
                 $"Thread {ProjectThreads.Count + 1}",
@@ -1401,8 +1392,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             await EnsureHarnessSessionAsync(
                 ResolveHarnessId(SelectedThread),
                 GetActiveWorkspacePath()).ConfigureAwait(true);
-            var result = await threadLifecycle
-                .ResumeAsync(CreateThreadResumeRequest(SelectedThread.ThreadId, GetActiveWorkspacePath()))
+            var result = await conversationFeature
+                .ResumeThreadAsync(CreateThreadResumeRequest(SelectedThread.ThreadId, GetActiveWorkspacePath()))
                 .ConfigureAwait(true);
             conversationWorkflow.RegisterResumed(result.ThreadId, result.Turns);
             TaskWorkspace.ApplyConversationSnapshot(conversationWorkflow.GetSnapshot(result.ThreadId));
@@ -1445,7 +1436,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 ResolveHarnessId(sourceThread),
                 sourceWorkspace).ConfigureAwait(true);
             var instructionSnapshot = ResolveInstructionSnapshot(sourceThread.ThreadId);
-            var result = await threadLifecycle.ForkAsync(new ThreadForkRequest(
+            var result = await conversationFeature.ForkThreadAsync(new ThreadForkRequest(
                 settings,
                 sourceThread,
                 sourceWorkspace,
@@ -1480,7 +1471,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 ResolveHarnessId(SelectedThread),
                 SelectedThread.WorkspacePath ?? SelectedThread.ProjectPath).ConfigureAwait(true);
             await Terminal.StopAndRemoveAsync(SelectedThread.ThreadId).ConfigureAwait(true);
-            await threadLifecycle.ArchiveAsync(
+            await conversationFeature.ArchiveThreadAsync(
                 settings,
                 SelectedThread.ThreadId,
                 CreateHarnessConnectionOptions(SelectedThread.WorkspacePath ?? SelectedThread.ProjectPath)).ConfigureAwait(true);
@@ -1506,7 +1497,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             await EnsureHarnessSessionAsync(
                 ResolveHarnessId(SelectedThread),
                 SelectedThread.WorkspacePath ?? SelectedThread.ProjectPath).ConfigureAwait(true);
-            await threadLifecycle.UnarchiveAsync(
+            await conversationFeature.UnarchiveThreadAsync(
                 settings,
                 SelectedThread.ThreadId,
                 CreateHarnessConnectionOptions(SelectedThread.WorkspacePath ?? SelectedThread.ProjectPath)).ConfigureAwait(true);
@@ -1531,7 +1522,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             var threadId = SelectedThread.ThreadId;
             var pinned = !SelectedThread.IsPinned;
-            await threadLifecycle.SetPinnedAsync(settings, threadId, pinned).ConfigureAwait(true);
+            await conversationFeature.SetThreadPinnedAsync(settings, threadId, pinned).ConfigureAwait(true);
             RefreshProjectThreads(threadId);
             StatusMessage = pinned ? "Chat pinned" : "Chat unpinned";
         }
@@ -1576,7 +1567,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             await EnsureHarnessSessionAsync(
                 ResolveHarnessId(thread),
                 thread.WorkspacePath ?? thread.ProjectPath).ConfigureAwait(true);
-            await threadLifecycle.RenameAsync(
+            await conversationFeature.RenameThreadAsync(
                 settings,
                 thread.ThreadId,
                 title,
@@ -1621,12 +1612,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             }
 
             await Terminal.StopAndRemoveAsync(thread.ThreadId).ConfigureAwait(true);
-            await threadLifecycle.DeleteAsync(
+            await conversationFeature.DeleteThreadAsync(
                 settings,
                 thread.ThreadId,
                 !thread.IsArchived,
                 CreateHarnessConnectionOptions(thread.WorkspacePath ?? thread.ProjectPath)).ConfigureAwait(true);
-            await followUpQueue.RemoveAsync(thread.ThreadId).ConfigureAwait(true);
+            await conversationFeature.RemoveFollowUpsAsync(thread.ThreadId).ConfigureAwait(true);
             conversationWorkflow.RemoveRuntime(thread.ThreadId);
             var nextThreadId = conversationWorkflow.GetThreads(settings, thread.ScopeKey).FirstOrDefault()?.ThreadId;
             settings.ComposerAttachmentDrafts.RemoveAll(draft =>
@@ -1677,7 +1668,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var attachments = TaskWorkspace.Attachments.Select(attachment => attachment.Clone()).ToList();
             var capturedComments = Git.CaptureReviewComments();
             var skillInputs = TaskWorkspace.SkillSelector.ResolveSkillInputs(guidance);
-            var mutation = await followUpQueue.EnqueueAsync(new FollowUpEnqueueUseCaseRequest(
+            var mutation = await conversationFeature.EnqueueFollowUpAsync(new FollowUpEnqueueUseCaseRequest(
                 settings,
                 threadId,
                 guidance,
@@ -1706,8 +1697,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        var mutation = await followUpQueue
-            .ReplaceAsync(settings, activeThreadId, snapshots)
+        var mutation = await conversationFeature
+            .ReplaceFollowUpsAsync(settings, activeThreadId, snapshots)
             .ConfigureAwait(true);
         ApplyFollowUpQueueMutation(activeThreadId, mutation);
         RaiseThreadCommandStates();
@@ -1716,13 +1707,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private async Task SendQueuedFollowUpNowAsync(string followUpId)
     {
         if (IsShuttingDown || string.IsNullOrWhiteSpace(activeThreadId) ||
-            !followUpQueue.HasQueue(activeThreadId))
+            !conversationFeature.HasFollowUpQueue(activeThreadId))
         {
             return;
         }
 
         var threadId = activeThreadId;
-        var item = followUpQueue.Get(threadId, followUpId);
+        var item = conversationFeature.GetFollowUp(threadId, followUpId);
         if (item is null)
         {
             return;
@@ -1742,7 +1733,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 var effectiveGuidance = GitInlineCommentPromptFormatter.AppendToPrompt(
                     item.Text,
                     item.ReviewComments);
-                var mutation = await followUpQueue.SteerAsync(
+                var mutation = await conversationFeature.SteerFollowUpAsync(
                     settings,
                     threadId,
                     item.Id,
@@ -1767,7 +1758,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        if (!followUpQueue.IsFirst(threadId, item.Id))
+        if (!conversationFeature.IsFirstFollowUp(threadId, item.Id))
         {
             StatusMessage = "Move this follow-up to the top before sending it";
             return;
@@ -1775,8 +1766,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         if (item.State == QueuedFollowUpState.NeedsAttention)
         {
-            var mutation = await followUpQueue
-                .MarkPendingAsync(settings, threadId, item.Id)
+            var mutation = await conversationFeature
+                .MarkFollowUpPendingAsync(settings, threadId, item.Id)
                 .ConfigureAwait(true);
             ApplyFollowUpQueueMutation(threadId, mutation);
         }
@@ -1801,7 +1792,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var effectiveGuidance = GitInlineCommentPromptFormatter.AppendToPrompt(
                 guidance,
                 capturedComments);
-            await turnExecution.SteerAsync(
+            await conversationFeature.SteerTurnAsync(
                 threadId,
                 CreateHarnessConnectionOptions(GetActiveWorkspacePath()),
                 new SteerTurnCommand(
@@ -1848,7 +1839,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             await Terminal.StopAndRemoveAsync(thread.ThreadId).ConfigureAwait(true);
-            await threadLifecycle.RemoveWorktreeAsync(settings, thread, SelectedProjectPath).ConfigureAwait(true);
+            await conversationFeature.RemoveWorktreeAsync(settings, thread, SelectedProjectPath).ConfigureAwait(true);
             thread.Mode = "worktree-removed";
             thread.TurnStatus = "Workspace removed";
             thread.UpdatedAt = DateTimeOffset.UtcNow;
@@ -2211,7 +2202,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             settings.LastModelOverride = NormalizeOverride(ModelOverride);
             settings.LastReasoningEffortOverride = NormalizeOverride(ReasoningEffortOverride);
             settings.LastServiceTierOverride = ToSettingsValue(TaskWorkspace.ServiceTierSelection);
-            var result = await turnExecution.StartAsync(new TurnExecutionRequest(
+            var result = await conversationFeature.StartTurnAsync(new TurnExecutionRequest(
                 settings,
                 activeThreadId,
                 GetConversationAddress(activeThreadId),
@@ -2219,37 +2210,22 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 submittedImages,
                 CreateHarnessConnectionOptions(workspacePath),
                 CreateHarnessTurnStartCommand(activeThreadId, effectivePrompt, submittedImages, workspacePath),
-                automaticTitle,
-                snapshot => InvokeOnCapturedSynchronizationContext(
-                    () => TaskWorkspace.ApplyConversationSnapshot(snapshot)),
-                started => InvokeOnCapturedSynchronizationContext(() =>
-                {
-                    TaskWorkspace.ApplyConversationSnapshot(started.Snapshot);
-                    if (started.Status == CodexTurnStatus.Running)
-                    {
-                        UpdateThreadActivity(started.ThreadId, isRunning: true, "Running");
-                        IsTurnRunning = true;
-                        activeTurnId = started.TurnId;
-                    }
-                    else
-                    {
-                        activeTurnId = null;
-                        IsTurnRunning = false;
-                    }
-                    cancelTurnCommand.RaiseCanExecuteChanged();
-                    _ = AcknowledgeReviewCommentsAsync(sourceProjectPath, submissionThreadId, capturedComments);
-                    TaskWorkspace.ClearAttachments();
-                    StatusMessage = started.Status == CodexTurnStatus.Running
-                        ? "Codex turn running"
-                        : $"Codex turn {started.Status.ToString().ToLowerInvariant()}";
-                }))).ConfigureAwait(true);
+                automaticTitle)).ConfigureAwait(true);
+            var currentSnapshot = conversationWorkflow.GetSnapshot(result.ThreadId);
+            var resultTurnIsRunning = conversationWorkflow.IsRunning(result.ThreadId) &&
+                conversationWorkflow.TryGetActiveTurn(result.ThreadId, out var currentTurnId) &&
+                string.Equals(currentTurnId, result.TurnId, StringComparison.Ordinal);
             TaskWorkspace.SkillSelector.ClearSelectedSkills();
-            TaskWorkspace.ApplyConversationSnapshot(result.Snapshot);
+            if (string.Equals(activeThreadId, result.ThreadId, StringComparison.Ordinal))
+            {
+                TaskWorkspace.ApplyConversationSnapshot(currentSnapshot);
+            }
+            _ = AcknowledgeReviewCommentsAsync(sourceProjectPath, submissionThreadId, capturedComments);
             if (SelectedThread is not null)
             {
                 SelectedThread.Preview = persistedThread?.Preview ?? titlePrompt;
             }
-            if (result.Status == CodexTurnStatus.Running)
+            if (resultTurnIsRunning)
             {
                 UpdateThreadActivity(activeThreadId, isRunning: true, "Running");
                 IsTurnRunning = true;
@@ -2261,10 +2237,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 IsTurnRunning = false;
             }
             cancelTurnCommand.RaiseCanExecuteChanged();
-            TaskWorkspace.ClearAttachments();
-            StatusMessage = result.Status == CodexTurnStatus.Running
+            StatusMessage = resultTurnIsRunning
                 ? "Codex turn running"
-                : $"Codex turn {result.Status.ToString().ToLowerInvariant()}";
+                : $"Codex turn {currentSnapshot.ActiveTurnStatus.ToString().ToLowerInvariant()}";
             if (result.AutomaticTitleApplied)
             {
                 RefreshProjectThreads(activeThreadId);
@@ -2329,35 +2304,18 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
             var result = await codeReview.StartAsync(new CodeReviewExecutionRequest(
                 activeThreadId,
-                target,
-                snapshot => InvokeOnCapturedSynchronizationContext(
-                    () => TaskWorkspace.ApplyConversationSnapshot(snapshot)),
-                started => InvokeOnCapturedSynchronizationContext(() =>
-                {
-                    TaskWorkspace.ApplyConversationSnapshot(started.Snapshot);
-                    if (started.Status == CodexTurnStatus.Running)
-                    {
-                        UpdateThreadActivity(started.ThreadId, isRunning: true, "Reviewing");
-                        IsTurnRunning = true;
-                        activeTurnId = started.TurnId;
-                    }
-                    else
-                    {
-                        IsTurnRunning = false;
-                        activeTurnId = null;
-                    }
-                    cancelTurnCommand.RaiseCanExecuteChanged();
-                    StatusMessage = started.Status == CodexTurnStatus.Running
-                        ? "Code review running"
-                        : $"Code review {started.Status.ToString().ToLowerInvariant()}";
-                }))).ConfigureAwait(true);
+                target)).ConfigureAwait(true);
+            var currentSnapshot = conversationWorkflow.GetSnapshot(result.ThreadId);
+            var resultTurnIsRunning = conversationWorkflow.IsRunning(result.ThreadId) &&
+                conversationWorkflow.TryGetActiveTurn(result.ThreadId, out var currentTurnId) &&
+                string.Equals(currentTurnId, result.TurnId, StringComparison.Ordinal);
 
-            TaskWorkspace.ApplyConversationSnapshot(result.Snapshot);
+            TaskWorkspace.ApplyConversationSnapshot(currentSnapshot);
             if (SelectedThread is not null)
             {
                 SelectedThread.Preview = target.DisplayLabel;
             }
-            if (result.Status == CodexTurnStatus.Running)
+            if (resultTurnIsRunning)
             {
                 UpdateThreadActivity(result.ThreadId, isRunning: true, "Reviewing");
                 IsTurnRunning = true;
@@ -2374,9 +2332,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             }
             cancelTurnCommand.RaiseCanExecuteChanged();
             TaskWorkspace.RaiseCommandStates();
-            StatusMessage = result.Status == CodexTurnStatus.Running
+            StatusMessage = resultTurnIsRunning
                 ? "Code review running"
-                : $"Code review {result.Status.ToString().ToLowerInvariant()}";
+                : $"Code review {currentSnapshot.ActiveTurnStatus.ToString().ToLowerInvariant()}";
         }
         catch (Exception ex)
         {
@@ -2465,7 +2423,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             settings.LastModelOverride = NormalizeOverride(ModelOverride);
             settings.LastReasoningEffortOverride = NormalizeOverride(ReasoningEffortOverride);
             settings.LastServiceTierOverride = ToSettingsValue(TaskWorkspace.ServiceTierSelection);
-            result = await turnExecution.EditAsync(new TurnEditExecutionRequest(
+            result = await conversationFeature.EditTurnAsync(new TurnEditExecutionRequest(
                 settings,
                 threadId,
                 GetConversationAddress(threadId),
@@ -2488,9 +2446,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
 
         var isSelectedAfterStart = string.Equals(activeThreadId, threadId, StringComparison.Ordinal);
+        var currentSnapshot = conversationWorkflow.GetSnapshot(threadId);
         if (isSelectedAfterStart)
         {
-            TaskWorkspace.ApplyConversationSnapshot(result.Snapshot);
+            TaskWorkspace.ApplyConversationSnapshot(currentSnapshot);
             TaskWorkspace.SubmittedPrompt = submittedPrompt;
             TaskWorkspace.NotifyResponseChanged();
             if (SelectedThread is not null)
@@ -2514,9 +2473,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return result.StateCommitted;
         }
 
-        var turnStatus = result.Status
+        _ = result.Status
             ?? throw new InvalidOperationException("The edited turn did not return a status.");
-        if (turnStatus == CodexTurnStatus.Running)
+        var resultTurnIsRunning = conversationWorkflow.IsRunning(threadId) &&
+            conversationWorkflow.TryGetActiveTurn(threadId, out var currentTurnId) &&
+            string.Equals(currentTurnId, result.TurnId, StringComparison.Ordinal);
+        if (resultTurnIsRunning)
         {
             UpdateThreadActivity(threadId, isRunning: true, "Running");
             if (isSelectedAfterStart)
@@ -2531,9 +2493,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             IsTurnRunning = false;
         }
         cancelTurnCommand.RaiseCanExecuteChanged();
-        StatusMessage = turnStatus == CodexTurnStatus.Running
+        StatusMessage = resultTurnIsRunning
             ? "Edited prompt running"
-            : $"Edited prompt {turnStatus.ToString().ToLowerInvariant()}";
+            : $"Edited prompt {currentSnapshot.ActiveTurnStatus.ToString().ToLowerInvariant()}";
         return true;
     }
 
@@ -2544,7 +2506,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (string.IsNullOrWhiteSpace(activeThreadId))
         {
             var instructionSnapshot = ResolveDefaultInstructionSnapshot();
-            var started = await threadLifecycle.StartAsync(new ThreadStartUseCaseRequest(
+            var started = await conversationFeature.StartThreadAsync(new ThreadStartUseCaseRequest(
                 settings,
                 scope,
                 $"Thread {ProjectThreads.Count + 1}",
@@ -2570,7 +2532,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         var previousThreadId = activeThreadId;
         var existingInstructionSnapshot = ResolveInstructionSnapshot(previousThreadId);
-        var activated = await threadLifecycle.ResumeOrReplaceAsync(new ThreadActivationUseCaseRequest(
+        var activated = await conversationFeature.ResumeOrReplaceThreadAsync(new ThreadActivationUseCaseRequest(
             settings,
             scope,
             workspacePath,
@@ -2642,7 +2604,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await turnExecution.CancelAsync(
+            await conversationFeature.CancelTurnAsync(
                 CreateHarnessConnectionOptions(GetActiveWorkspacePath()),
                 GetConversationAddress(activeThreadId),
                 activeTurnId).ConfigureAwait(true);
@@ -2701,9 +2663,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ApprovalQueue.Clear();
         appServerSessionCoordinator.ServerRequestReceived -= OnServerRequestReceived;
         harnessRuntimeCoordinator.EventReceived -= OnHarnessEventReceived;
+        conversationFeature.Changed -= OnConversationFeatureChanged;
         appServerSessionCoordinator.FlushNotifications();
         await Skills.DisposeAsync().ConfigureAwait(true);
-        await followUpQueue.DisposeAsync().ConfigureAwait(true);
+        await conversationFeature.DisposeAsync().ConfigureAwait(true);
         await harnessRuntimeCoordinator.DisposeAsync().ConfigureAwait(true);
         await appServerSessionCoordinator.DisposeAsync().ConfigureAwait(true);
         await SaveActiveThreadStateAsync().ConfigureAwait(true);
@@ -2749,7 +2712,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(TimeSpan.FromSeconds(2));
-                await turnExecution.CancelAsync(
+                await conversationFeature.CancelTurnAsync(
                     CreateHarnessConnectionOptions(GetWorkspacePathForThread(turn.Key)),
                     GetConversationAddress(turn.Key),
                     turn.Value,
@@ -3043,8 +3006,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return false;
         }
 
-        return followUpQueue.HasQueue(threadId)
-            ? followUpQueue.GetCount(threadId) > 0
+        return conversationFeature.HasFollowUpQueue(threadId)
+            ? conversationFeature.GetFollowUpCount(threadId) > 0
             : SelectedThread?.QueuedFollowUps.Count > 0;
     }
 
@@ -3328,12 +3291,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (IsShuttingDown ||
             conversationWorkflow.IsRunning(threadId) ||
-            !followUpQueue.HasQueue(threadId))
+            !conversationFeature.HasFollowUpQueue(threadId))
         {
             return;
         }
 
-        if (followUpQueue.GetFirstPending(threadId) is null)
+        if (conversationFeature.GetFirstPendingFollowUp(threadId) is null)
         {
             return;
         }
@@ -3387,13 +3350,33 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 effectivePrompt);
         }
 
-        var result = await followUpQueue.DispatchNextAsync(new FollowUpDispatchUseCaseRequest(
+        var queued = conversationFeature.GetFirstPendingFollowUp(threadId);
+        if (queued is null)
+        {
+            return;
+        }
+
+        FollowUpDispatchPreparation preparation;
+        try
+        {
+            var prepared = await PrepareStartRequestAsync(
+                queued,
+                appServerWarmUpCancellation.Token).ConfigureAwait(true);
+            preparation = FollowUpDispatchPreparation.Ready(queued.Id, prepared);
+        }
+        catch (Exception ex)
+        {
+            preparation = FollowUpDispatchPreparation.Failed(queued.Id, ex.Message);
+        }
+
+        var result = await conversationFeature.DispatchNextFollowUpAsync(new FollowUpDispatchUseCaseRequest(
             settings,
             threadId,
-            PrepareStartRequestAsync)).ConfigureAwait(true);
+            preparation)).ConfigureAwait(true);
         var dispatch = result.Dispatch;
         if (!dispatch.Attempted) return;
-        ApplyFollowUpQueueSnapshot(threadId, result.Snapshot);
+        var currentSnapshot = conversationWorkflow.GetSnapshot(threadId);
+        ApplyFollowUpQueueSnapshot(threadId, currentSnapshot);
         TaskWorkspace.NotifyQueuedFollowUpsChanged();
         if (!string.IsNullOrWhiteSpace(dispatch.ErrorMessage))
         {
@@ -3406,18 +3389,20 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
         if (string.IsNullOrWhiteSpace(dispatch.TurnId) || dispatch.TurnStatus is null) return;
-        var turnStatus = dispatch.TurnStatus.Value;
+        var dispatchedTurnIsRunning = conversationWorkflow.IsRunning(threadId) &&
+            conversationWorkflow.TryGetActiveTurn(threadId, out var currentTurnId) &&
+            string.Equals(currentTurnId, dispatch.TurnId, StringComparison.Ordinal);
         UpdateThreadActivity(
             threadId,
-            turnStatus == CodexTurnStatus.Running,
-            turnStatus == CodexTurnStatus.Running ? "Running" : turnStatus.ToString());
+            dispatchedTurnIsRunning,
+            dispatchedTurnIsRunning ? "Running" : currentSnapshot.ActiveTurnStatus.ToString());
         if (string.Equals(threadId, activeThreadId, StringComparison.Ordinal))
         {
-            activeTurnId = turnStatus == CodexTurnStatus.Running ? dispatch.TurnId : null;
-            IsTurnRunning = turnStatus == CodexTurnStatus.Running;
+            activeTurnId = dispatchedTurnIsRunning ? dispatch.TurnId : null;
+            IsTurnRunning = dispatchedTurnIsRunning;
             StatusMessage = IsTurnRunning
                 ? "Queued follow-up running"
-                : $"Codex turn {turnStatus.ToString().ToLowerInvariant()}";
+                : $"Codex turn {currentSnapshot.ActiveTurnStatus.ToString().ToLowerInvariant()}";
         }
         if (!conversationWorkflow.IsRunning(threadId))
         {
@@ -3428,7 +3413,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task PersistFollowUpQueueAsync(string threadId)
     {
-        var mutation = await followUpQueue.PersistAsync(settings, threadId).ConfigureAwait(true);
+        var mutation = await conversationFeature.PersistFollowUpsAsync(settings, threadId).ConfigureAwait(true);
         ApplyFollowUpQueueMutation(threadId, mutation);
     }
 
@@ -3706,6 +3691,41 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void OnAppServerNotificationReceived(object? sender, CodexAppServerNotification notification)
     {
         DispatchAppServerNotification(notification);
+    }
+
+    private void OnConversationFeatureChanged(object? sender, ConversationWorkspaceChangedEvent change)
+    {
+        InvokeOnCapturedSynchronizationContext(() =>
+        {
+            if (string.Equals(activeThreadId, change.ThreadId, StringComparison.Ordinal))
+            {
+                TaskWorkspace.ApplyConversationSnapshot(change.Snapshot);
+                if (change.Kind == ConversationWorkspaceChangeKind.PendingTurnStarted &&
+                    change.Operation == ConversationOperationKind.DirectTurn)
+                {
+                    TaskWorkspace.ClearAttachments();
+                }
+            }
+
+            if (change.Kind != ConversationWorkspaceChangeKind.TurnStarted ||
+                change.TurnStatus is null ||
+                string.IsNullOrWhiteSpace(change.TurnId))
+            {
+                return;
+            }
+
+            var isRunning = change.TurnStatus == CodexTurnStatus.Running;
+            UpdateThreadActivity(
+                change.ThreadId,
+                isRunning,
+                isRunning ? "Running" : change.TurnStatus.Value.ToString());
+            if (string.Equals(activeThreadId, change.ThreadId, StringComparison.Ordinal))
+            {
+                activeTurnId = isRunning ? change.TurnId : null;
+                IsTurnRunning = isRunning;
+                cancelTurnCommand.RaiseCanExecuteChanged();
+            }
+        });
     }
 
     private void OnHarnessEventReceived(object? sender, HarnessEvent harnessEvent)
@@ -3986,7 +4006,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         try
         {
-            var result = await threadStatePersistence.SaveAsync(settings, threadId).ConfigureAwait(true);
+            var result = await conversationFeature.SaveThreadAsync(settings, threadId).ConfigureAwait(true);
             var presentation = ProjectThreads.FirstOrDefault(thread =>
                 string.Equals(thread.ThreadId, threadId, StringComparison.Ordinal));
             if (result is not null && presentation is not null && !ReferenceEquals(presentation, result.State))
@@ -4168,7 +4188,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await threadStatePersistence.SaveActiveAsync(
+            await conversationFeature.SaveActiveThreadAsync(
                 settings,
                 FindProjectThreadState(),
                 GetCurrentScope(),

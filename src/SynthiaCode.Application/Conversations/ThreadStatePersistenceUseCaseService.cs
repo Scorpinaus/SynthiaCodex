@@ -1,7 +1,7 @@
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Settings;
 
-namespace SynthiaCode.App.Services;
+namespace SynthiaCode.Application.Conversations;
 
 /// <summary>Persists the bounded transcript projection for a thread in one place.</summary>
 public sealed class ThreadStatePersistenceUseCaseService
@@ -142,3 +142,4 @@ public sealed class ThreadStatePersistenceUseCaseService
 }
 
 public sealed record ThreadStateSaveResult(PersistedProjectThread State, DateTimeOffset UpdatedAt);
+

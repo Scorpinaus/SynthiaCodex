@@ -1,4 +1,5 @@
 using SynthiaCode.App.Services;
+using SynthiaCode.Application.Conversations;
 using SynthiaCode.Application.Harnesses;
 using SynthiaCode.Core.Attachments;
 using SynthiaCode.Core.Auth;
@@ -52,12 +53,8 @@ public sealed class AppServices
         IAttachmentStore attachmentStore,
         WorkspaceAttachmentResolver workspaceAttachmentResolver,
         ISharedCodexConfigurationService sharedCodexConfigurationService,
-        ConversationWorkflowController conversationWorkflow,
-        ThreadLifecycleUseCaseService threadLifecycleService,
-        ThreadStatePersistenceUseCaseService threadStatePersistenceService,
-        TurnExecutionUseCaseService turnExecutionService,
+        IConversationFeatureFacade conversationFeature,
         CodeReviewUseCaseService codeReviewService,
-        FollowUpQueueUseCaseService followUpQueueService,
         ProjectWorkspaceOperations projectWorkspaceOperations,
         IProjectTrustService projectTrustService,
         AttachmentDraftOrchestrationService attachmentDraftService,
@@ -82,12 +79,8 @@ public sealed class AppServices
         AttachmentStore = attachmentStore;
         WorkspaceAttachmentResolver = workspaceAttachmentResolver;
         SharedCodexConfigurationService = sharedCodexConfigurationService;
-        ConversationWorkflow = conversationWorkflow;
-        ThreadLifecycleService = threadLifecycleService;
-        ThreadStatePersistenceService = threadStatePersistenceService;
-        TurnExecutionService = turnExecutionService;
+        ConversationFeature = conversationFeature;
         CodeReviewService = codeReviewService;
-        FollowUpQueueService = followUpQueueService;
         ProjectWorkspaceOperations = projectWorkspaceOperations;
         ProjectTrustService = projectTrustService;
         AttachmentDraftService = attachmentDraftService;
@@ -132,14 +125,9 @@ public sealed class AppServices
 
     public ISharedCodexConfigurationService SharedCodexConfigurationService { get; }
 
-    public ConversationWorkflowController ConversationWorkflow { get; }
-    public ThreadLifecycleUseCaseService ThreadLifecycleService { get; }
+    public IConversationFeatureFacade ConversationFeature { get; }
 
-    public ThreadStatePersistenceUseCaseService ThreadStatePersistenceService { get; }
-
-    public TurnExecutionUseCaseService TurnExecutionService { get; }
     public CodeReviewUseCaseService CodeReviewService { get; }
-    public FollowUpQueueUseCaseService FollowUpQueueService { get; }
 
     public ProjectWorkspaceOperations ProjectWorkspaceOperations { get; }
 
@@ -188,29 +176,18 @@ public sealed class AppServices
         var workspaceAttachmentResolver = new WorkspaceAttachmentResolver();
         var sharedCodexConfigurationService =
             new SharedCodexConfigurationService(codexRuntimeEnvironment.HomePath);
-        var threadLifecycleService = new ThreadLifecycleUseCaseService(
-            harnessOperations, gitService, worktreeService, threadStore, threadWorkspace, settingsStore);
-        var threadStatePersistenceService = new ThreadStatePersistenceUseCaseService(
-            settingsStore, threadStore, threadWorkspace);
         var followUpQueues = new CodexFollowUpQueueWorkspace();
-        var conversationWorkflow = new ConversationWorkflowController(
+        var conversationFeature = new ConversationFeatureFacade(
+            harnessOperations,
+            gitService,
+            worktreeService,
+            settingsStore,
             threadStore,
             threadWorkspace,
             followUpQueues);
-        var turnExecutionService = new TurnExecutionUseCaseService(
-            harnessOperations,
-            conversationWorkflow,
-            threadLifecycleService,
-            threadStatePersistenceService);
         var codeReviewService = new CodeReviewUseCaseService(
             appServerSessionCoordinator,
-            conversationWorkflow);
-        var followUpQueueService = new FollowUpQueueUseCaseService(
-            harnessOperations,
-            conversationWorkflow,
-            settingsStore,
-            threadWorkspace,
-            followUpQueues);
+            conversationFeature.Workspace);
         var projectWorkspaceOperations = new ProjectWorkspaceOperations(
             gitService, worktreeService, recentProjectService, generalWorkspaceService);
         var projectTrustService = new ProjectTrustService(
@@ -246,12 +223,8 @@ public sealed class AppServices
             attachmentStore,
             workspaceAttachmentResolver,
             sharedCodexConfigurationService,
-            conversationWorkflow,
-            threadLifecycleService,
-            threadStatePersistenceService,
-            turnExecutionService,
+            conversationFeature,
             codeReviewService,
-            followUpQueueService,
             projectWorkspaceOperations,
             projectTrustService,
             attachmentDraftService,

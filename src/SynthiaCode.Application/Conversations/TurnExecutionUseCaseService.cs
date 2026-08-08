@@ -4,7 +4,7 @@ using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Harnesses;
 using SynthiaCode.Core.Settings;
 
-namespace SynthiaCode.App.Services;
+namespace SynthiaCode.Application.Conversations;
 
 /// <summary>
 /// Executes harness turns and owns the corresponding conversation state transitions.
@@ -35,8 +35,11 @@ public sealed class TurnExecutionUseCaseService
     {
         ArgumentNullException.ThrowIfNull(request);
         UpdatePreview(request.Settings, request.ThreadId, request.Prompt, request.Attachments);
-        conversations.BeginTurn(request.ThreadId, request.Prompt, request.Attachments);
-        request.PendingStarted?.Invoke(conversations.GetSnapshot(request.ThreadId));
+        conversations.BeginTurn(
+            request.ThreadId,
+            request.Prompt,
+            request.Attachments,
+            ConversationOperationKind.DirectTurn);
 
         try
         {
@@ -47,13 +50,6 @@ public sealed class TurnExecutionUseCaseService
             var bound = conversations.BindPendingTurn(request.ThreadId, started.RemoteTurnId);
             conversations.RegisterTurn(request.ThreadId, started.RemoteTurnId);
             RegisterStatus(request.ThreadId, started.RemoteTurnId, bound.Status);
-            request.TurnStarted?.Invoke(new TurnExecutionResult(
-                request.ThreadId,
-                started.RemoteTurnId,
-                bound.Status,
-                conversations.GetSnapshot(request.ThreadId),
-                false,
-                null));
 
             var titleApplied = false;
             string? titleError = null;
@@ -110,7 +106,11 @@ public sealed class TurnExecutionUseCaseService
 
             conversations.SupersedeTurnsFrom(request.ThreadId, request.SourceTurnId);
             conversations.ReconcileHistory(request.ThreadId, rollback.Turns.Select(ToLegacySnapshot));
-            conversations.BeginTurn(request.ThreadId, request.Prompt, request.Attachments);
+            conversations.BeginTurn(
+                request.ThreadId,
+                request.Prompt,
+                request.Attachments,
+                ConversationOperationKind.PromptEdit);
             committed = true;
             UpdatePreview(request.Settings, request.ThreadId, request.Prompt, request.Attachments);
 
@@ -254,9 +254,7 @@ public sealed record TurnExecutionRequest(
     IReadOnlyList<AttachmentReference> Attachments,
     HarnessConnectionOptions ConnectionOptions,
     StartTurnCommand StartCommand,
-    string? AutomaticTitle,
-    Action<ConversationWorkspaceSnapshot>? PendingStarted = null,
-    Action<TurnExecutionResult>? TurnStarted = null);
+    string? AutomaticTitle);
 
 public sealed record TurnExecutionResult(
     string ThreadId,

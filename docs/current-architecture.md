@@ -3,7 +3,7 @@
 **Recorded:** 6 August 2026
 **Last code-verified:** 8 August 2026
 **Release:** 0.1.0
-**Phase:** Modern WPF redesign through Phase 21, with product extensions through generated-image, attachment, prompt-editing, chat-management, queued-dispatch hardening, Goal mode, multi-folder local projects, native branch push, and the provider-neutral harness boundary
+**Phase:** Architecture migration Phase 1, with the complete conversation feature slice moved behind an Application facade
 **Purpose:** Describe the current architecture, presentation shell, runtime and persistence boundaries, implemented desktop workflows, and release verification baseline.
 
 ## System shape
@@ -13,11 +13,11 @@ The solution is a Windows-only WPF desktop application with seven projects:
 | Project | Responsibility | Dependencies |
 | --- | --- | --- |
 | `SynthiaCode.Core` | Provider-neutral harness models and events; settings, thread, attachment, Git, worktree, terminal, auth, logging, and Codex protocol-domain contracts; conversation reduction | None |
-| `SynthiaCode.Application` | Harness registry, capability-gated feature contracts, session lifecycle, and provider-neutral conversation operations | Core |
+| `SynthiaCode.Application` | Harness registry and runtime; the conversation feature facade; workspace state ownership; thread lifecycle, turn execution, persistence, and queued-dispatch orchestration | Core |
 | `SynthiaCode.Infrastructure` | Codex CLI/app-server transport, JSON settings, Git, worktrees, ConPTY terminal, auth, logging | Core |
 | `SynthiaCode.Harnesses.Codex` | Adapter from neutral harness commands/events to Codex app-server types, operations, and notifications | Application and Core |
 | `SynthiaCode.Harnesses.InMemory` | Deterministic, process-free harness implementation used to prove and test the provider boundary | Application and Core |
-| `SynthiaCode.App` | WPF composition root, windows, theme resources, feature view models, UI services, and nonvisual application use cases | Application, Core, Codex harness, and Infrastructure |
+| `SynthiaCode.App` | WPF composition root, windows, theme resources, feature view models, UI services, and Codex-specific side features such as review, goals, and skills | Application, Core, Codex harness, and Infrastructure |
 | `SynthiaCode.Tests` | xUnit-discovered behavioral and integration-style test suite; the executable entry point remains only as a UTF-8 transport fixture | All production projects plus the in-memory harness |
 
 The actual project-reference graph is:
@@ -39,16 +39,18 @@ flowchart LR
     Tests --> CodexHarness
 ```
 
-`AppServices.Create()` is the manual composition root. It constructs concrete infrastructure, registers the production `CodexHarness`, creates the harness runtime and workflow services, then supplies them to `MainViewModel`. `SynthiaCode.Harnesses.InMemory` is referenced by tests but is not registered in the production app. There is no external dependency-injection container.
+`AppServices.Create()` is the manual composition root. It constructs concrete infrastructure, registers the production `CodexHarness`, creates one `ConversationFeatureFacade`, and supplies that facade to `MainViewModel`. `SynthiaCode.Harnesses.InMemory` is referenced by tests but is not registered in the production app. There is no external dependency-injection container.
 
-The architecture is layered but deliberately pragmatic rather than a strict clean-architecture implementation. Core has no project dependencies. Application contains the portable harness runtime. Infrastructure contains operating-system and process adapters. Provider translation lives in a harness project. The App project owns WPF and still contains several WPF-free use-case services; moving those services into Application would be a future boundary refinement, not the current design.
+The architecture is layered but deliberately pragmatic rather than a strict clean-architecture implementation. Core has no project dependencies. Application contains the portable harness runtime and the complete conversation feature slice. Infrastructure contains operating-system and process adapters. Provider translation lives in a harness project. App owns WPF and intentionally retains Codex-specific side features until portable contracts exist for them.
 
 At runtime the major components form this topology:
 
 ```mermaid
 flowchart TB
     UI["WPF views and feature view models"] --> Shell["MainViewModel shell coordinator"]
-    Shell --> UseCases["Lifecycle, turn, queue, review, persistence use cases"]
+    Shell --> Facade["IConversationFeatureFacade"]
+    Facade --> UseCases["Lifecycle, turn, queue, persistence use cases"]
+    UseCases --> Workspace["IConversationWorkspace"]
     UseCases --> HarnessOps["IHarnessOperations"]
     HarnessOps --> Runtime["HarnessRuntimeCoordinator"]
     Runtime --> CodexAdapter["CodexHarnessSession"]
@@ -56,7 +58,8 @@ flowchart TB
     Session --> Client["CodexAppServerClient"]
     Client --> Transport["UTF-8 stdio transport"]
     Transport --> Codex["codex app-server child process"]
-    UseCases --> State["ThreadStore / conversation and queue workspaces"]
+    Workspace --> State["ThreadStore / conversation and queue workspaces"]
+    Shell --> SideFeatures["Codex review, goals, skills"]
     Shell --> Git["GitService / WorktreeService"]
     Shell --> Terminal["ConPTY terminal sessions"]
     Shell --> Storage["JSON settings / attachments / isolated CODEX_HOME / logs"]
@@ -69,7 +72,7 @@ flowchart TB
 3. `MainWindow` is constructed and shown before asynchronous initialization begins.
 4. `MainViewModel.InitializeAsync` loads settings, restores shell preferences, applies the theme, restores recent-project metadata, and runs Codex/auth diagnostics.
 5. App-server warm-up starts in the background after the shell reaches Ready.
-6. Window closing calls `MainViewModel.ShutdownAsync`, which cancels active turns, disposes terminal and task resources, clears approvals, disposes skills and queue subscriptions, disposes harness sessions and the app-server client, and saves the active thread state.
+6. Window closing calls `MainViewModel.ShutdownAsync`, which cancels active turns, disposes terminal and task resources, clears approvals, disposes skills and the conversation facade, disposes harness sessions and the app-server client, and saves the active thread state.
 7. `App.OnExit` performs a final idempotent disposal and releases the mutex.
 
 This ordering deliberately keeps shell visibility independent of Codex app-server startup.
@@ -98,16 +101,16 @@ Projectless General chats use the same thread lifecycle, transcript, search, pin
 
 `MainViewModel.cs` remains the shell coordinator. It owns UI validation, project/thread selection, cross-feature event routing, shell layout, theme/status projection, app-server warm-up, notification marshaling, and shutdown ordering.
 
-Application workflows no longer use `MainViewModel` as a hidden service layer. These services are WPF-free even though they currently live under `SynthiaCode.App/Services`:
+Application workflows no longer use `MainViewModel` as a hidden service layer. The complete slice lives under `SynthiaCode.Application/Conversations`:
 
 - `ThreadLifecycleUseCaseService` owns durable create, resume/fallback, fork, archive, rename, delete, pin, and worktree transitions;
 - `TurnExecutionUseCaseService` owns start, edit/rollback, steer, cancel, automatic-title, and conversation state transitions;
-- `CodeReviewUseCaseService` owns pending, bound, failed, and inline-thread validation for dedicated review turns;
 - `FollowUpQueueUseCaseService` owns queue mutation, durable queue snapshots, per-thread serialized dispatch, recovery, removal, and disposal;
 - `ThreadStatePersistenceUseCaseService` owns bounded transcript and active-thread snapshots;
-- `ConversationWorkflowController` is limited to runtime conversation identity, notification routing, and detached snapshots.
+- `ConversationWorkflowController` implements the single `IConversationWorkspace` state owner, serializes reductions, preserves terminal lifecycle ordering, routes notifications, and returns detached snapshots;
+- `ConversationFeatureFacade` is the one presentation-facing boundary that composes and hides those services.
 
-`MainViewModel` composes resolved request inputs and projects returned snapshots into feature view models. Concrete app-server lifecycle, terminal lifetime, diagnostics/auth operations, Git operations, and the five application use-case boundaries are owned outside presentation.
+`MainViewModel` receives one `IConversationFeatureFacade`, composes resolved request inputs, subscribes to application workspace events, and projects returned or current authoritative snapshots into feature view models. Use-case request records no longer carry UI callbacks. `CodeReviewUseCaseService` remains an App-side Codex feature and uses `IConversationWorkspace`; goals and skills remain separate Codex side surfaces as planned.
 
 ## Runtime flows
 
@@ -128,6 +131,7 @@ The portability work is intentionally incremental. Common conversation execution
 ```mermaid
 sequenceDiagram
     participant UI as TaskView / MainViewModel
+    participant F as ConversationFeatureFacade
     participant UC as TurnExecutionUseCaseService
     participant HO as HarnessOperations
     participant HR as HarnessRuntimeCoordinator
@@ -137,7 +141,10 @@ sequenceDiagram
     participant WF as ConversationWorkflowController
     participant PS as ThreadStatePersistenceUseCaseService
 
-    UI->>UC: StartTurnCommand + local pending turn
+    UI->>F: TurnExecutionRequest
+    F->>UC: StartAsync
+    UC->>WF: begin pending turn
+    WF-->>UI: application event + detached snapshot
     UC->>HO: StartTurnAsync
     HO->>HR: resolve provider session
     HR-->>HO: connected session
@@ -150,7 +157,8 @@ sequenceDiagram
     HR-->>UI: routed provider event
     UI->>WF: reduce event by conversation/turn identity
     WF-->>UI: detached conversation snapshot
-    UI->>PS: persist after state transitions/completion
+    UI->>F: save after state transitions/completion
+    F->>PS: persist detached workspace state
 ```
 
 Protocol request construction, response correlation, parsing, and transport failure handling remain inside Infrastructure. Core owns app-server request/result records and notification-derived thread state.
@@ -163,9 +171,9 @@ The presentation layer subscribes to both event levels for different reasons. Ge
 | --- | --- | --- |
 | Saved projects, preferences, drafts, local transcript cache | `AppSettings` through `ISettingsStore` | One durable graph is snapshotted before coalesced atomic writes. |
 | Persisted/presentation thread mapping and active selection per scope | `ThreadStore` | Maps storage-only DTOs to observable clones and back. |
-| Loaded/running identities and active turn routing | `ConversationWorkflowController` | Holds runtime indexes and returns detached snapshots; it is not the durable store. |
-| Reduced transcript, activity, context usage, generated images, and latest diff | One `CodexThreadService` per thread in `CodexThreadWorkspace` | Events route by remote thread and turn IDs; bounded collections prevent unbounded repeatable history. |
-| Queued follow-ups | One `CodexFollowUpQueue` per thread in `CodexFollowUpQueueWorkspace` | Queue mutation and dispatch are isolated from whichever thread is selected in the UI. |
+| Conversation workspace state | `ConversationWorkflowController` through `IConversationWorkspace` | Single Application owner for loaded/running identity, active-turn routing, serialized reduction, terminal ordering, and detached snapshots; it is not the durable store. |
+| Reduced transcript, activity, context usage, generated images, and latest diff | `IConversationWorkspace`, backed by one `CodexThreadService` per thread | Events route by remote thread and turn IDs; bounded collections prevent unbounded repeatable history. |
+| Queued follow-ups | Application conversation slice, backed by one `CodexFollowUpQueue` per thread | Queue mutation and dispatch are isolated from whichever thread is selected in the UI and exposed through the facade. |
 | Remote Codex thread history and goals | `codex app-server` | Local state is a durable presentation/recovery cache and is reconciled on resume/read. |
 | Repository and terminal state | Git processes and per-thread ConPTY sessions | Presentation keeps repository projections, transient confirmed push plans, and bounded terminal buffers, not an independent source of truth. |
 
@@ -332,7 +340,7 @@ Each terminal buffer is capped at 250,000 characters. Phase 5B replaced the orig
 
 ### Persistence
 
-The composition root exposes a `CoalescingSettingsStore` around `JsonSettingsStore`. Thread transcript saves run through `ThreadStatePersistenceUseCaseService`; queued-follow-up saves run through `FollowUpQueueUseCaseService`; lifecycle transactions persist through `ThreadLifecycleUseCaseService`. Shell preferences remain narrow `MainViewModel` saves. Requests arriving within 75 ms are collapsed into one physical write containing the latest immutable deep snapshot.
+The composition root exposes a `CoalescingSettingsStore` around `JsonSettingsStore`. Inside the Application conversation facade, thread transcript saves run through `ThreadStatePersistenceUseCaseService`, queued-follow-up saves run through `FollowUpQueueUseCaseService`, and lifecycle transactions persist through `ThreadLifecycleUseCaseService`. Shell preferences remain narrow `MainViewModel` saves. Requests arriving within 75 ms are collapsed into one physical write containing the latest immutable deep snapshot.
 
 `JsonSettingsStore` serializes writes through a gate, flushes the complete settings graph to a write-through `settings.json.tmp`, and replaces `settings.json` with an overwrite move. Loading promotes a valid newer temporary file when an interrupted save left the primary missing or corrupt.
 
@@ -358,7 +366,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 - `CodexAppServerClient` serializes writes, correlates outgoing responses, separately tracks incoming server requests, and fails pending work when the read loop or process connection fails.
 - `AppServerSessionCoordinator` serializes connection replacement and associates approval requests with one client generation. Responses from a stale connection are rejected.
 - Agent-message deltas are coalesced for 50 ms by thread, turn, and item. A non-delta notification flushes pending text first, preserving protocol order.
-- Harness connection creation is serialized and cached per provider. Turn reduction tolerates a notification arriving before the `turn/start` response binds the pending local turn.
+- Harness connection creation is serialized and cached per provider. `IConversationWorkspace` serializes turn reduction and detached snapshot creation; a recorded completion cannot be reopened by a delayed start continuation, and notification-before-response ordering binds the same pending turn.
 - Settings requests inside a 75 ms window share one immutable physical snapshot. Queue dispatch uses a per-thread semaphore and persists `Starting` before contacting the provider.
 - Git, worktree, Codex utility, app-server, and terminal processes are cancellable; owned hidden process trees are terminated during cancellation or disposal. Visible login/logout consoles are intentionally transferred to the user.
 - Shutdown is idempotent. It stops new UI actions, cancels active turns, releases terminal and queue resources, flushes pending notifications, disposes harness/provider sessions, then persists final local state.
@@ -378,7 +386,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 
 `dotnet test SynthiaCode.sln` is the authoritative local gate on Windows with the .NET 10 SDK selected by `global.json`. The test project references every production layer plus the in-memory harness. Coverage combines pure contract/reducer/use-case tests, fake app-server transports, deterministic harness parity tests, temporary-repository Git/worktree tests, local bare-repository push integration tests, and WPF presentation tests hosted on a dedicated STA dispatcher. Test collections and process-level test parallelism are disabled because WPF application state, native terminal resources, and shared process fixtures require deterministic ownership.
 
-Repository-wide build policy lives in `.editorconfig`, `Directory.Build.props`, and `Directory.Packages.props`. Builds are deterministic, CI treats warnings as errors, and external package versions are centrally owned. `ArchitectureBoundaryTests` locks the production project graph, namespace ownership and forbidden upward imports, and confines WPF/Windows targeting to the App project. Phase 0 golden characterization tests preserve conversation reduction, queued dispatch, reconnect, and persistence-migration behavior before later structural refactoring.
+Repository-wide build policy lives in `.editorconfig`, `Directory.Build.props`, and `Directory.Packages.props`. Builds are deterministic, CI treats warnings as errors, and external package versions are centrally owned. `ArchitectureBoundaryTests` locks the production project graph, namespace ownership and forbidden upward imports, and confines WPF/Windows targeting to the App project. Phase 0 golden characterization tests preserve conversation reduction, queued dispatch, reconnect, and persistence-migration behavior. Phase 1 architecture tests pin Application ownership, the single facade constructor boundary, callback-free requests, detached workspace events, and terminal turn ordering.
 
 GitHub Actions restores and runs the Release test suite on `windows-latest`. Main-branch, tag, and manual workflows publish a self-contained `win-x64` portable folder; a tag matching the app project's semantic version also produces a ZIP and SHA-256 checksum GitHub release. The app project is `net10.0-windows`/WPF; the non-WPF Core, Application, harness, and Infrastructure libraries target `net10.0`.
 
@@ -391,7 +399,8 @@ The current seams are explicit:
 - Production registers only Codex even though `AppSettings.DefaultHarnessId` and per-thread harness identity are durable.
 - Conversation reduction and persisted transcript records still use Codex-named types; the neutral harness layer adapts into that proven reducer.
 - Goals, dedicated review, account/rate limits, skills, effective configuration, and permission profiles remain Codex-specific.
-- Several nonvisual use-case services live in the App assembly, and `MainViewModel` remains the large cross-feature shell coordinator.
+- `MainViewModel` remains the large cross-feature shell coordinator and still performs presentation projection plus provider-event marshaling.
+- Goals, dedicated review, skills, account/rate limits, effective configuration, and permission profiles remain App-side Codex features rather than members of the portable conversation facade.
 - The manual composition root requires code changes for provider registration; plugin discovery and dynamic loading are not implemented.
 
 These are current implementation boundaries, not hidden abstractions. New work should preserve capability checks, local/remote conversation identity, detached snapshot ownership, thread-keyed background routing, atomic persistence, and explicit disposal.

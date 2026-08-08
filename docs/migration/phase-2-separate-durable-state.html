@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>SynthiaCode Migration - Phase 2: Separate Durable State</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f4f2ec;
+      --surface: #fffdf7;
+      --strong: #ffffff;
+      --ink: #1e2522;
+      --muted: #606a65;
+      --line: #d7d8d1;
+      --accent: #7250a8;
+      --accent-soft: #ede5fa;
+      --success: #24724a;
+      --success-soft: #e2f3e8;
+      --warning: #9b6210;
+      --warning-soft: #fff0d5;
+      --code: #eeeee8;
+      --shadow: 0 18px 48px rgb(38 31 23 / 9%);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #121211;
+        --surface: #1b1b19;
+        --strong: #22221f;
+        --ink: #efeee9;
+        --muted: #b4b4ac;
+        --line: #3d3c36;
+        --accent: #c9a8ff;
+        --accent-soft: #35244f;
+        --success: #88dca8;
+        --success-soft: #173824;
+        --warning: #ffca72;
+        --warning-soft: #402e11;
+        --code: #141412;
+        --shadow: 0 18px 48px rgb(0 0 0 / 30%);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 31rem), var(--page);
+      color: var(--ink);
+      font: 16px/1.65 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: var(--accent); text-underline-offset: .18em; }
+    code { padding: .12rem .34rem; border-radius: .32rem; background: var(--code); font: .9em "Cascadia Code", Consolas, monospace; }
+    h1, h2, h3 { line-height: 1.14; text-wrap: balance; }
+    h1 { max-width: 900px; margin: 0; font-size: clamp(2.35rem, 6.6vw, 5.2rem); letter-spacing: -.055em; }
+    h2 { margin: 0 0 1rem; font-size: clamp(1.65rem, 4vw, 2.45rem); letter-spacing: -.035em; }
+    h3 { margin: 0 0 .55rem; font-size: 1.06rem; }
+    p { text-wrap: pretty; }
+    pre { margin: 0; padding: 1rem; overflow: auto; background: var(--code); border-radius: .8rem; }
+    pre code { padding: 0; background: transparent; }
+    .shell { width: min(1140px, calc(100% - 2rem)); margin: 0 auto; }
+    .hero { padding: clamp(3.5rem, 8vw, 6.8rem) 0 2.6rem; }
+    .eyebrow { margin: 0 0 .7rem; color: var(--accent); font-size: .78rem; font-weight: 850; letter-spacing: .14em; text-transform: uppercase; }
+    .lede { max-width: 800px; margin: 1.25rem 0 0; color: var(--muted); font-size: clamp(1.04rem, 2vw, 1.24rem); }
+    .meta, .phase-links { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: 1.45rem; }
+    .pill { display: inline-flex; align-items: center; min-height: 2rem; padding: .25rem .78rem; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--surface) 88%, transparent); color: var(--muted); font-size: .86rem; font-weight: 700; text-decoration: none; }
+    .pill.success { border-color: color-mix(in srgb, var(--success) 38%, var(--line)); background: var(--success-soft); color: var(--success); }
+    .scoreboard { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .9rem; margin: 1rem auto 4rem; }
+    .score, .card, .check, .flow-node { border: 1px solid var(--line); border-radius: .95rem; background: var(--surface); box-shadow: var(--shadow); }
+    .score { padding: 1.2rem; }
+    .score strong { display: block; font-size: clamp(1.5rem, 3.5vw, 2.4rem); line-height: 1; letter-spacing: -.04em; }
+    .score span { display: block; margin-top: .55rem; color: var(--muted); font-size: .87rem; }
+    .layout { display: grid; grid-template-columns: 225px minmax(0, 1fr); gap: clamp(2rem, 6vw, 5rem); }
+    nav { position: sticky; top: 1rem; align-self: start; padding: 1rem; border-left: 2px solid var(--line); }
+    nav strong { display: block; margin-bottom: .5rem; font-size: .76rem; letter-spacing: .09em; text-transform: uppercase; }
+    nav a { display: block; padding: .3rem 0; color: var(--muted); text-decoration: none; }
+    nav a:hover { color: var(--accent); }
+    main section { margin-bottom: 4.6rem; scroll-margin-top: 1.5rem; }
+    .section-intro { max-width: 780px; margin-top: -.35rem; color: var(--muted); }
+    .checklist, .cards, .timeline { display: grid; gap: .85rem; margin-top: 1.3rem; }
+    .check { display: grid; grid-template-columns: 1.6rem 1fr; gap: .8rem; padding: 1rem 1.1rem; box-shadow: none; }
+    .check-mark { color: var(--success); font-weight: 900; }
+    .check p, .card p, .timeline p { margin: .25rem 0 0; color: var(--muted); }
+    .card { padding: 1.18rem; box-shadow: none; }
+    .card.application { border-left: 4px solid var(--accent); }
+    .card.guard { border-left: 4px solid var(--success); }
+    .card.lesson { border-left: 4px solid var(--warning); }
+    .tag { display: inline-block; margin-bottom: .5rem; color: var(--muted); font-size: .72rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+    .flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: stretch; gap: 1.8rem; margin-top: 1.4rem; }
+    .flow-node { position: relative; min-height: 9rem; padding: 1rem; box-shadow: none; }
+    .flow-node:not(:last-child)::after { content: "\2192"; position: absolute; right: -1.45rem; top: 50%; color: var(--accent); font-size: 1.45rem; font-weight: 800; transform: translateY(-50%); }
+    .flow-node small { display: block; margin-bottom: .45rem; color: var(--accent); font-weight: 800; text-transform: uppercase; }
+    .flow-node p { margin: .35rem 0 0; color: var(--muted); font-size: .9rem; }
+    .table-wrap { margin-top: 1.2rem; overflow-x: auto; border: 1px solid var(--line); border-radius: .9rem; }
+    table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: .92rem; }
+    th, td { padding: .9rem 1rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--strong); color: var(--muted); font-size: .74rem; letter-spacing: .06em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .timeline { counter-reset: entry; }
+    .timeline article { position: relative; padding: 0 0 1.25rem 2.6rem; border-left: 2px solid var(--line); }
+    .timeline article::before { counter-increment: entry; content: counter(entry); position: absolute; left: -.95rem; top: 0; display: grid; width: 1.8rem; height: 1.8rem; place-items: center; border-radius: 50%; background: var(--warning-soft); color: var(--warning); font-weight: 850; }
+    .lesson-line { padding: .65rem .8rem; border-radius: .6rem; background: var(--warning-soft); color: var(--ink) !important; }
+    details { margin-top: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--surface); }
+    summary { cursor: pointer; font-weight: 800; }
+    details pre { margin-top: 1rem; }
+    footer { margin-top: 4rem; padding: 2rem 0 3rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .88rem; }
+    @media (max-width: 900px) { .scoreboard, .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } .flow-node::after { display: none; } }
+    @media (max-width: 760px) { .scoreboard, .flow, .layout { grid-template-columns: 1fr; } nav { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-left: 0; border-top: 2px solid var(--line); } nav strong { grid-column: 1 / -1; } }
+    @media print { body { background: white; color: black; } nav { display: none; } .layout { display: block; } .score, .card, .check, .flow-node, table, details { box-shadow: none; break-inside: avoid; } a { color: black; } }
+  </style>
+</head>
+<body>
+  <header class="hero shell">
+    <p class="eyebrow">SynthiaCode architecture migration</p>
+    <h1>Phase 2: Separate Durable State</h1>
+    <p class="lede">The application still works with the established settings and thread model, while Infrastructure now stores preferences, catalog metadata, conversations, queues, and drafts through focused repositories.</p>
+    <div class="meta">
+      <span class="pill success">&#10003; Complete</span>
+      <span class="pill"><time datetime="2026-08-08">8 August 2026</time></span>
+      <span class="pill">Schema version 1</span>
+      <span class="pill">Release 0.1.0 import</span>
+    </div>
+    <div class="phase-links" aria-label="Migration phases">
+      <a class="pill" href="phase-1-move-feature-slice.html">&#8592; Phase 1 feature slice</a>
+      <a class="pill" href="../current-architecture.md">Current architecture</a>
+    </div>
+  </header>
+
+  <div class="shell scoreboard" aria-label="Phase 2 results">
+    <div class="score"><strong>5</strong><span>Focused durable repositories</span></div>
+    <div class="score"><strong>1/thread</strong><span>Versioned conversation files</span></div>
+    <div class="score"><strong>0&#8594;1</strong><span>Explicit release migration</span></div>
+    <div class="score"><strong>381/381</strong><span>Full test gate passed</span></div>
+  </div>
+
+  <div class="shell layout">
+    <nav aria-label="On this page">
+      <strong>Phase 2 record</strong>
+      <a href="#objectives">Objectives</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#storage">Storage layout</a>
+      <a href="#migration">Migration</a>
+      <a href="#mistakes">Mistakes</a>
+      <a href="#lessons">Lessons</a>
+      <a href="#verification">Verification</a>
+      <a href="#files">Files</a>
+      <a href="#handoff">Handoff</a>
+    </nav>
+
+    <main>
+      <section id="objectives">
+        <p class="eyebrow">Committed scope</p>
+        <h2>Objectives completed</h2>
+        <div class="checklist">
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Repository boundaries first</h3><p>Core now owns interfaces for legacy settings, preferences, catalog, conversations, queue state, draft state, and the commit manifest. JSON remains an Infrastructure concern.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Split durable documents</h3><p><code>preferences.json</code>, <code>catalog.json</code>, one versioned conversation file per thread, <code>queues.json</code>, and <code>drafts.json</code> replace new writes to the monolithic settings document.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Sequential migration</h3><p>A strict migrator accepts only adjacent version steps. Release 0.1.0 imports through the explicit 0-to-1 step.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Backup and one-time import</h3><p>The original <code>settings.json</code> bytes are preserved in <code>settings.release-0.1.0.backup.json</code>. A committed manifest prevents later re-import.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Keep memory stable</h3><p><code>AppSettings</code>, <code>PersistedProjectThread</code>, and presentation state were not redesigned. A golden reflection test pins that boundary.</p></div></div>
+        </div>
+      </section>
+
+      <section id="architecture">
+        <p class="eyebrow">Dependency direction</p>
+        <h2>One compatibility surface, several durable owners</h2>
+        <p class="section-intro"><code>ISettingsStore</code> remains the application-facing aggregate during this phase. The new adapter projects a deep snapshot into repositories and reconstructs the same in-memory graph on load.</p>
+        <div class="flow" role="img" aria-label="Application settings flow through a split adapter and mapper into focused repositories, then commit through the manifest.">
+          <div class="flow-node"><small>Existing callers</small><strong>ISettingsStore</strong><p>No workflow or presentation model migration in this phase.</p></div>
+          <div class="flow-node"><small>Compatibility adapter</small><strong>SplitJsonSettingsStore</strong><p>Serializes aggregate loads, saves, imports, and generations.</p></div>
+          <div class="flow-node"><small>Projection boundary</small><strong>DurableStateMapper</strong><p>Maps the stable graph to focused versioned documents.</p></div>
+          <div class="flow-node"><small>Durable owners</small><strong>JSON repositories</strong><p>Atomic file replacement, backup recovery, hashed conversation paths.</p></div>
+        </div>
+      </section>
+
+      <section id="storage">
+        <p class="eyebrow">Disk schema</p>
+        <h2>Storage layout</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Document</th><th>Owns</th><th>Excludes</th></tr></thead>
+            <tbody>
+              <tr><td><code>preferences.json</code></td><td>Theme, model defaults, policy settings, pane state, schema preferences.</td><td>Projects, threads, transcripts, queues, drafts.</td></tr>
+              <tr><td><code>catalog.json</code></td><td>Recent projects and thread identity, title, lifecycle, workspace, timestamps.</td><td>Transcript payloads and queued work.</td></tr>
+              <tr><td><code>conversations/&lt;sha256&gt;.json</code></td><td>Final response, timeline, raw events, turns, context usage for exactly one thread.</td><td>Queue and composer state.</td></tr>
+              <tr><td><code>queues.json</code></td><td>Queued follow-ups keyed by thread ID.</td><td>Conversation transcript.</td></tr>
+              <tr><td><code>drafts.json</code></td><td>Composer attachments and inline review comments.</td><td>Thread catalog and transcript.</td></tr>
+              <tr><td><code>storage-manifest.json</code></td><td>Committed schema, generation, and legacy-import provenance.</td><td>Feature data.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="migration">
+        <p class="eyebrow">Recovery and compatibility</p>
+        <h2>Import and commit protocol</h2>
+        <div class="cards">
+          <article class="card application"><span class="tag">Step 1</span><h3>Detect</h3><p>A valid manifest selects split storage. Without one, the adapter looks for the release 0.1.0 source or an earlier import backup.</p></article>
+          <article class="card application"><span class="tag">Step 2</span><h3>Preserve</h3><p>The old settings document is copied byte for byte once. Invalid backups fail closed instead of silently importing defaults.</p></article>
+          <article class="card application"><span class="tag">Step 3</span><h3>Migrate sequentially</h3><p>The registry requires exactly <code>n</code> to <code>n+1</code>. Missing, skipping, and downgrade paths throw explicit errors.</p></article>
+          <article class="card guard"><span class="tag">Step 4</span><h3>Commit last</h3><p>Data documents are written before the manifest. A loader accepts only the manifest generation and restores matching backups if a later generation was interrupted.</p></article>
+        </div>
+      </section>
+
+      <section id="mistakes">
+        <p class="eyebrow">Honest migration log</p>
+        <h2>Mistakes and corrections</h2>
+        <div class="timeline">
+          <article><h3>The first contracts build missed a harness namespace</h3><p><code>DurableStateContracts.cs</code> used <code>KnownHarnessIds</code> without importing its namespace, so the first Core compile failed with two errors.</p><p class="lesson-line"><strong>Correction:</strong> added the narrow import and rebuilt Core successfully before proceeding to Infrastructure.</p></article>
+          <article><h3>Per-file atomicity was not aggregate atomicity</h3><p>The initial storage sketch had atomic replacement for each JSON file, but a crash between files could still expose a mixed snapshot.</p><p class="lesson-line"><strong>Correction:</strong> added generation numbers, per-file backups, and a manifest written last. The interrupted-save characterization now proves rollback to the committed generation.</p></article>
+          <article><h3>The legacy loader was intentionally tolerant, but import must not be</h3><p><code>JsonSettingsStore.LoadAsync</code> historically recovers to defaults after unreadable JSON. Reusing that behavior during a destructive format migration could turn corruption into a successful empty import.</p><p class="lesson-line"><strong>Correction:</strong> import reads the immutable backup through a fail-closed repository method and commits nothing if that backup is invalid.</p></article>
+          <article><h3>Storage documentation and metadata assertions move together</h3><p>The current-architecture snapshot is executable documentation: changing its phase and verification count requires updating the release metadata guard in the same change.</p><p class="lesson-line"><strong>Correction:</strong> updated both and ran the focused metadata tests before the final full gate.</p></article>
+          <article><h3>One final full run hit a timing-sensitive Phase 1 case</h3><p>The follow-up-turn behavioral case briefly observed zero visible turns while the other 380 tests passed. No Phase 2 storage assertion failed.</p><p class="lesson-line"><strong>Correction:</strong> isolated the exact case, passed it once and then 10/10 stress runs, and reran the complete Release suite successfully without masking or weakening the test.</p></article>
+        </div>
+      </section>
+
+      <section id="lessons">
+        <p class="eyebrow">What carries forward</p>
+        <h2>Lessons for later phases</h2>
+        <div class="cards">
+          <article class="card lesson"><h3>Stabilize one axis at a time</h3><p>A disk migration is easier to prove when the in-memory model is pinned. Future domain-model changes can now target repository mappings instead of parsing legacy JSON everywhere.</p></article>
+          <article class="card lesson"><h3>A manifest is a small transaction log</h3><p>Multiple atomic files need a shared commit decision. Generation matching makes partial writes detectable and recoverable without a database.</p></article>
+          <article class="card lesson"><h3>Import provenance is durable state</h3><p>The manifest records the source release and import time, making one-time behavior observable and preventing a stale legacy file from regaining authority.</p></article>
+          <article class="card lesson"><h3>Deletion needs its own retention policy</h3><p>Unreferenced conversation files are currently ignored. Removing them safely should be a separate, tested maintenance operation after the committed catalog has aged past a recovery window.</p></article>
+        </div>
+      </section>
+
+      <section id="verification">
+        <p class="eyebrow">Evidence</p>
+        <h2>Verification gate</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Gate</th><th>Result</th></tr></thead>
+            <tbody>
+              <tr><td>Core and Infrastructure incremental builds</td><td>0 warnings, 0 errors</td></tr>
+              <tr><td>Phase 2 durable-state characterization</td><td>5 / 5 passed</td></tr>
+              <tr><td>Split round-trip</td><td>Preferences, catalog, transcript, queue, and draft content verified in their owning files</td></tr>
+              <tr><td>Release 0.1.0 import</td><td>Byte-exact backup, harness identity migration, manifest provenance, and no re-import verified</td></tr>
+              <tr><td>Interrupted aggregate save</td><td>Committed generation recovered from per-document backups</td></tr>
+              <tr><td>Transient follow-up timing audit</td><td>Isolated rerun passed; 10 / 10 stress runs passed</td></tr>
+              <tr><td>Authoritative full test gate</td><td>381 / 381 passed</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <details>
+          <summary>Authoritative command</summary>
+          <pre><code>dotnet test SynthiaCode.sln -c Release --no-restore
+
+Passed: 381  Failed: 0  Skipped: 0  Total: 381</code></pre>
+        </details>
+      </section>
+
+      <section id="files">
+        <p class="eyebrow">Change inventory</p>
+        <h2>Primary files</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Area</th><th>Files</th></tr></thead>
+            <tbody>
+              <tr><td>Core contracts and documents</td><td><a href="../../src/SynthiaCode.Core/Settings/DurableStateContracts.cs"><code>DurableStateContracts.cs</code></a></td></tr>
+              <tr><td>Mapping and migrations</td><td><a href="../../src/SynthiaCode.Infrastructure/Settings/DurableStateMapper.cs"><code>DurableStateMapper.cs</code></a>, <a href="../../src/SynthiaCode.Infrastructure/Settings/SequentialDurableStateMigrator.cs"><code>SequentialDurableStateMigrator.cs</code></a></td></tr>
+              <tr><td>JSON repositories</td><td><a href="../../src/SynthiaCode.Infrastructure/Settings/JsonDurableStateRepositories.cs"><code>JsonDurableStateRepositories.cs</code></a>, <a href="../../src/SynthiaCode.Infrastructure/Settings/JsonSettingsStore.cs"><code>JsonSettingsStore.cs</code></a></td></tr>
+              <tr><td>Aggregate and composition</td><td><a href="../../src/SynthiaCode.Infrastructure/Settings/SplitJsonSettingsStore.cs"><code>SplitJsonSettingsStore.cs</code></a>, <a href="../../src/SynthiaCode.App/AppServices.cs"><code>AppServices.cs</code></a></td></tr>
+              <tr><td>Characterization</td><td><a href="../../src/SynthiaCode.Tests/Phase2DurableStateTests.cs"><code>Phase2DurableStateTests.cs</code></a>, <a href="../../src/SynthiaCode.Tests/ReleaseMetadataTests.cs"><code>ReleaseMetadataTests.cs</code></a></td></tr>
+              <tr><td>Architecture record</td><td><a href="../current-architecture.md"><code>current-architecture.md</code></a>, this changelog</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="handoff">
+        <p class="eyebrow">Phase boundary</p>
+        <h2>What Phase 2 deliberately leaves stable</h2>
+        <p class="section-intro">Application use cases still receive <code>ISettingsStore</code>, and the aggregate in-memory settings graph remains the compatibility surface. That is deliberate: the disk schema changed in this phase; later work can narrow use-case repositories without combining two migrations in one review.</p>
+        <div class="card guard"><h3>Stable handoff</h3><p>Durable ownership is now explicit, legacy import is reversible through its backup, and every loaded document must belong to one committed generation.</p></div>
+      </section>
+    </main>
+  </div>
+
+  <footer><div class="shell">SynthiaCode migration record &middot; Phase 2 &middot; Generated from verified repository state on <time datetime="2026-08-08">8 August 2026</time>.</div></footer>
+</body>
+</html>

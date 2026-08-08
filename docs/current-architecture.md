@@ -1,9 +1,9 @@
 # SynthiaCode: Current Architecture
 
-**Recorded:** 6 August 2026
+**Recorded:** 8 August 2026
 **Last code-verified:** 8 August 2026
 **Release:** 0.1.0
-**Phase:** Architecture migration Phase 1, with the complete conversation feature slice moved behind an Application facade
+**Phase:** Architecture migration Phase 2, with durable state separated behind repository contracts
 **Purpose:** Describe the current architecture, presentation shell, runtime and persistence boundaries, implemented desktop workflows, and release verification baseline.
 
 ## System shape
@@ -14,7 +14,7 @@ The solution is a Windows-only WPF desktop application with seven projects:
 | --- | --- | --- |
 | `SynthiaCode.Core` | Provider-neutral harness models and events; settings, thread, attachment, Git, worktree, terminal, auth, logging, and Codex protocol-domain contracts; conversation reduction | None |
 | `SynthiaCode.Application` | Harness registry and runtime; the conversation feature facade; workspace state ownership; thread lifecycle, turn execution, persistence, and queued-dispatch orchestration | Core |
-| `SynthiaCode.Infrastructure` | Codex CLI/app-server transport, JSON settings, Git, worktrees, ConPTY terminal, auth, logging | Core |
+| `SynthiaCode.Infrastructure` | Codex CLI/app-server transport, split JSON durable-state repositories and legacy import, Git, worktrees, ConPTY terminal, auth, logging | Core |
 | `SynthiaCode.Harnesses.Codex` | Adapter from neutral harness commands/events to Codex app-server types, operations, and notifications | Application and Core |
 | `SynthiaCode.Harnesses.InMemory` | Deterministic, process-free harness implementation used to prove and test the provider boundary | Application and Core |
 | `SynthiaCode.App` | WPF composition root, windows, theme resources, feature view models, UI services, and Codex-specific side features such as review, goals, and skills | Application, Core, Codex harness, and Infrastructure |
@@ -39,7 +39,7 @@ flowchart LR
     Tests --> CodexHarness
 ```
 
-`AppServices.Create()` is the manual composition root. It constructs concrete infrastructure, registers the production `CodexHarness`, creates one `ConversationFeatureFacade`, and supplies that facade to `MainViewModel`. `SynthiaCode.Harnesses.InMemory` is referenced by tests but is not registered in the production app. There is no external dependency-injection container.
+`AppServices.Create()` is the manual composition root. It constructs concrete infrastructure, wraps `SplitJsonSettingsStore` in `CoalescingSettingsStore`, registers the production `CodexHarness`, creates one `ConversationFeatureFacade`, and supplies that facade to `MainViewModel`. `SynthiaCode.Harnesses.InMemory` is referenced by tests but is not registered in the production app. There is no external dependency-injection container.
 
 The architecture is layered but deliberately pragmatic rather than a strict clean-architecture implementation. Core has no project dependencies. Application contains the portable harness runtime and the complete conversation feature slice. Infrastructure contains operating-system and process adapters. Provider translation lives in a harness project. App owns WPF and intentionally retains Codex-specific side features until portable contracts exist for them.
 
@@ -62,7 +62,7 @@ flowchart TB
     Shell --> SideFeatures["Codex review, goals, skills"]
     Shell --> Git["GitService / WorktreeService"]
     Shell --> Terminal["ConPTY terminal sessions"]
-    Shell --> Storage["JSON settings / attachments / isolated CODEX_HOME / logs"]
+    Shell --> Storage["Split durable state / attachments / isolated CODEX_HOME / logs"]
 ```
 
 ## Startup and shutdown
@@ -340,15 +340,24 @@ Each terminal buffer is capped at 250,000 characters. Phase 5B replaced the orig
 
 ### Persistence
 
-The composition root exposes a `CoalescingSettingsStore` around `JsonSettingsStore`. Inside the Application conversation facade, thread transcript saves run through `ThreadStatePersistenceUseCaseService`, queued-follow-up saves run through `FollowUpQueueUseCaseService`, and lifecycle transactions persist through `ThreadLifecycleUseCaseService`. Shell preferences remain narrow `MainViewModel` saves. Requests arriving within 75 ms are collapsed into one physical write containing the latest immutable deep snapshot.
+The composition root exposes a `CoalescingSettingsStore` around `SplitJsonSettingsStore`. Inside the Application conversation facade, thread transcript saves run through `ThreadStatePersistenceUseCaseService`, queued-follow-up saves run through `FollowUpQueueUseCaseService`, and lifecycle transactions persist through `ThreadLifecycleUseCaseService`. Shell preferences remain narrow `MainViewModel` saves. Requests arriving within 75 ms are collapsed into one logical aggregate snapshot; the split adapter then projects that unchanged `AppSettings` snapshot into focused repository documents.
 
-`JsonSettingsStore` serializes writes through a gate, flushes the complete settings graph to a write-through `settings.json.tmp`, and replaces `settings.json` with an overwrite move. Loading promotes a valid newer temporary file when an interrupted save left the primary missing or corrupt.
+Repository contracts for preferences, the project/thread catalog, conversations, queues, drafts, the commit manifest, and legacy settings belong to Core. Their JSON implementations belong to Infrastructure. `AppSettings`, `PersistedProjectThread`, and the presentation model did not change in Phase 2; `DurableStateMapper` is the anti-corruption boundary between the established in-memory graph and the new disk documents.
+
+Each physical document carries schema version 1 and a monotonically increasing generation. Repositories write through a temporary file and retain the preceding primary as a backup. Preferences, catalog, conversation files, queue state, and draft state are written first; `storage-manifest.json` is moved last as the commit marker. Loading accepts only documents matching the committed generation and recovers a matching backup after an interrupted multi-file save. Conversation filenames are SHA-256 hashes of thread IDs, while the versioned document retains and validates the original thread ID.
+
+If no manifest exists, `JsonSettingsStore` acts only as the release 0.1.0 repository adapter. The original bytes are copied once to `settings.release-0.1.0.backup.json`, an explicit 0-to-1 migration runs, and the imported split generation is committed. Once the manifest exists, `settings.json` is never consulted again. An interrupted import retries from the immutable backup.
 
 The application has no separate database. Its durable and external storage locations are:
 
 | Data | Location / owner | Lifecycle |
 | --- | --- | --- |
-| Settings, projects, thread cache, queues, and drafts | `%LOCALAPPDATA%\SynthiaCode\settings.json` | Atomic replacement with interrupted-save recovery. |
+| Preferences | `%LOCALAPPDATA%\SynthiaCode\preferences.json` | Versioned, generation-checked atomic replacement. |
+| Project/thread catalog | `%LOCALAPPDATA%\SynthiaCode\catalog.json` | Project metadata and thread lifecycle/index fields only. |
+| Conversation transcripts | `%LOCALAPPDATA%\SynthiaCode\conversations\<thread-hash>.json` | One versioned file per cataloged conversation. |
+| Queues and composer drafts | `%LOCALAPPDATA%\SynthiaCode\queues.json` and `drafts.json` | Stored independently from transcripts and preferences. |
+| Durable commit marker | `%LOCALAPPDATA%\SynthiaCode\storage-manifest.json` | Written last; selects the only committed generation. |
+| Release 0.1.0 import source | `%LOCALAPPDATA%\SynthiaCode\settings.json` and `settings.release-0.1.0.backup.json` | Byte-exact backup and one-time import; ignored after a manifest is committed. |
 | Managed attachment snapshots | `%LOCALAPPDATA%\SynthiaCode\attachments` | Content-addressed objects plus bounded staging/orphan cleanup based on persisted references. |
 | General projectless workspace | `%LOCALAPPDATA%\SynthiaCode\workspaces\general` | Created on startup and constrained beneath app data. |
 | Codex configuration and state | `%LOCALAPPDATA%\SynthiaCode\codex-home` | Passed only to child Codex processes through `CODEX_HOME`; the parent environment is unchanged. |
@@ -356,9 +365,9 @@ The application has no separate database. Its durable and external storage locat
 | Assistant worktree registry | `<git-common-dir>\synthiacode\worktrees.json` | Records ownership so only SynthiaCode-created worktrees can be removed. |
 | Assistant worktree checkout | Sibling `<repository-name>.worktrees\<task-id>` | Created with a `codex/<task-id>` branch; cleanup requires registry ownership and direct-child containment. |
 
-Persisted and presented thread state are separate. `AppSettings.ProjectThreads` contains storage-only `PersistedProjectThread` DTOs. `ThreadStore` maps those records to observable `ProjectThreadState` objects for presentation and maps changes back on upsert. JSON property names were preserved, and a literal legacy-settings regression verifies backward-compatible loading without migration.
+Persisted and presented thread state remain separate. `AppSettings.ProjectThreads` contains storage-only `PersistedProjectThread` DTOs. `ThreadStore` maps those records to observable `ProjectThreadState` objects for presentation and maps changes back on upsert. A golden property-shape test prevents the disk migration from silently changing this established in-memory contract.
 
-Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 conversation turns. Each persisted turn retains at most 100 activity items plus attachment metadata, prompt-version state, and generated-image paths. Attachment references in drafts, queues, and turns participate in managed-store cleanup. At baseline, the local `settings.json` was 144,872 bytes. Every physical save emits `settings_saved` duration/size telemetry, while each coordinator batch emits logical request and coalesced-request counts. The synthetic burst baseline is 20 logical requests to one physical write.
+Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 conversation turns. Each persisted turn retains at most 100 activity items plus attachment metadata, prompt-version state, and generated-image paths. Attachment references in drafts, queues, and turns participate in managed-store cleanup. At the historical baseline, the single local `settings.json` was 144,872 bytes. Split commits emit `durable_state_saved` generation, duration, and thread-count telemetry, while each coordinator batch continues to emit logical request and coalesced-request counts. The synthetic burst baseline remains 20 logical requests to one aggregate commit.
 
 ## Concurrency and failure model
 
@@ -367,7 +376,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 - `AppServerSessionCoordinator` serializes connection replacement and associates approval requests with one client generation. Responses from a stale connection are rejected.
 - Agent-message deltas are coalesced for 50 ms by thread, turn, and item. A non-delta notification flushes pending text first, preserving protocol order.
 - Harness connection creation is serialized and cached per provider. `IConversationWorkspace` serializes turn reduction and detached snapshot creation; a recorded completion cannot be reopened by a delayed start continuation, and notification-before-response ordering binds the same pending turn.
-- Settings requests inside a 75 ms window share one immutable physical snapshot. Queue dispatch uses a per-thread semaphore and persists `Starting` before contacting the provider.
+- Settings requests inside a 75 ms window share one immutable aggregate snapshot. A generation manifest commits the projected repository documents as one recoverable durable state. Queue dispatch uses a per-thread semaphore and persists `Starting` before contacting the provider.
 - Git, worktree, Codex utility, app-server, and terminal processes are cancellable; owned hidden process trees are terminated during cancellation or disposal. Visible login/logout consoles are intentionally transferred to the user.
 - Shutdown is idempotent. It stops new UI actions, cancels active turns, releases terminal and queue resources, flushes pending notifications, disposes harness/provider sessions, then persists final local state.
 
@@ -386,7 +395,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 
 `dotnet test SynthiaCode.sln` is the authoritative local gate on Windows with the .NET 10 SDK selected by `global.json`. The test project references every production layer plus the in-memory harness. Coverage combines pure contract/reducer/use-case tests, fake app-server transports, deterministic harness parity tests, temporary-repository Git/worktree tests, local bare-repository push integration tests, and WPF presentation tests hosted on a dedicated STA dispatcher. Test collections and process-level test parallelism are disabled because WPF application state, native terminal resources, and shared process fixtures require deterministic ownership.
 
-Repository-wide build policy lives in `.editorconfig`, `Directory.Build.props`, and `Directory.Packages.props`. Builds are deterministic, CI treats warnings as errors, and external package versions are centrally owned. `ArchitectureBoundaryTests` locks the production project graph, namespace ownership and forbidden upward imports, and confines WPF/Windows targeting to the App project. Phase 0 golden characterization tests preserve conversation reduction, queued dispatch, reconnect, and persistence-migration behavior. Phase 1 architecture tests pin Application ownership, the single facade constructor boundary, callback-free requests, detached workspace events, and terminal turn ordering.
+Repository-wide build policy lives in `.editorconfig`, `Directory.Build.props`, and `Directory.Packages.props`. Builds are deterministic, CI treats warnings as errors, and external package versions are centrally owned. `ArchitectureBoundaryTests` locks the production project graph, namespace ownership and forbidden upward imports, and confines WPF/Windows targeting to the App project. Phase 0 golden characterization tests preserve conversation reduction, queued dispatch, reconnect, and persistence-migration behavior. Phase 1 architecture tests pin Application ownership, the single facade constructor boundary, callback-free requests, detached workspace events, and terminal turn ordering. Phase 2 tests pin repository ownership, the unchanged in-memory settings shape, split-file contents, one-time release import, strictly sequential migrations, and generation recovery.
 
 GitHub Actions restores and runs the Release test suite on `windows-latest`. Main-branch, tag, and manual workflows publish a self-contained `win-x64` portable folder; a tag matching the app project's semantic version also produces a ZIP and SHA-256 checksum GitHub release. The app project is `net10.0-windows`/WPF; the non-WPF Core, Application, harness, and Infrastructure libraries target `net10.0`.
 
@@ -402,6 +411,7 @@ The current seams are explicit:
 - `MainViewModel` remains the large cross-feature shell coordinator and still performs presentation projection plus provider-event marshaling.
 - Goals, dedicated review, skills, account/rate limits, effective configuration, and permission profiles remain App-side Codex features rather than members of the portable conversation facade.
 - The manual composition root requires code changes for provider registration; plugin discovery and dynamic loading are not implemented.
+- Conversation files that are no longer referenced by the committed catalog are ignored but not yet compacted; a future maintenance policy can remove them only after a safe retention window.
 
 These are current implementation boundaries, not hidden abstractions. New work should preserve capability checks, local/remote conversation identity, detached snapshot ownership, thread-keyed background routing, atomic persistence, and explicit disposal.
 
@@ -434,7 +444,7 @@ The next two tables are retained as the dated Phase 5B and release 0.1.0 optimiz
 | --- | --- | --- |
 | `MainViewModel.cs` | 3,502 physical lines | Thread lifecycle, turn execution, queue dispatch, and thread-state persistence execute behind explicit application use-case services; the remaining size is shell/UI projection and cross-feature coordination. |
 | `MainWindow.xaml` | 444 physical lines | Custom chrome, adaptive three-zone shell, compact drawers, lower terminal dock, inspector, status, and approval hosting. |
-| Behavioral suite | 262 passing tests | Includes 259 existing behavioral cases plus three focused release/architecture metadata regressions, all discovered individually by xUnit. |
+| xUnit suite | 381 passing tests | Includes the 307-case legacy behavioral matrix plus focused architecture, migration, integration, and presentation tests discovered individually by xUnit. |
 | Startup shell/readiness | 541 ms / 759 ms | unchanged |
 | Codex long stream | 25,001 notifications, 2 UI batches, 20.71 MiB, 40.25 ms | same batching/allocation bound; synthetic CPU time varies locally |
 | Terminal storage/presentation | 39.06 MiB in 2.24 ms; 250,000 retained; 100 chunks to 1 UI update | faster storage run; same presentation bound |

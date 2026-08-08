@@ -5,7 +5,7 @@ using SynthiaCode.Core.Settings;
 
 namespace SynthiaCode.Infrastructure.Settings;
 
-public sealed class JsonSettingsStore : ISettingsStore
+public sealed class JsonSettingsStore : ILegacySettingsRepository
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
@@ -19,12 +19,32 @@ public sealed class JsonSettingsStore : ISettingsStore
     {
         Directory.CreateDirectory(appDataDirectory);
         SettingsPath = Path.Combine(appDataDirectory, "settings.json");
+        BackupPath = Path.Combine(appDataDirectory, "settings.release-0.1.0.backup.json");
         this.logger = logger;
     }
 
     public string SettingsPath { get; }
 
+    public string BackupPath { get; }
+
+    public bool Exists => File.Exists(SettingsPath) || File.Exists(SettingsPath + ".tmp");
+
+    public bool BackupExists => File.Exists(BackupPath);
+
     public async Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default)
+    {
+        var settings = await TryLoadAuthoritativeAsync(cancellationToken).ConfigureAwait(false);
+        if (settings is not null)
+        {
+            return settings;
+        }
+
+        settings = new AppSettings();
+        AppSettingsHarnessMigration.Apply(settings);
+        return settings;
+    }
+
+    private async Task<AppSettings?> TryLoadAuthoritativeAsync(CancellationToken cancellationToken)
     {
         var tempPath = SettingsPath + ".tmp";
         var temporaryAttempted = false;
@@ -60,9 +80,7 @@ public sealed class JsonSettingsStore : ISettingsStore
             }
         }
 
-        var settings = new AppSettings();
-        AppSettingsHarnessMigration.Apply(settings);
-        return settings;
+        return null;
     }
 
     private void PromoteTemporaryFile(string tempPath)
@@ -140,6 +158,43 @@ public sealed class JsonSettingsStore : ISettingsStore
         {
             saveGate.Release();
         }
+    }
+
+    public async Task CreateBackupAsync(CancellationToken cancellationToken = default)
+    {
+        await saveGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (File.Exists(BackupPath))
+            {
+                return;
+            }
+
+            var source = await TryLoadAuthoritativeAsync(cancellationToken).ConfigureAwait(false);
+            if (source is null || !File.Exists(SettingsPath))
+            {
+                throw new InvalidDataException(
+                    "The release 0.1.0 settings document is missing or invalid and cannot be backed up.");
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Copy(SettingsPath, BackupPath, overwrite: false);
+            logger.Log(
+                AppLogLevel.Information,
+                "legacy_settings_backup_created",
+                "The release 0.1.0 settings document was backed up before import.");
+        }
+        finally
+        {
+            saveGate.Release();
+        }
+    }
+
+    public async Task<AppSettings> LoadBackupAsync(CancellationToken cancellationToken = default)
+    {
+        var settings = await TryLoadAsync(BackupPath, cancellationToken).ConfigureAwait(false);
+        return settings ?? throw new InvalidDataException(
+            "The release 0.1.0 settings backup is missing or invalid.");
     }
 
     private void TryDeleteStaleTemporaryFile(string tempPath)

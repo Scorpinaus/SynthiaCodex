@@ -142,7 +142,7 @@ public sealed class AppServices
         var appDataDirectory = SystemPaths.AppDataDirectory;
         var logger = new FileAppLogger(appDataDirectory);
         var settingsStore = new CoalescingSettingsStore(
-            new JsonSettingsStore(appDataDirectory, logger),
+            new SplitJsonSettingsStore(appDataDirectory, logger),
             logger);
         var codexRuntimeEnvironment = new CodexRuntimeEnvironment(SystemPaths.CodexHomeDirectory);
         CodexDiagnosticStoreMaintenance.TrimOversizedStore(codexRuntimeEnvironment.HomePath, logger);

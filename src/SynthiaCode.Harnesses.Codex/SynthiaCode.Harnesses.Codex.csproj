@@ -3,7 +3,6 @@
   <ItemGroup>
     <ProjectReference Include="..\SynthiaCode.Application\SynthiaCode.Application.csproj" />
     <ProjectReference Include="..\SynthiaCode.Core\SynthiaCode.Core.csproj" />
-    <ProjectReference Include="..\SynthiaCode.Infrastructure\SynthiaCode.Infrastructure.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

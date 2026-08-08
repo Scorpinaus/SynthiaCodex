@@ -2032,7 +2032,11 @@ static async Task TestViewModelQueuesAndDrainsFollowUpAsync()
 
     var preflightStart = transport.ClientMessages.Count;
     transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-queue","turn":{"id":"turn-queue-1","status":"completed","items":[]}}}""");
-    var queuedTurn = await CompleteQueuedDispatchPreflightAsync(transport, projectPath, preflightStart);
+    var queuedTurn = await CompleteQueuedDispatchPreflightAsync(
+        transport,
+        projectPath,
+        preflightStart,
+        () => $"status={viewModel.StatusMessage}; queue={string.Join(",", viewModel.TaskWorkspace.QueuedFollowUps.Select(item => $"{item.State}:{item.LastError}"))}");
     AssertJsonString("turn/start", queuedTurn, "method", "queued follow-up starts a new turn");
     AssertJsonString("thread-queue", queuedTurn, "params.threadId", "queued follow-up stays on its thread");
     AssertJsonString("Run the focused queue tests next", queuedTurn, "params.input.0.text", "queued follow-up prompt");
@@ -2162,7 +2166,11 @@ static async Task TestViewModelDrainsQueuedFollowUpOnBackgroundThreadAsync()
 
     var preflightStart = transport.ClientMessages.Count;
     transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-background-a","turn":{"id":"turn-background-a-1","status":"completed","items":[]}}}""");
-    var queuedTurn = await CompleteQueuedDispatchPreflightAsync(transport, projectPath, preflightStart);
+    var queuedTurn = await CompleteQueuedDispatchPreflightAsync(
+        transport,
+        projectPath,
+        preflightStart,
+        () => $"status={viewModel.StatusMessage}; queue={string.Join(",", settingsStore.SavedSettings.ProjectThreads.Single(thread => thread.ThreadId == "thread-background-a").QueuedFollowUps.Select(item => $"{item.State}:{item.LastError}"))}");
     AssertJsonString("turn/start", queuedTurn, "method", "background queued follow-up starts a turn");
     AssertJsonString("thread-background-a", queuedTurn, "params.threadId", "background queued follow-up stays on its owning thread");
     AssertJsonString("Queued work for the first thread", queuedTurn, "params.input.0.text", "background queued prompt");
@@ -2173,7 +2181,9 @@ static async Task TestViewModelDrainsQueuedFollowUpOnBackgroundThreadAsync()
         "background queued follow-up acknowledged and persisted");
     AssertEqual("thread-background-b", viewModel.SelectedThread?.ThreadId, "background drain does not change selection");
     AssertTrue(viewModel.IsTurnRunning, "selected second thread remains running");
-    AssertTrue(viewModel.ProjectThreads.Single(thread => thread.ThreadId == "thread-background-a").IsRunning, "background queued turn has running indicator");
+    await WaitUntilAsync(
+        () => viewModel.ProjectThreads.Single(thread => thread.ThreadId == "thread-background-a").IsRunning,
+        "background queued turn has running indicator");
 
     transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-background-a","turn":{"id":"turn-background-a-2","status":"completed","items":[]}}}""");
     transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-background-b","turn":{"id":"turn-background-b-1","status":"completed","items":[]}}}""");
@@ -3232,7 +3242,8 @@ static async Task CompleteAutomaticThreadRenameAsync(
 static async Task<JsonObject> CompleteQueuedDispatchPreflightAsync(
     FakeAppServerTransport transport,
     string workspacePath,
-    int nextMessage)
+    int nextMessage,
+    Func<string>? describeState = null)
 {
     var modelRequest = await WaitForNextRequestAsync("model/list");
     Respond(
@@ -3256,7 +3267,16 @@ static async Task<JsonObject> CompleteQueuedDispatchPreflightAsync(
         profilesRequest,
         """{"data":[{"id":":workspace","description":"Workspace boundary","allowed":true}]}""");
 
-    return await WaitForNextRequestAsync("turn/start");
+    try
+    {
+        return await WaitForNextRequestAsync("turn/start");
+    }
+    catch (TaskCanceledException ex)
+    {
+        throw new InvalidOperationException(
+            $"Queued dispatch did not send turn/start. {describeState?.Invoke() ?? "No state diagnostics were supplied."}",
+            ex);
+    }
 
     void Respond(JsonObject request, string result) =>
         transport.ServerSend($"{{\"id\":{request["id"]!.ToJsonString()},\"result\":{result}}}");

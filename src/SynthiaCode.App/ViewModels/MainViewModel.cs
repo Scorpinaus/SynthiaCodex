@@ -2797,9 +2797,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             var harnessId = ResolveHarnessId(SelectedThread);
-            var session = await harnessRuntimeCoordinator.GetOrConnectAsync(
+            var session = await EnsureHarnessSessionAsync(
                 harnessId,
-                CreateHarnessConnectionOptions(GetActiveWorkspacePathIfAvailable()),
+                GetActiveWorkspacePathIfAvailable(),
                 appServerWarmUpCancellation.Token).ConfigureAwait(true);
             CodexAccountInfo? account = null;
             if (harnessId == HarnessId.Codex)
@@ -3479,7 +3479,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         await appServerSessionCoordinator.EnsureConnectedAsync(currentCodex, cancellationToken).ConfigureAwait(true);
     }
 
-    private async Task EnsureHarnessSessionAsync(
+    private async Task<IHarnessSession> EnsureHarnessSessionAsync(
         HarnessId harnessId,
         string? workspacePath,
         CancellationToken cancellationToken = default)
@@ -3489,7 +3489,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             await EnsureAppServerSessionAsync(cancellationToken).ConfigureAwait(true);
         }
 
-        await harnessRuntimeCoordinator.GetOrConnectAsync(
+        return await harnessRuntimeCoordinator.GetOrConnectAsync(
             harnessId,
             CreateHarnessConnectionOptions(workspacePath),
             cancellationToken).ConfigureAwait(true);

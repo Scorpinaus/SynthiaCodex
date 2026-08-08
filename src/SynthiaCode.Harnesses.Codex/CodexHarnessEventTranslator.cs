@@ -38,13 +38,7 @@ public static class CodexHarnessEventTranslator
                     occurredAt)],
             CodexAppServerNotificationKind.TurnCompleted
                 when threadId is not null && turnId is not null =>
-                [new TurnCompletedEvent(
-                    HarnessId.Codex,
-                    threadId,
-                    turnId,
-                    ParseStatus(notification.TurnStatus),
-                    ReadString(notification.Params, "turn.error.message") ?? ReadString(notification.Params, "error.message"),
-                    occurredAt)],
+                TranslateTurnCompleted(notification, threadId, turnId, occurredAt),
             CodexAppServerNotificationKind.ThreadTokenUsageUpdated when threadId is not null =>
                 TranslateUsage(notification.Params, threadId, occurredAt),
             CodexAppServerNotificationKind.ThreadCompacted when threadId is not null =>
@@ -83,6 +77,66 @@ public static class CodexHarnessEventTranslator
             delta,
             timestamp)];
     }
+
+    private static IReadOnlyList<HarnessEvent> TranslateTurnCompleted(
+        CodexAppServerNotification notification,
+        string threadId,
+        string turnId,
+        DateTimeOffset timestamp)
+    {
+        var message = ReadString(notification.Params, "turn.error.message") ??
+            ReadString(notification.Params, "error.message");
+        var additionalDetails = ReadString(notification.Params, "turn.error.additionalDetails") ??
+            ReadString(notification.Params, "error.additionalDetails");
+        var detail = JoinErrorDetail(message, additionalDetails);
+        var completed = new TurnCompletedEvent(
+            HarnessId.Codex,
+            threadId,
+            turnId,
+            ParseStatus(notification.TurnStatus),
+            detail,
+            timestamp);
+        var statusCode = ReadLong(
+            notification.Params,
+            "turn.error.codexErrorInfo.responseStreamDisconnected.httpStatusCode") ??
+            ReadLong(notification.Params, "error.codexErrorInfo.responseStreamDisconnected.httpStatusCode") ??
+            ReadLong(notification.Params, "turn.error.codexErrorInfo.httpConnectionFailed.httpStatusCode");
+        if (statusCode == 401 || ContainsAuthenticationFailure(detail))
+        {
+            return
+            [
+                new AuthenticationRequiredEvent(
+                    HarnessId.Codex,
+                    threadId,
+                    detail ?? "Codex authentication is required.",
+                    timestamp),
+                completed
+            ];
+        }
+
+        return [completed];
+    }
+
+    private static string? JoinErrorDetail(string? message, string? additionalDetails)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return string.IsNullOrWhiteSpace(additionalDetails) ? null : additionalDetails;
+        }
+        if (string.IsNullOrWhiteSpace(additionalDetails) ||
+            message.Contains(additionalDetails, StringComparison.OrdinalIgnoreCase))
+        {
+            return message;
+        }
+        return $"{message} ({additionalDetails})";
+    }
+
+    private static bool ContainsAuthenticationFailure(string? detail) =>
+        !string.IsNullOrWhiteSpace(detail) &&
+        (detail.Contains("401", StringComparison.OrdinalIgnoreCase) ||
+         detail.Contains("unauthorized", StringComparison.OrdinalIgnoreCase) ||
+         detail.Contains("missing bearer", StringComparison.OrdinalIgnoreCase) ||
+         detail.Contains("authentication required", StringComparison.OrdinalIgnoreCase));
 
     private static IReadOnlyList<HarnessEvent> TranslateCompletedAgentMessage(
         CodexAppServerNotification notification,

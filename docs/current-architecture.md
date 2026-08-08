@@ -15,7 +15,7 @@ The solution is a Windows-only WPF desktop application with seven projects:
 | `SynthiaCode.Core` | Provider-neutral harness models and events; settings, thread, attachment, Git, worktree, terminal, auth, logging, and Codex protocol-domain contracts; conversation reduction | None |
 | `SynthiaCode.Application` | Harness registry, capability-gated feature contracts, session lifecycle, and provider-neutral conversation operations | Core |
 | `SynthiaCode.Infrastructure` | Codex CLI/app-server transport, JSON settings, Git, worktrees, ConPTY terminal, auth, logging | Core |
-| `SynthiaCode.Harnesses.Codex` | Adapter from neutral harness commands/events to Codex app-server types, operations, and notifications | Application, Core, and Infrastructure |
+| `SynthiaCode.Harnesses.Codex` | Adapter from neutral harness commands/events to Codex app-server types, operations, and notifications | Application and Core |
 | `SynthiaCode.Harnesses.InMemory` | Deterministic, process-free harness implementation used to prove and test the provider boundary | Application and Core |
 | `SynthiaCode.App` | WPF composition root, windows, theme resources, feature view models, UI services, and nonvisual application use cases | Application, Core, Codex harness, and Infrastructure |
 | `SynthiaCode.Tests` | xUnit-discovered behavioral and integration-style test suite; the executable entry point remains only as a UTF-8 transport fixture | All production projects plus the in-memory harness |
@@ -29,7 +29,6 @@ flowchart LR
     App --> Infrastructure["SynthiaCode.Infrastructure"]
     App --> Core["SynthiaCode.Core"]
     CodexHarness --> Application
-    CodexHarness --> Infrastructure
     CodexHarness --> Core
     InMemory["SynthiaCode.Harnesses.InMemory"] --> Application
     InMemory --> Core
@@ -378,6 +377,8 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 ## Testing, build, and delivery
 
 `dotnet test SynthiaCode.sln` is the authoritative local gate on Windows with the .NET 10 SDK selected by `global.json`. The test project references every production layer plus the in-memory harness. Coverage combines pure contract/reducer/use-case tests, fake app-server transports, deterministic harness parity tests, temporary-repository Git/worktree tests, local bare-repository push integration tests, and WPF presentation tests hosted on a dedicated STA dispatcher. Test collections and process-level test parallelism are disabled because WPF application state, native terminal resources, and shared process fixtures require deterministic ownership.
+
+Repository-wide build policy lives in `.editorconfig`, `Directory.Build.props`, and `Directory.Packages.props`. Builds are deterministic, CI treats warnings as errors, and external package versions are centrally owned. `ArchitectureBoundaryTests` locks the production project graph, namespace ownership and forbidden upward imports, and confines WPF/Windows targeting to the App project. Phase 0 golden characterization tests preserve conversation reduction, queued dispatch, reconnect, and persistence-migration behavior before later structural refactoring.
 
 GitHub Actions restores and runs the Release test suite on `windows-latest`. Main-branch, tag, and manual workflows publish a self-contained `win-x64` portable folder; a tag matching the app project's semantic version also produces a ZIP and SHA-256 checksum GitHub release. The app project is `net10.0-windows`/WPF; the non-WPF Core, Application, harness, and Infrastructure libraries target `net10.0`.
 

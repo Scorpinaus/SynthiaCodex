@@ -11,7 +11,7 @@ public static class CodexHarnessMappings
         var policy = command.Options.ExecutionPolicy;
         return new CodexThreadStartOptions(
             Model: command.Options.ModelId,
-            Sandbox: policy?.WorkspaceAccess.ToCodex(),
+            Sandbox: ToCodexSandbox(policy),
             ApprovalPolicy: policy?.ApprovalMode.ToCodexPolicy(),
             ApprovalsReviewer: policy?.ApprovalMode.ToCodexReviewer(),
             PermissionProfileId: policy?.ProfileId,
@@ -30,7 +30,7 @@ public static class CodexHarnessMappings
         return new CodexThreadResumeRequest(
             command.Address.RequireRemoteId(),
             command.WorkspacePath ?? string.Empty,
-            policy?.WorkspaceAccess.ToCodex(),
+            ToCodexSandbox(policy),
             command.Options.ModelId,
             policy?.ApprovalMode.ToCodexPolicy(),
             policy?.ApprovalMode.ToCodexReviewer(),
@@ -49,7 +49,7 @@ public static class CodexHarnessMappings
         return new CodexThreadForkRequest(
             command.Source.RequireRemoteId(),
             command.WorkspacePath ?? string.Empty,
-            policy?.WorkspaceAccess.ToCodex(),
+            ToCodexSandbox(policy),
             command.Options.ModelId,
             policy?.ApprovalMode.ToCodexPolicy(),
             policy?.ApprovalMode.ToCodexReviewer(),
@@ -70,7 +70,7 @@ public static class CodexHarnessMappings
             command.Address.RequireRemoteId(),
             command.Inputs.Select(ToCodex).ToArray(),
             command.WorkspacePath ?? string.Empty,
-            policy?.WorkspaceAccess.ToCodex(),
+            ToCodexSandbox(policy),
             command.Options.ModelId,
             ParseReasoningEffort(command.Options.ReasoningEffortId),
             ParseServiceTier(command.Options.ServiceTierId),
@@ -256,6 +256,11 @@ public static class CodexHarnessMappings
         WorkspaceAccessMode.Unrestricted => CodexSandbox.DangerFullAccess,
         _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unknown workspace access mode.")
     };
+
+    private static CodexSandbox? ToCodexSandbox(HarnessExecutionPolicy? policy) =>
+        policy is null || !string.IsNullOrWhiteSpace(policy.ProfileId)
+            ? null
+            : policy.WorkspaceAccess.ToCodex();
 
     private static CodexApprovalPolicy ToCodexPolicy(this ApprovalInteractionMode mode) => mode switch
     {

@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' != ''">true</ContinuousIntegrationBuild>
+    <TreatWarningsAsErrors Condition="'$(CI)' != ''">true</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>

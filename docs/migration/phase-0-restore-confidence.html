@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>SynthiaCode Migration — Phase 0: Restore Confidence</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f4f1e8;
+      --surface: #fffdf7;
+      --surface-strong: #ffffff;
+      --ink: #17211d;
+      --muted: #5a665f;
+      --line: #d7d7cb;
+      --accent: #006c67;
+      --accent-soft: #d8efea;
+      --success: #19733d;
+      --success-soft: #dff3e5;
+      --warning: #9a5700;
+      --warning-soft: #fff0cf;
+      --danger: #a2322b;
+      --code: #eef0e9;
+      --shadow: 0 18px 50px rgb(31 46 39 / 10%);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #101613;
+        --surface: #171f1b;
+        --surface-strong: #1d2722;
+        --ink: #e8eee9;
+        --muted: #a9b6ae;
+        --line: #34423a;
+        --accent: #69d6c9;
+        --accent-soft: #153b36;
+        --success: #82dda3;
+        --success-soft: #173824;
+        --warning: #ffc66d;
+        --warning-soft: #422d0e;
+        --danger: #ff9c94;
+        --code: #111a16;
+        --shadow: 0 18px 50px rgb(0 0 0 / 28%);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 28rem),
+        var(--page);
+      color: var(--ink);
+      font: 16px/1.65 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    a { color: var(--accent); text-underline-offset: 0.18em; }
+    a:hover { text-decoration-thickness: 0.14em; }
+    code {
+      padding: 0.12rem 0.34rem;
+      border-radius: 0.3rem;
+      background: var(--code);
+      font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+      font-size: 0.9em;
+    }
+
+    .shell { width: min(1120px, calc(100% - 2rem)); margin: 0 auto; }
+    .hero { padding: clamp(3.5rem, 9vw, 7rem) 0 2.5rem; }
+    .eyebrow {
+      margin: 0 0 0.65rem;
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { line-height: 1.12; text-wrap: balance; }
+    h1 { max-width: 780px; margin: 0; font-size: clamp(2.35rem, 7vw, 5.25rem); letter-spacing: -0.055em; }
+    h2 { margin: 0 0 1rem; font-size: clamp(1.65rem, 4vw, 2.5rem); letter-spacing: -0.035em; }
+    h3 { margin: 0 0 0.55rem; font-size: 1.05rem; }
+    .lede { max-width: 760px; margin: 1.2rem 0 0; color: var(--muted); font-size: clamp(1.05rem, 2vw, 1.25rem); }
+    .meta { display: flex; flex-wrap: wrap; gap: 0.65rem; margin-top: 1.5rem; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      min-height: 2rem;
+      padding: 0.25rem 0.75rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--surface) 86%, transparent);
+      color: var(--muted);
+      font-size: 0.86rem;
+      font-weight: 650;
+    }
+    .pill.success { border-color: color-mix(in srgb, var(--success) 35%, var(--line)); background: var(--success-soft); color: var(--success); }
+
+    .scoreboard {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1rem;
+      margin: 1rem 0 4rem;
+    }
+    .score {
+      padding: 1.25rem;
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .score strong { display: block; font-size: clamp(1.6rem, 4vw, 2.55rem); line-height: 1; letter-spacing: -0.04em; }
+    .score span { display: block; margin-top: 0.55rem; color: var(--muted); font-size: 0.88rem; }
+
+    .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: clamp(2rem, 6vw, 5rem); }
+    nav { position: sticky; top: 1rem; align-self: start; padding: 1rem; border-left: 2px solid var(--line); }
+    nav strong { display: block; margin-bottom: 0.5rem; font-size: 0.78rem; letter-spacing: 0.09em; text-transform: uppercase; }
+    nav a { display: block; padding: 0.3rem 0; color: var(--muted); text-decoration: none; }
+    nav a:hover { color: var(--accent); }
+    main section { margin-bottom: 4.5rem; scroll-margin-top: 1.5rem; }
+    .section-intro { max-width: 720px; margin-top: -0.35rem; color: var(--muted); }
+
+    .checklist, .cards, .timeline { display: grid; gap: 0.85rem; margin-top: 1.35rem; }
+    .check {
+      display: grid;
+      grid-template-columns: 1.6rem 1fr;
+      gap: 0.8rem;
+      padding: 1rem 1.1rem;
+      border: 1px solid var(--line);
+      border-radius: 0.8rem;
+      background: var(--surface);
+    }
+    .check-mark { color: var(--success); font-weight: 900; }
+    .check p, .card p, .timeline p { margin: 0.25rem 0 0; color: var(--muted); }
+    .card {
+      padding: 1.2rem;
+      border: 1px solid var(--line);
+      border-radius: 0.9rem;
+      background: var(--surface);
+    }
+    .card.fix { border-left: 4px solid var(--success); }
+    .card.guard { border-left: 4px solid var(--accent); }
+    .card.lesson { border-left: 4px solid var(--warning); }
+    .tag {
+      display: inline-block;
+      margin-bottom: 0.55rem;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .table-wrap { margin-top: 1.2rem; overflow-x: auto; border: 1px solid var(--line); border-radius: 0.9rem; }
+    table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: 0.92rem; }
+    th, td { padding: 0.9rem 1rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--surface-strong); color: var(--muted); font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+
+    .timeline { counter-reset: entry; }
+    .timeline article {
+      position: relative;
+      padding: 0 0 1.15rem 2.6rem;
+      border-left: 2px solid var(--line);
+    }
+    .timeline article::before {
+      counter-increment: entry;
+      content: counter(entry);
+      position: absolute;
+      left: -1.05rem;
+      top: -0.15rem;
+      display: grid;
+      width: 2rem;
+      height: 2rem;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--warning-soft);
+      color: var(--warning);
+      font-size: 0.78rem;
+      font-weight: 900;
+    }
+    .timeline article:last-child { padding-bottom: 0; }
+    .lesson-line { margin-top: 0.5rem !important; color: var(--ink) !important; }
+    .lesson-line strong { color: var(--warning); }
+
+    details { margin-top: 1rem; border: 1px solid var(--line); border-radius: 0.8rem; background: var(--surface); }
+    summary { cursor: pointer; padding: 0.85rem 1rem; font-weight: 750; }
+    pre { margin: 0; padding: 1rem; overflow: auto; border-top: 1px solid var(--line); background: var(--code); font-size: 0.84rem; }
+    footer { margin-top: 4rem; padding: 2rem 0 3rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.88rem; }
+
+    @media (max-width: 760px) {
+      .scoreboard { grid-template-columns: 1fr; }
+      .layout { grid-template-columns: 1fr; }
+      nav { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-left: 0; border-top: 2px solid var(--line); }
+      nav strong { grid-column: 1 / -1; }
+    }
+
+    @media print {
+      body { background: white; color: black; }
+      nav { display: none; }
+      .layout { display: block; }
+      .score, .card, .check, table, details { box-shadow: none; break-inside: avoid; }
+      a { color: black; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero shell">
+    <p class="eyebrow">SynthiaCode architecture migration</p>
+    <h1>Phase 0: Restore Confidence</h1>
+    <p class="lede">Re-established a green behavioral baseline, captured four fragile workflows as golden contracts, and added repository guardrails before structural refactoring begins.</p>
+    <div class="meta">
+      <span class="pill success">✓ Complete</span>
+      <span class="pill"><time datetime="2026-08-08">8 August 2026</time></span>
+      <span class="pill">Release configuration</span>
+      <span class="pill">No package upgrades</span>
+    </div>
+  </header>
+
+  <div class="shell scoreboard" aria-label="Phase verification summary">
+    <div class="score"><strong>360 / 364</strong><span>Starting behavioral baseline</span></div>
+    <div class="score"><strong>372 / 372</strong><span>Final Release test gate</span></div>
+    <div class="score"><strong>0</strong><span>Build warnings and errors</span></div>
+  </div>
+
+  <div class="shell layout">
+    <nav aria-label="On this page">
+      <strong>Phase record</strong>
+      <a href="#objectives">Objectives</a>
+      <a href="#behavior-fixes">Behavior fixes</a>
+      <a href="#golden-tests">Golden tests</a>
+      <a href="#guardrails">Guardrails</a>
+      <a href="#mistakes">Mistakes &amp; lessons</a>
+      <a href="#verification">Verification</a>
+      <a href="#files">Changed files</a>
+      <a href="#handoff">Next-phase handoff</a>
+    </nav>
+
+    <main>
+      <section id="objectives">
+        <p class="eyebrow">Scope</p>
+        <h2>Objectives completed</h2>
+        <div class="checklist">
+          <div class="check"><span class="check-mark">✓</span><div><strong>Restore the four failing behaviors.</strong><p>Authentication status, active queued dispatch, background queued dispatch, and app-server reconnect now pass without rebaselining product expectations.</p></div></div>
+          <div class="check"><span class="check-mark">✓</span><div><strong>Add golden characterization coverage.</strong><p>Conversation reduction, queued dispatch, reconnect, and legacy persistence migration now have exact semantic JSON snapshots.</p></div></div>
+          <div class="check"><span class="check-mark">✓</span><div><strong>Centralize repository policy.</strong><p>Formatting, deterministic builds, CI warning policy, and package-version ownership now live at the solution root.</p></div></div>
+          <div class="check"><span class="check-mark">✓</span><div><strong>Make architecture executable.</strong><p>Four tests enforce the project graph, namespace ownership, forbidden upward imports, and the Windows desktop boundary.</p></div></div>
+          <div class="check"><span class="check-mark">✓</span><div><strong>Remove the unused dependency.</strong><p>The Codex harness no longer references Infrastructure and succeeds under an isolated Release rebuild.</p></div></div>
+        </div>
+      </section>
+
+      <section id="behavior-fixes">
+        <p class="eyebrow">Repairs</p>
+        <h2>Four failures, three underlying defects</h2>
+        <p class="section-intro">The failures were treated as evidence about ownership boundaries. Each correction was made at the narrowest layer that had lost or bypassed the relevant state.</p>
+        <div class="cards">
+          <article class="card fix">
+            <span class="tag">Authentication status</span>
+            <h3>Provider error context survives neutral event translation</h3>
+            <p>Turn failure translation now retains provider error detail, recognizes 401/authentication failures, and emits an authentication-required event before completion. The completion snapshot therefore exposes an actionable sign-in state.</p>
+          </article>
+          <article class="card fix">
+            <span class="tag">Queued dispatch — active and background</span>
+            <h3>Named permission profiles no longer collide with legacy sandbox fields</h3>
+            <p>The Codex request mapper now omits the legacy sandbox value whenever a named permission profile is present. This resolves the app-server rejection that blocked both active-thread and background-thread queue drains.</p>
+          </article>
+          <article class="card fix">
+            <span class="tag">Reconnect</span>
+            <h3>Feature loading goes through the runtime coordinator</h3>
+            <p>Model loading no longer treats a cached harness session as proof that its provider transport is healthy. It asks the coordinator to ensure the session, allowing the established reconnect path to replace a failed app-server generation.</p>
+          </article>
+          <article class="card fix">
+            <span class="tag">Background queue observation</span>
+            <h3>The test follows asynchronous UI projection</h3>
+            <p>The queue test now waits for the running state after durable removal is observed. Durable state is authoritative, while the UI continuation is eventually consistent on the captured synchronization context.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="golden-tests">
+        <p class="eyebrow">Characterization</p>
+        <h2>Four workflows frozen as semantic snapshots</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Golden contract</th><th>What it protects</th></tr></thead>
+            <tbody>
+              <tr><td>Conversation reduction</td><td>Turn status, final response, authentication flag, context accounting, timeline order, raw-event order, activity, and diff projection.</td></tr>
+              <tr><td>Queued dispatch</td><td>Queued text and workspace identity, permission-profile mapping, absence of a legacy sandbox collision, durability transition, and runtime start.</td></tr>
+              <tr><td>Reconnect</td><td><code>Connecting → Connected → Reconnecting → Connected</code>, process-generation replacement, old-transport disposal, and recovery telemetry.</td></tr>
+              <tr><td>Persistence migration</td><td>Legacy Codex thread identity, managed permission mode, current storage shape, and migration idempotence.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <details>
+          <summary>Focused golden-test result</summary>
+          <pre><code>Passed: 4  Failed: 0  Total: 4  Duration: 285 ms</code></pre>
+        </details>
+      </section>
+
+      <section id="guardrails">
+        <p class="eyebrow">Repository policy</p>
+        <h2>New guardrails make drift visible</h2>
+        <div class="cards">
+          <article class="card guard"><h3>Editor conventions</h3><p><a href="../../.editorconfig"><code>.editorconfig</code></a> standardizes UTF-8, final newlines, whitespace, and indentation without introducing analyzer-driven source churn.</p></article>
+          <article class="card guard"><h3>Build conventions</h3><p><a href="../../Directory.Build.props"><code>Directory.Build.props</code></a> enables deterministic output and CI builds, with warnings promoted to errors in CI.</p></article>
+          <article class="card guard"><h3>Central package versions</h3><p><a href="../../Directory.Packages.props"><code>Directory.Packages.props</code></a> owns all four external package versions. Existing versions were preserved exactly; dependency upgrades remain a deliberate future change.</p></article>
+          <article class="card guard"><h3>Architecture boundaries</h3><p>The tests assert the exact production project-reference graph, each project's namespace root, forbidden upward namespace imports, and that WPF/<code>-windows</code> targeting remains confined to <code>SynthiaCode.App</code>.</p></article>
+          <article class="card guard"><h3>Dependency removal</h3><p><code>SynthiaCode.Harnesses.Codex → SynthiaCode.Infrastructure</code> was removed after source inspection, then verified by an isolated <code>Rebuild</code> with zero warnings and errors.</p></article>
+        </div>
+      </section>
+
+      <section id="mistakes">
+        <p class="eyebrow">Candid record</p>
+        <h2>Mistakes, corrections, and lessons</h2>
+        <div class="timeline">
+          <article>
+            <h3>Queue diagnostics initially hid the useful failure</h3>
+            <p>A helper timed out while waiting for the next message, obscuring the app-server's actual permission-policy error.</p>
+            <p class="lesson-line"><strong>Lesson:</strong> asynchronous test timeouts should report the last application status and relevant durable state.</p>
+          </article>
+          <article>
+            <h3>The background queue assertion assumed lock-step UI state</h3>
+            <p>The test asserted <code>IsRunning</code> immediately after queue removal, although removal is persisted before the UI continuation runs.</p>
+            <p class="lesson-line"><strong>Lesson:</strong> assert immediate durable invariants directly and await eventually consistent projections explicitly.</p>
+          </article>
+          <article>
+            <h3>The first golden fixture did not compile</h3>
+            <p>Its initial draft had one excess closing parenthesis and confused a raw <code>Guid</code> with the <code>ConversationId</code> value object.</p>
+            <p class="lesson-line"><strong>Lesson:</strong> compile and run one new characterization class before expanding the surrounding phase.</p>
+          </article>
+          <article>
+            <h3>The first namespace rule produced a false positive</h3>
+            <p>A substring match interpreted <code>SynthiaCode.Application</code> as an import of <code>SynthiaCode.App</code>; its first compile also exposed nullable dictionary-key warnings.</p>
+            <p class="lesson-line"><strong>Lesson:</strong> architecture rules are production code: compare namespace segments, keep failure output precise, and run them with warnings-as-errors.</p>
+          </article>
+          <article>
+            <h3>The first central-package restore could not reach NuGet</h3>
+            <p>The restricted process hit an SSL credential failure. The same unchanged restore succeeded once explicit network permission was granted.</p>
+            <p class="lesson-line"><strong>Lesson:</strong> distinguish environment access failures from package-graph failures before changing dependency declarations.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="verification">
+        <p class="eyebrow">Evidence</p>
+        <h2>Verification gate</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Gate</th><th>Result</th></tr></thead>
+            <tbody>
+              <tr><td>Original behavioral suite after fixes</td><td>307 / 307 behavioral cases passed</td></tr>
+              <tr><td>Phase 0 golden characterization tests</td><td>4 / 4 passed in 285 ms</td></tr>
+              <tr><td>Architecture boundary tests</td><td>4 / 4 passed in 173 ms</td></tr>
+              <tr><td>Codex harness isolated Release rebuild</td><td>0 warnings, 0 errors</td></tr>
+              <tr><td>Solution Release build with CI policy</td><td>0 warnings, 0 errors</td></tr>
+              <tr><td>Authoritative full Release test gate</td><td>372 / 372 passed in 37 s</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <details>
+          <summary>Authoritative command</summary>
+          <pre><code>dotnet test SynthiaCode.sln --configuration Release --no-restore \
+  --settings SynthiaCode.runsettings -p:TreatWarningsAsErrors=true
+
+Passed: 372  Failed: 0  Skipped: 0  Total: 372  Duration: 37 s</code></pre>
+        </details>
+      </section>
+
+      <section id="files">
+        <p class="eyebrow">Change inventory</p>
+        <h2>Files changed</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Area</th><th>Files</th></tr></thead>
+            <tbody>
+              <tr><td>Root policy</td><td><a href="../../.editorconfig"><code>.editorconfig</code></a>, <a href="../../Directory.Build.props"><code>Directory.Build.props</code></a>, <a href="../../Directory.Packages.props"><code>Directory.Packages.props</code></a></td></tr>
+              <tr><td>App and reconnect</td><td><a href="../../src/SynthiaCode.App/ViewModels/MainViewModel.cs"><code>MainViewModel.cs</code></a>, <a href="../../src/SynthiaCode.App/SynthiaCode.App.csproj"><code>SynthiaCode.App.csproj</code></a></td></tr>
+              <tr><td>Codex adapter</td><td><a href="../../src/SynthiaCode.Harnesses.Codex/CodexHarnessEventTranslator.cs"><code>CodexHarnessEventTranslator.cs</code></a>, <a href="../../src/SynthiaCode.Harnesses.Codex/CodexHarnessMappings.cs"><code>CodexHarnessMappings.cs</code></a>, <a href="../../src/SynthiaCode.Harnesses.Codex/SynthiaCode.Harnesses.Codex.csproj"><code>SynthiaCode.Harnesses.Codex.csproj</code></a></td></tr>
+              <tr><td>Tests</td><td><a href="../../src/SynthiaCode.Tests/Program.cs"><code>Program.cs</code></a>, <a href="../../src/SynthiaCode.Tests/Phase0GoldenCharacterizationTests.cs"><code>Phase0GoldenCharacterizationTests.cs</code></a>, <a href="../../src/SynthiaCode.Tests/ArchitectureBoundaryTests.cs"><code>ArchitectureBoundaryTests.cs</code></a>, <a href="../../src/SynthiaCode.Tests/SynthiaCode.Tests.csproj"><code>SynthiaCode.Tests.csproj</code></a></td></tr>
+              <tr><td>Architecture record</td><td><a href="../current-architecture.md"><code>current-architecture.md</code></a>, this changelog</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="handoff">
+        <p class="eyebrow">Phase boundary</p>
+        <h2>What Phase 0 deliberately did not do</h2>
+        <p class="section-intro">No projects were split, no dependency versions were upgraded, and no provider-neutral model was redesigned. The new snapshots and dependency tests create a safe point from which the next structural phase can move code while proving behavior remains stable.</p>
+        <div class="card guard">
+          <h3>Changelog convention for later phases</h3>
+          <p>Each completed phase receives a standalone file at <code>docs/migration/phase-N-short-name.html</code> with the same minimum record: scope, changes, verification evidence, mistakes, lessons, and explicit handoff.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer>
+    <div class="shell">SynthiaCode migration record · Phase 0 · Generated from verified repository state on <time datetime="2026-08-08">8 August 2026</time>.</div>
+  </footer>
+</body>
+</html>

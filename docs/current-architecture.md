@@ -3,7 +3,7 @@
 **Recorded:** 6 August 2026
 **Last code-verified:** 8 August 2026
 **Release:** 0.1.0
-**Phase:** Modern WPF redesign through Phase 21, with product extensions through generated-image, attachment, prompt-editing, chat-management, queued-dispatch hardening, Goal mode, multi-folder local projects, and the provider-neutral harness boundary
+**Phase:** Modern WPF redesign through Phase 21, with product extensions through generated-image, attachment, prompt-editing, chat-management, queued-dispatch hardening, Goal mode, multi-folder local projects, native branch push, and the provider-neutral harness boundary
 **Purpose:** Describe the current architecture, presentation shell, runtime and persistence boundaries, implemented desktop workflows, and release verification baseline.
 
 ## System shape
@@ -168,7 +168,7 @@ The presentation layer subscribes to both event levels for different reasons. Ge
 | Reduced transcript, activity, context usage, generated images, and latest diff | One `CodexThreadService` per thread in `CodexThreadWorkspace` | Events route by remote thread and turn IDs; bounded collections prevent unbounded repeatable history. |
 | Queued follow-ups | One `CodexFollowUpQueue` per thread in `CodexFollowUpQueueWorkspace` | Queue mutation and dispatch are isolated from whichever thread is selected in the UI. |
 | Remote Codex thread history and goals | `codex app-server` | Local state is a durable presentation/recovery cache and is reconciled on resume/read. |
-| Repository and terminal state | Git processes and per-thread ConPTY sessions | Presentation keeps projections and bounded terminal buffers, not an independent source of truth. |
+| Repository and terminal state | Git processes and per-thread ConPTY sessions | Presentation keeps repository projections, transient confirmed push plans, and bounded terminal buffers, not an independent source of truth. |
 
 Snapshots crossing from workflow/reducer code into presentation are cloned and read-only by convention. Background notifications and queued dispatch route by captured thread identity, never by the currently selected chat.
 
@@ -184,13 +184,48 @@ The composer **Review** action and an exact `/review` submission share one nativ
 
 For ordinary tracked text modifications, Unstaged rows expose stage and confirmed discard while Staged rows expose unstage. `GitService` validates the bounded single-hunk patch and streams it directly to `git apply`: cached apply stages, cached reverse apply unstages, and worktree reverse apply discards. Repository status and the surviving selected file refresh through the existing mutation path. File-level metadata changes and binary diffs keep the established whole-file actions instead of presenting ambiguous partial operations.
 
-The Changes comparison contract is typed as Unstaged, Staged, Commit, Branch, or Last turn. `GitService` resolves a selected revision to a commit before invoking `git show --root` for the exact commit or `git merge-base` plus `git diff <base> HEAD` for a branch. `GitUnifiedDiffDocumentParser` splits the aggregate output into immutable per-file documents, preserving rename context, and the existing line renderer consumes the selected document. Commit, Branch, and Last turn never satisfy mutation command guards.
+The Changes comparison contract is typed as Unstaged, Staged, Commit, Branch, or Last turn. `GitService` resolves a selected revision to a commit before invoking `git show --root` for the exact commit or `git merge-base` plus `git diff <base> HEAD` for a branch. `GitUnifiedDiffDocumentParser` splits the aggregate output into immutable per-file documents, preserving rename context, and the existing line renderer consumes the selected document. Commit, Branch, and Last turn never satisfy file/hunk mutation command guards; repository-level push is governed independently by named-branch, selected-root, and busy-state guards.
 
 Codex `turn/diff/updated` notifications translate into a harness-neutral turn-diff event. The thread reducer attaches the bounded aggregate diff to its exact turn, app-server history restores `turn.diff`, and detached snapshot mappings preserve it end to end. Persistence intentionally retains a diff only for the latest non-superseded turn; Last turn parses that snapshot and presents **All repos**, matching the official Codex scope without inventing repository ownership that is absent from the protocol payload.
 
 User-authored inline comments are a separate typed Core contract. `GitInlineComment` bounds and validates stable identity, repository containment, current/original paths, old/new side, line, captured diff text, body, and timestamps. `GitViewModel` owns row-local add/cancel/edit/remove interactions, projects pending comments back onto exact rows after diff refreshes, and exposes a per-chat fallback summary for comments outside the selected file. `ComposerReviewCommentDraftStore` persists cloned comments alongside attachment drafts and preserves new-chat-to-thread migration. `GitInlineCommentPromptFormatter` produces the single deterministic prompt used by both the local transcript and harness command.
 
 Start, steer, and queue flows capture immutable comment snapshots. Acknowledgement removes only those IDs from the originating chat's live or persisted draft; failures and comments created after capture remain pending. `CodexFollowUpQueue` deep-copies the structured comments through settings persistence, exposes their count on queued cards, and formats them only when manually steered or dispatched. Confidence display when the plain-text payload omits it and detached review delivery remain outside this slice.
+
+### Native branch push
+
+Native push follows the same selected-repository boundary as the Changes workspace while separating read-only target discovery from mutation. Core distinguishes detached state through `GitRepositoryState.IsDetachedHead` and `HasNamedBranch`, carries the confirmed destination in `GitPushPlan`, and returns `GitPushResult`. `IGitService.GetPushPlanAsync` supplies the exact branch, remote, remote ref, repository root, and upstream-creation flag that presentation must show before `IGitService.PushAsync` can mutate Git.
+
+```mermaid
+sequenceDiagram
+    participant UI as GitView / GitViewModel
+    participant IX as IUserInteractionService
+    participant GS as GitService
+    participant Git as git.exe
+
+    UI->>GS: GetPushPlanAsync(selected repository root)
+    GS->>Git: symbolic-ref / for-each-ref / remote
+    Git-->>GS: named branch and push destination
+    GS-->>UI: GitPushPlan
+    UI->>IX: Confirm branch, remote, remote branch, upstream action
+    alt User cancels
+        IX-->>UI: No Git mutation
+    else User confirms
+        UI->>GS: PushAsync(root, confirmed plan)
+        GS->>Git: Re-resolve and compare push plan
+        GS->>Git: Normal push or set-upstream push
+        GS-->>UI: GitPushResult
+        UI->>GS: Refresh repository state
+    end
+```
+
+`GitService.GetPushPlanAsync` requires a detected repository root, a symbolic named branch, and at least one commit. An existing upstream is read with `for-each-ref` and retains both its configured remote and remote branch. Without an upstream, `git remote` must return exactly one remote: none produces an actionable configuration error, while multiple remotes fail closed rather than guessing. The sole remote produces a plan whose `CreatesUpstream` flag is true. Slash-containing branch names remain individual `ArgumentList` values throughout.
+
+`GitViewModel` captures the selected repository root, enters the shared busy state, obtains the plan, and verifies that its root and branch still match the displayed repository. `WpfUserInteractionService` then presents an explicit default-No confirmation naming the local branch, remote, remote branch, and whether upstream will be created. Cancellation returns before `PushAsync`; confirmation is followed by a second displayed-target check. `GitView` exposes this command as **Push** beside the existing commit controls, and detached `HEAD` never satisfies its command guard.
+
+`GitService.PushAsync` requires the confirmed repository root to match the request, recomputes the current plan, and rejects any branch, remote, remote-ref, or upstream-mode change after confirmation. Existing upstreams use the argument vector `push -- <remote> HEAD:<remote-ref>`; a first push uses `push --set-upstream -- <remote> <branch>`. Neither path adds force or delete options. Success returns the typed result and refreshes every repository projection while preserving the selected root. Push stderr is classified into sanitized rejection, authentication, missing-repository, connectivity, or generic guidance; raw remote output is not added to presentation or structured logs, and credential storage remains owned by the user's Git configuration.
+
+Pull-request creation/status, remote selection and management, fetch, and pull remain outside the native Git surface.
 
 ### Server-request approvals and permission modes
 
@@ -249,7 +284,7 @@ The composer footer owns one compact model summary instead of a permanent Run se
 
 Conversation start, resume, fork, and turn commands carry a harness-neutral workspace-root list. The Codex adapter keeps the effective primary/worktree as `cwd`, describes secondary folders as path data while preserving primary-only automatic `AGENTS.md`, skill, and `config.toml` discovery, and serializes the roots as `sandboxPolicy.writableRoots` only for explicit `workspaceWrite` turns. Read-only, unrestricted, config-owned, profile, approval, and managed-policy semantics are not broadened.
 
-`GitViewModel` scans the active worktree plus attached project folders, deduplicates repositories by resolved root, keeps the effective primary first, and projects one selected repository into Unstaged, Staged, Commit, and Branch state. Last turn intentionally switches the header to **All repos**. Every Git mutation and Editor/Explorer deep link uses a selected repository root, and mutation commands are available only in Unstaged or Staged.
+`GitViewModel` scans the active worktree plus attached project folders, deduplicates repositories by resolved root, keeps the effective primary first, and projects one selected repository into Unstaged, Staged, Commit, and Branch state. Last turn intentionally switches the header to **All repos**. Every Git mutation and Editor/Explorer deep link uses a selected repository root. File/hunk mutations remain available only in Unstaged or Staged, commit requires staged changes, and push requires the selected repository to retain a named branch through confirmation and execution.
 
 ### Attachments and generated-image editing
 
@@ -334,6 +369,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 - The user-selected project, attached roots, app-data directory, Git repositories, and Codex child process are distinct trust boundaries. Paths are normalized before containment or ownership checks.
 - Workspace attachment references must remain within an attached root. External files/folders are snapshotted into managed storage; alternate data streams, reparse points, root/sibling escapes, unsafe relative paths, and over-limit content are rejected.
 - Git and worktree commands use `ProcessStartInfo.ArgumentList`. File operations resolve repository-contained paths. A hunk patch is parser-verified, capped at 8 MiB, and sent over standard input rather than a shell argument or temporary file.
+- Native push revalidates the selected root, named branch, remote, remote ref, and upstream mode after confirmation. It issues only normal or `--set-upstream` push arguments, never force or delete arguments, translates raw Git failures before presentation/logging, and does not store credentials.
 - Worktree deletion is allowed only for a registry-owned direct child of the repository's sibling worktree container; the primary checkout cannot be removed.
 - Codex runs with SynthiaCode's isolated `CODEX_HOME`. Permission mode is resolved once per request, managed requirements restrict available choices, and invalid or stale profiles fail closed.
 - Approval requests retain the client generation and original JSON-RPC ID type, accept exactly one response, and grant only the selected subset of the immutable request.
@@ -341,7 +377,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 
 ## Testing, build, and delivery
 
-`dotnet test SynthiaCode.sln` is the authoritative local gate on Windows with the .NET 10 SDK selected by `global.json`. The test project references every production layer plus the in-memory harness. Coverage combines pure contract/reducer/use-case tests, fake app-server transports, deterministic harness parity tests, temporary-repository Git/worktree tests, and WPF presentation tests hosted on a dedicated STA dispatcher. Test collections and process-level test parallelism are disabled because WPF application state, native terminal resources, and shared process fixtures require deterministic ownership.
+`dotnet test SynthiaCode.sln` is the authoritative local gate on Windows with the .NET 10 SDK selected by `global.json`. The test project references every production layer plus the in-memory harness. Coverage combines pure contract/reducer/use-case tests, fake app-server transports, deterministic harness parity tests, temporary-repository Git/worktree tests, local bare-repository push integration tests, and WPF presentation tests hosted on a dedicated STA dispatcher. Test collections and process-level test parallelism are disabled because WPF application state, native terminal resources, and shared process fixtures require deterministic ownership.
 
 GitHub Actions restores and runs the Release test suite on `windows-latest`. Main-branch, tag, and manual workflows publish a self-contained `win-x64` portable folder; a tag matching the app project's semantic version also produces a ZIP and SHA-256 checksum GitHub release. The app project is `net10.0-windows`/WPF; the non-WPF Core, Application, harness, and Infrastructure libraries target `net10.0`.
 
@@ -404,11 +440,11 @@ A no-build behavioral-runner invocation took approximately 12 seconds during the
 
 - Harness discovery, capability checks, session caching, neutral event fan-out, and session disposal belong to the Application/harness boundary. App-server transport/client startup, pending-request failure, restart serialization, notification batching, and disposal belong to `AppServerSessionCoordinator`; common Codex notifications are translated before WPF receives semantic conversation events.
 - Terminal sessions belong to `TerminalViewModel`; shutdown disposes all sessions and logs bounded-buffer metrics.
-- Git and worktree commands use argument lists, retain repository/worktree ownership guards, and terminate process trees on cancellation. Hunk patches never enter shell arguments or temporary files; `GitService` accepts at most one parser-verified patch up to 8 MiB over redirected standard input.
+- Git and worktree commands use argument lists, retain repository/worktree ownership guards, and terminate process trees on cancellation. Hunk patches never enter shell arguments or temporary files; `GitService` accepts at most one parser-verified patch up to 8 MiB over redirected standard input. Push preflight and final execution belong to `GitService`; `GitViewModel` owns only the transient selected-root plan, confirmation, busy state, refresh, and sanitized status projection.
 - Codex utility commands terminate their process tree on cancellation. Visible login/logout consoles are intentionally user-owned after launch.
 - Sandbox remains bounded by the selected mode. Explicit `workspace-write` turns add only the current attached project roots; no approval, authentication, destructive-action confirmation, worktree ownership, or archive semantics changed.
 - Final-response text remains intentionally complete rather than bounded. Timeline, raw events, diagnostics, and terminal history—the repeatable record streams—are bounded.
 
 ## Phase boundary
 
-Release 0.1.0 and the current post-release build include native active-context skill discovery/enablement and exact-path composer invocation, generated-image display/edit flows, managed and multi-root workspace attachments, projectless and multi-folder project chats, Goal mode, prompt editing/forking, chat management/search, queued follow-up hardening, multi-repository Git selection, all five Changes scopes, dedicated inline code review, structured reviewer findings, user-authored inline comments, hunk-level Git operations, the provider-neutral conversation harness boundary, and the Phase 21 Markdown surface. Production provider selection remains Codex-only. Arbitrary skill roots, native MCP administration, plugins/connectors, automations, detached review, push/PR workflows, dynamic harness loading, and full worktree handoff/snapshot lifecycle remain outside the current boundary.
+Release 0.1.0 and the current post-release build include native active-context skill discovery/enablement and exact-path composer invocation, generated-image display/edit flows, managed and multi-root workspace attachments, projectless and multi-folder project chats, Goal mode, prompt editing/forking, chat management/search, queued follow-up hardening, multi-repository Git selection, all five Changes scopes, dedicated inline code review, structured reviewer findings, user-authored inline comments, hunk-level Git operations, confirmed native branch push, the provider-neutral conversation harness boundary, and the Phase 21 Markdown surface. Production provider selection remains Codex-only. Arbitrary skill roots, native MCP administration, plugins/connectors, automations, detached review, pull-request creation/status, dynamic harness loading, and full worktree handoff/snapshot lifecycle remain outside the current boundary.

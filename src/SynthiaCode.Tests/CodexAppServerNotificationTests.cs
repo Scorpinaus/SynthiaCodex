@@ -1,19 +1,13 @@
 using System.Text.Json.Nodes;
 using SynthiaCode.Core.Codex.AppServer;
 
-internal static class CodexAppServerNotificationTests
+[Trait("Category", TestCategories.ProtocolContract)]
+public sealed class CodexAppServerNotificationTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("typed app-server decoder maps every supported notification kind", MapsEverySupportedKindAsync),
-        ("typed app-server decoder routes top-level and nested identifiers", DecodesRoutingShapesAsync),
-        ("typed app-server decoder exposes archive lifecycle transitions", DecodesArchiveLifecycleAsync),
-        ("typed app-server decoder handles account skills and approval lifecycle", DecodesAccountSkillsAndApprovalLifecycleAsync),
-        ("typed app-server decoder drives workspace and thread projections", DrivesTypedThreadProjectionsAsync),
-        ("typed app-server decoder preserves unknown wire notifications", PreservesUnknownNotificationAsync)
-    ];
 
-    private static Task MapsEverySupportedKindAsync()
+
+    [Fact(DisplayName = "typed app-server decoder maps every supported notification kind")]
+    public Task MapsEverySupportedKindAsync()
     {
         var cases = new (string Method, CodexAppServerNotificationKind Kind)[]
         {
@@ -50,7 +44,8 @@ internal static class CodexAppServerNotificationTests
         return Task.CompletedTask;
     }
 
-    private static Task DecodesRoutingShapesAsync()
+    [Fact(DisplayName = "typed app-server decoder routes top-level and nested identifiers")]
+    public Task DecodesRoutingShapesAsync()
     {
         var topLevel = Decode(
             CodexAppServerNotificationMethods.TurnCompleted,
@@ -68,7 +63,8 @@ internal static class CodexAppServerNotificationTests
         return Task.CompletedTask;
     }
 
-    private static Task DecodesArchiveLifecycleAsync()
+    [Fact(DisplayName = "typed app-server decoder exposes archive lifecycle transitions")]
+    public Task DecodesArchiveLifecycleAsync()
     {
         var archived = Decode(CodexAppServerNotificationMethods.ThreadArchived, """{"thread":{"id":"thread-1"}}""");
         var unarchived = Decode(CodexAppServerNotificationMethods.ThreadUnarchived, """{"threadId":"thread-1"}""");
@@ -78,7 +74,8 @@ internal static class CodexAppServerNotificationTests
         return Task.CompletedTask;
     }
 
-    private static Task DecodesAccountSkillsAndApprovalLifecycleAsync()
+    [Fact(DisplayName = "typed app-server decoder handles account skills and approval lifecycle")]
+    public Task DecodesAccountSkillsAndApprovalLifecycleAsync()
     {
         var account = Decode(
             CodexAppServerNotificationMethods.AccountRateLimitsUpdated,
@@ -103,7 +100,8 @@ internal static class CodexAppServerNotificationTests
         return Task.CompletedTask;
     }
 
-    private static Task DrivesTypedThreadProjectionsAsync()
+    [Fact(DisplayName = "typed app-server decoder drives workspace and thread projections")]
+    public Task DrivesTypedThreadProjectionsAsync()
     {
         var workspace = new CodexThreadWorkspace();
         workspace.Restore(new SynthiaCode.Core.Settings.ProjectThreadState { ProjectPath = @"C:\Repo", ThreadId = "thread-1" });
@@ -123,7 +121,8 @@ internal static class CodexAppServerNotificationTests
         return Task.CompletedTask;
     }
 
-    private static Task PreservesUnknownNotificationAsync()
+    [Fact(DisplayName = "typed app-server decoder preserves unknown wire notifications")]
+    public Task PreservesUnknownNotificationAsync()
     {
         var notification = Decode("future/notification", """{"threadId":"thread-1","value":7}""");
 

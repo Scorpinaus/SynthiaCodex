@@ -4,17 +4,14 @@ using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Settings;
 using SynthiaCode.Infrastructure.Codex;
 
-internal static class Phase5GModelControlsTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class Phase5GModelControlsTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("phase 5g model catalog retains picker capabilities", ModelCatalogRetainsPickerCapabilitiesAsync),
-        ("phase 5g turn service tier supports inherit fast and off", TurnServiceTierSupportsInheritFastAndOffAsync),
-        ("phase 5g selection reconciles model reasoning and fast", SelectionReconcilesModelReasoningAndFastAsync),
-        ("phase 5g service tier preference survives settings snapshot", ServiceTierPreferenceSurvivesSettingsSnapshotAsync)
-    ];
 
-    private static async Task ModelCatalogRetainsPickerCapabilitiesAsync()
+
+    [Fact(DisplayName = "phase 5g model catalog retains picker capabilities")]
+    public async Task ModelCatalogRetainsPickerCapabilitiesAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = new CodexAppServerClient(
@@ -58,7 +55,8 @@ internal static class Phase5GModelControlsTests
         Assert(model.AvailabilityMessage == "Available for this workspace", "catalog retains availability message");
     }
 
-    private static async Task TurnServiceTierSupportsInheritFastAndOffAsync()
+    [Fact(DisplayName = "phase 5g turn service tier supports inherit fast and off")]
+    public async Task TurnServiceTierSupportsInheritFastAndOffAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = new CodexAppServerClient(
@@ -90,7 +88,8 @@ internal static class Phase5GModelControlsTests
         await standard;
     }
 
-    private static Task SelectionReconcilesModelReasoningAndFastAsync()
+    [Fact(DisplayName = "phase 5g selection reconciles model reasoning and fast")]
+    public Task SelectionReconcilesModelReasoningAndFastAsync()
     {
         var viewModel = WorkspaceActionStubs.CreateTaskViewModel(WorkspaceActionStubs.Task(
             () => Task.CompletedTask,
@@ -152,7 +151,8 @@ internal static class Phase5GModelControlsTests
         return Task.CompletedTask;
     }
 
-    private static Task ServiceTierPreferenceSurvivesSettingsSnapshotAsync()
+    [Fact(DisplayName = "phase 5g service tier preference survives settings snapshot")]
+    public Task ServiceTierPreferenceSurvivesSettingsSnapshotAsync()
     {
         var settings = new AppSettings
         {

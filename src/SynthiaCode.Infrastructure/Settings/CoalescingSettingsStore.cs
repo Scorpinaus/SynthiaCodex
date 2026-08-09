@@ -9,6 +9,7 @@ public sealed class CoalescingSettingsStore : ISettingsStore
     private readonly ISettingsStore inner;
     private readonly IAppLogger logger;
     private readonly TimeSpan coalescingWindow;
+    private readonly TimeProvider timeProvider;
     private AppSettings? pendingSnapshot;
     private List<TaskCompletionSource> pendingCompletions = [];
     private bool workerRunning;
@@ -16,11 +17,13 @@ public sealed class CoalescingSettingsStore : ISettingsStore
     public CoalescingSettingsStore(
         ISettingsStore inner,
         IAppLogger logger,
-        TimeSpan? coalescingWindow = null)
+        TimeSpan? coalescingWindow = null,
+        TimeProvider? timeProvider = null)
     {
         this.inner = inner ?? throw new ArgumentNullException(nameof(inner));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
         this.coalescingWindow = coalescingWindow ?? TimeSpan.FromMilliseconds(75);
+        this.timeProvider = timeProvider ?? TimeProvider.System;
         if (this.coalescingWindow < TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(coalescingWindow));
@@ -65,7 +68,10 @@ public sealed class CoalescingSettingsStore : ISettingsStore
         {
             if (coalescingWindow > TimeSpan.Zero)
             {
-                await Task.Delay(coalescingWindow).ConfigureAwait(false);
+                await Task.Delay(
+                    coalescingWindow,
+                    timeProvider,
+                    CancellationToken.None).ConfigureAwait(false);
             }
 
             AppSettings snapshot;

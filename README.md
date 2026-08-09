@@ -93,9 +93,15 @@ External `skills/changed` notifications invalidate the active view without scann
 SynthiaCode.sln
 src\
   SynthiaCode.App\
+  SynthiaCode.Application\
   SynthiaCode.Core\
+  SynthiaCode.Harnesses.Codex\
+  SynthiaCode.Harnesses.InMemory\
   SynthiaCode.Infrastructure\
+  SynthiaCode.Presentation\
+  SynthiaCode.Tests.Unit\
   SynthiaCode.Tests\
+  SynthiaCode.UnicodeEchoFixture\
 ```
 
 ## Build And Test
@@ -108,7 +114,18 @@ Restore, build, and run the test suite with:
 dotnet test SynthiaCode.sln
 ```
 
-`dotnet test` is the authoritative local and CI command. It discovers and reports each behavioral case individually. The test executable is retained only as an internal UTF-8 transport fixture (`--unicode-transport-fixture`).
+`dotnet test` is the authoritative local and CI command. It discovers and reports each behavioral case as a normal xUnit fact. Both test projects are libraries. `SynthiaCode.Tests.Unit` targets `net10.0` without App, Infrastructure, Windows, or WPF references. `SynthiaCode.UnicodeEchoFixture` is the dedicated UTF-8 transport fixture executable.
+
+Use the test category when you need a focused gate:
+
+```powershell
+dotnet test src\SynthiaCode.Tests.Unit\SynthiaCode.Tests.Unit.csproj --filter "Category=Unit"
+dotnet test src\SynthiaCode.Tests\SynthiaCode.Tests.csproj --filter "Category=ProtocolContract"
+dotnet test src\SynthiaCode.Tests\SynthiaCode.Tests.csproj --filter "Category=InfrastructureIntegration"
+dotnet test src\SynthiaCode.Tests\SynthiaCode.Tests.csproj --filter "Category=Wpf"
+```
+
+Pure unit and fake-only protocol test collections can run in parallel. Infrastructure, native-process, and WPF collections are serialized.
 
 Standard solution builds produce the runnable application at:
 

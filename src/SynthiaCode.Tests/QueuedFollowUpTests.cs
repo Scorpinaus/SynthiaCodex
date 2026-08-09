@@ -2,19 +2,14 @@ using SynthiaCode.App.ViewModels;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Settings;
 
-internal static class QueuedFollowUpTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class QueuedFollowUpTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("queued follow-up preference defaults and parses compatibly", PreferenceDefaultsAndParsesCompatiblyAsync),
-        ("queued follow-up domain edits and reorders without identity loss", DomainEditsAndReordersAsync),
-        ("queued follow-up restore makes interrupted delivery explicit", RestoreMakesInterruptedDeliveryExplicitAsync),
-        ("queued follow-up workspace isolates threads", WorkspaceIsolatesThreadsAsync),
-        ("queued follow-ups survive deep settings snapshots", QueueSurvivesDeepSettingsSnapshotAsync),
-        ("queued follow-up composer labels active behavior", ComposerLabelsActiveBehaviorAsync)
-    ];
 
-    private static Task PreferenceDefaultsAndParsesCompatiblyAsync()
+
+    [Fact(DisplayName = "queued follow-up preference defaults and parses compatibly")]
+    public Task PreferenceDefaultsAndParsesCompatiblyAsync()
     {
         Assert(((string?)null).ParseFollowUpBehavior() == FollowUpBehavior.Queue, "missing setting defaults to queue");
         Assert("queue".ParseFollowUpBehavior() == FollowUpBehavior.Queue, "queue setting parses");
@@ -26,7 +21,8 @@ internal static class QueuedFollowUpTests
         return Task.CompletedTask;
     }
 
-    private static Task DomainEditsAndReordersAsync()
+    [Fact(DisplayName = "queued follow-up domain edits and reorders without identity loss")]
+    public Task DomainEditsAndReordersAsync()
     {
         var queue = new CodexFollowUpQueue();
         var options = Options(@"D:\Repo");
@@ -60,7 +56,8 @@ internal static class QueuedFollowUpTests
         return Task.CompletedTask;
     }
 
-    private static Task RestoreMakesInterruptedDeliveryExplicitAsync()
+    [Fact(DisplayName = "queued follow-up restore makes interrupted delivery explicit")]
+    public Task RestoreMakesInterruptedDeliveryExplicitAsync()
     {
         var queue = new CodexFollowUpQueue();
         queue.Restore(
@@ -82,7 +79,8 @@ internal static class QueuedFollowUpTests
         return Task.CompletedTask;
     }
 
-    private static Task WorkspaceIsolatesThreadsAsync()
+    [Fact(DisplayName = "queued follow-up workspace isolates threads")]
+    public Task WorkspaceIsolatesThreadsAsync()
     {
         var workspace = new CodexFollowUpQueueWorkspace();
         workspace.GetOrCreate("thread-a").Enqueue("A", Options(@"D:\A"));
@@ -94,7 +92,8 @@ internal static class QueuedFollowUpTests
         return Task.CompletedTask;
     }
 
-    private static Task QueueSurvivesDeepSettingsSnapshotAsync()
+    [Fact(DisplayName = "queued follow-ups survive deep settings snapshots")]
+    public Task QueueSurvivesDeepSettingsSnapshotAsync()
     {
         var queued = new QueuedFollowUpSnapshot
         {
@@ -137,7 +136,8 @@ internal static class QueuedFollowUpTests
         return Task.CompletedTask;
     }
 
-    private static Task ComposerLabelsActiveBehaviorAsync()
+    [Fact(DisplayName = "queued follow-up composer labels active behavior")]
+    public Task ComposerLabelsActiveBehaviorAsync()
     {
         var viewModel = WorkspaceActionStubs.CreateTaskViewModel(WorkspaceActionStubs.Task(
             () => Task.CompletedTask,

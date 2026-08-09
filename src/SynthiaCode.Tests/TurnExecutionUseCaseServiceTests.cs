@@ -9,6 +9,8 @@ using SynthiaCode.Harnesses.Codex;
 using SynthiaCode.Infrastructure.Codex;
 using Xunit;
 
+[Trait("Category", TestCategories.ProtocolContract)]
+[Collection(TestCategories.NativeCollection)]
 public sealed class TurnExecutionUseCaseServiceTests
 {
     [Fact]
@@ -167,19 +169,13 @@ public sealed class TurnExecutionUseCaseServiceTests
         FakeAppServerTransport transport,
         string method)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        while (true)
-        {
-            var messageCount = transport.ClientMessages.Count;
-            for (var index = 0; index < messageCount; index++)
-            {
-                var request = JsonNode.Parse(transport.ClientMessages[index])?.AsObject();
-                if (string.Equals(request?["method"]?.GetValue<string>(), method, StringComparison.Ordinal))
-                {
-                    return request!;
-                }
-            }
-            await Task.Delay(20, timeout.Token);
-        }
+        var line = await transport.ClientMessageProbe.WaitForAsync(
+            candidate => string.Equals(
+                JsonNode.Parse(candidate)?["method"]?.GetValue<string>(),
+                method,
+                StringComparison.Ordinal),
+            $"{method} request");
+        return JsonNode.Parse(line)?.AsObject()
+            ?? throw new InvalidOperationException($"The {method} request was not a JSON object.");
     }
 }

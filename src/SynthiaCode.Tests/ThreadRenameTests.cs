@@ -18,20 +18,14 @@ using SynthiaCode.Infrastructure.Codex;
 using SynthiaCode.Infrastructure.Projects;
 using SynthiaCode.Infrastructure.Workspaces;
 
-internal static class ThreadRenameTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class ThreadRenameTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("app-server client sends thread rename requests", AppServerClientSendsThreadRenameRequestsAsync),
-        ("thread store renames chats and updates presentation titles", ThreadStoreRenamesChatsAsync),
-        ("sidebar rename command supports general and project chats", SidebarRenameCommandSupportsBothScopesAsync),
-        ("general and project chat menus expose rename", ChatMenusExposeRenameAsync),
-        ("general and project chat actions appear on hover or selection", ChatActionsAppearOnHoverOrSelectionAsync),
-        ("main view model renames and persists general and project chats", MainViewModelRenamesBothScopesAsync),
-        ("first message automatically renames a new chat once", FirstMessageAutomaticallyRenamesNewChatOnceAsync)
-    ];
 
-    private static async Task AppServerClientSendsThreadRenameRequestsAsync()
+
+    [Fact(DisplayName = "app-server client sends thread rename requests")]
+    public async Task AppServerClientSendsThreadRenameRequestsAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = new CodexAppServerClient(
@@ -49,7 +43,8 @@ internal static class ThreadRenameTests
         await renameTask;
     }
 
-    private static Task ThreadStoreRenamesChatsAsync()
+    [Fact(DisplayName = "thread store renames chats and updates presentation titles")]
+    public Task ThreadStoreRenamesChatsAsync()
     {
         var before = DateTimeOffset.UtcNow.AddMinutes(-5);
         var settings = new AppSettings
@@ -79,7 +74,8 @@ internal static class ThreadRenameTests
         return Task.CompletedTask;
     }
 
-    private static async Task SidebarRenameCommandSupportsBothScopesAsync()
+    [Fact(DisplayName = "sidebar rename command supports general and project chats")]
+    public async Task SidebarRenameCommandSupportsBothScopesAsync()
     {
         ProjectThreadViewModel? viewModel = null;
         var renamedIds = new List<string>();
@@ -97,17 +93,18 @@ internal static class ThreadRenameTests
         viewModel.SelectedThread = general;
         Assert(viewModel.RenameThreadCommand.CanExecute(null), "rename is enabled for a General chat");
         viewModel.RenameThreadCommand.Execute(null);
-        await WaitUntilAsync(() => renamedIds.Count == 1, "General rename callback");
+        await StateProbe.WaitForAsync(() => renamedIds.Count == 1, "General rename callback");
 
         viewModel.SelectedThread = project;
         Assert(viewModel.RenameThreadCommand.CanExecute(null), "rename is enabled for a project chat");
         viewModel.RenameThreadCommand.Execute(null);
-        await WaitUntilAsync(() => renamedIds.Count == 2, "project rename callback");
+        await StateProbe.WaitForAsync(() => renamedIds.Count == 2, "project rename callback");
 
         Assert(renamedIds.SequenceEqual(["general-thread", "project-thread"]), "rename targets the selected chat in either scope");
     }
 
-    private static Task ChatMenusExposeRenameAsync() => WpfTestHost.RunAsync(() =>
+    [Fact(DisplayName = "general and project chat menus expose rename")]
+    public Task ChatMenusExposeRenameAsync() => WpfTestHost.RunAsync(() =>
     {
         ConfigureNavigationResources(Application.Current.Resources);
         var viewModel = CreateNavigationViewModel();
@@ -145,7 +142,8 @@ internal static class ThreadRenameTests
             "both Rename menu items use the shared selected-thread command");
     });
 
-    private static Task ChatActionsAppearOnHoverOrSelectionAsync() => WpfTestHost.RunAsync(() =>
+    [Fact(DisplayName = "general and project chat actions appear on hover or selection")]
+    public Task ChatActionsAppearOnHoverOrSelectionAsync() => WpfTestHost.RunAsync(() =>
     {
         ConfigureNavigationResources(Application.Current.Resources);
         var viewModel = CreateNavigationViewModel();
@@ -208,7 +206,8 @@ internal static class ThreadRenameTests
                     setter.Property == UIElement.VisibilityProperty &&
                     Equals(setter.Value, Visibility.Visible)));
 
-    private static async Task MainViewModelRenamesBothScopesAsync()
+    [Fact(DisplayName = "main view model renames and persists general and project chats")]
+    public async Task MainViewModelRenamesBothScopesAsync()
     {
         using var temp = TempWorkspace.Create();
         var generalPath = temp.CreateDirectory("general");
@@ -249,7 +248,7 @@ internal static class ThreadRenameTests
         await viewModel.InitializeAsync();
         await transport.WaitForClientMessageCountAsync(2);
         transport.ServerSend("""{"id":0,"result":{"userAgent":"codex-test"}}""");
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => coordinator.State == AppServerSessionState.Connected,
             "app-server warm-up");
 
@@ -259,7 +258,7 @@ internal static class ThreadRenameTests
             viewModel.ProjectThreads.Single(thread => thread.ThreadId == "general-thread"),
             "Renamed general");
         viewModel.OpenRecentProjectCommand.Execute(projectPath);
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => string.Equals(viewModel.SelectedProjectPath, projectPath, StringComparison.OrdinalIgnoreCase),
             "project selection");
         await RenameSelectedAsync(
@@ -279,7 +278,8 @@ internal static class ThreadRenameTests
         await viewModel.DisposeAsync();
     }
 
-    private static async Task FirstMessageAutomaticallyRenamesNewChatOnceAsync()
+    [Fact(DisplayName = "first message automatically renames a new chat once")]
+    public async Task FirstMessageAutomaticallyRenamesNewChatOnceAsync()
     {
         using var temp = TempWorkspace.Create();
         var generalPath = temp.CreateDirectory("general");
@@ -318,7 +318,7 @@ internal static class ThreadRenameTests
         await transport.WaitForClientMessageCountAsync(4);
         transport.ServerSend("""{"id":2,"result":{"turn":{"id":"first-turn"}}}""");
 
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => transport.ClientMessages.Any(message =>
                 ReadString(JsonNode.Parse(message)!.AsObject(), "method") == "thread/name/set"),
             "automatic first-message rename");
@@ -330,22 +330,22 @@ internal static class ThreadRenameTests
         var renameRequestId = rename["id"]?.ToJsonString()
             ?? throw new InvalidOperationException("automatic rename request did not include an id");
         transport.ServerSend($"{{\"id\":{renameRequestId},\"result\":{{}}}}");
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => viewModel.SelectedThread?.Title == "Plan release validation",
             "automatic title presentation");
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => settingsStore.SavedSettings.ProjectThreads.Single().Title == "Plan release validation",
             "automatic title persistence");
 
         transport.ServerSend(
             """{"method":"turn/completed","params":{"threadId":"auto-name-thread","turn":{"id":"first-turn","status":"completed","items":[]}}}""");
-        await WaitUntilAsync(() => !viewModel.IsTurnRunning, "first named turn completion");
-        await WaitUntilAsync(() => viewModel.SubmitPromptCommand.CanExecute(null), "follow-up submission readiness");
+        await StateProbe.WaitForAsync(() => !viewModel.IsTurnRunning, "first named turn completion");
+        await StateProbe.WaitForAsync(() => viewModel.SubmitPromptCommand.CanExecute(null), "follow-up submission readiness");
 
         var beforeFollowUp = transport.ClientMessages.Count;
         viewModel.PromptText = "Run the tests";
         viewModel.SubmitPromptCommand.Execute(null);
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => transport.ClientMessages.Skip(beforeFollowUp).Any(message =>
                 ReadString(JsonNode.Parse(message)!.AsObject(), "method") == "turn/start"),
             "follow-up turn start");
@@ -356,7 +356,7 @@ internal static class ThreadRenameTests
         var followUpRequestId = followUp["id"]?.ToJsonString()
             ?? throw new InvalidOperationException("follow-up turn request did not include an id");
         transport.ServerSend($"{{\"id\":{followUpRequestId},\"result\":{{\"turn\":{{\"id\":\"follow-up-turn\"}}}}}}");
-        await WaitUntilAsync(() => viewModel.IsTurnRunning, "follow-up turn running");
+        await StateProbe.WaitForAsync(() => viewModel.IsTurnRunning, "follow-up turn running");
         Assert(
             transport.ClientMessages.Count(message =>
                 ReadString(JsonNode.Parse(message)!.AsObject(), "method") == "thread/name/set") == 1,
@@ -364,7 +364,7 @@ internal static class ThreadRenameTests
 
         transport.ServerSend(
             """{"method":"turn/completed","params":{"threadId":"auto-name-thread","turn":{"id":"follow-up-turn","status":"completed","items":[]}}}""");
-        await WaitUntilAsync(() => !viewModel.IsTurnRunning, "follow-up turn completion");
+        await StateProbe.WaitForAsync(() => !viewModel.IsTurnRunning, "follow-up turn completion");
         await viewModel.DisposeAsync();
     }
 
@@ -377,7 +377,7 @@ internal static class ThreadRenameTests
         viewModel.SelectedThread = thread;
         var previousRequestCount = transport.ClientMessages.Count;
         viewModel.RenameThreadCommand.Execute(null);
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => transport.ClientMessages.Skip(previousRequestCount).Any(message =>
                 ReadString(JsonNode.Parse(message)!.AsObject(), "method") == "thread/name/set"),
             $"{thread.ThreadId} rename request");
@@ -390,7 +390,7 @@ internal static class ThreadRenameTests
         var requestId = request["id"]?.ToJsonString()
             ?? throw new InvalidOperationException("rename request did not include an id");
         transport.ServerSend($"{{\"id\":{requestId},\"result\":{{}}}}");
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => viewModel.ProjectThreads.Any(item =>
                 item.ThreadId == thread.ThreadId && item.Title == expectedName),
             $"{thread.ThreadId} persisted rename");
@@ -506,26 +506,6 @@ internal static class ThreadRenameTests
         }
     }
 
-    private static async Task WaitUntilAsync(Func<bool> condition, string label)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (true)
-        {
-            try
-            {
-                if (condition()) return;
-                await Task.Delay(20, timeout.Token);
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("Collection was modified", StringComparison.Ordinal))
-            {
-                // The UI-owned collection can be refreshed on the dispatcher between condition reads.
-            }
-            catch (OperationCanceledException)
-            {
-                throw new InvalidOperationException($"Timed out waiting for {label}.");
-            }
-        }
-    }
 
     private static void Assert(bool condition, string message)
     {

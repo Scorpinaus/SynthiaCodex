@@ -2,23 +2,13 @@ using System.Text.Json.Nodes;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Infrastructure.Codex;
 
-internal static class ApprovalProtocolTests
+[Trait("Category", TestCategories.ProtocolContract)]
+public sealed class ApprovalProtocolTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("approval protocol classifies string-id server requests", ClassifiesStringIdServerRequestsAsync),
-        ("approval protocol responds exactly once with original numeric id", RespondsExactlyOnceWithOriginalNumericIdAsync),
-        ("approval protocol rejects unsupported server requests", RejectsUnsupportedServerRequestsAsync),
-        ("approval protocol invalidates resolved server requests", InvalidatesResolvedServerRequestsAsync),
-        ("permission profiles list with pagination and compatibility fallback", ListsPermissionProfilesAsync),
-        ("permission profiles serialize exclusively on lifecycle requests", PermissionProfilesSerializeExclusivelyAsync),
-        ("execution policies serialize on thread and turn requests", ExecutionPoliciesSerializeAsync),
-        ("instruction overrides serialize on thread lifecycle requests", InstructionOverridesSerializeOnThreadLifecycleAsync),
-        ("unsupported instruction overrides explain the Codex runtime requirement", UnsupportedInstructionOverridesExplainRuntimeRequirementAsync),
-        ("execution policy config and requirements are read", ReadsExecutionPolicyConfigAndRequirementsAsync)
-    ];
 
-    private static async Task ClassifiesStringIdServerRequestsAsync()
+
+    [Fact(DisplayName = "approval protocol classifies string-id server requests")]
+    public async Task ClassifiesStringIdServerRequestsAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = CreateClient(transport);
@@ -42,7 +32,8 @@ internal static class ApprovalProtocolTests
         Assert(transport.ClientMessages.Count == 2, "server request is not mistaken for an outgoing response");
     }
 
-    private static async Task RespondsExactlyOnceWithOriginalNumericIdAsync()
+    [Fact(DisplayName = "approval protocol responds exactly once with original numeric id")]
+    public async Task RespondsExactlyOnceWithOriginalNumericIdAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = CreateClient(transport);
@@ -75,7 +66,8 @@ internal static class ApprovalProtocolTests
         Assert(transport.ClientMessages.Count == 3, "duplicate response is not written");
     }
 
-    private static async Task RejectsUnsupportedServerRequestsAsync()
+    [Fact(DisplayName = "approval protocol rejects unsupported server requests")]
+    public async Task RejectsUnsupportedServerRequestsAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = CreateClient(transport);
@@ -89,7 +81,8 @@ internal static class ApprovalProtocolTests
         Assert(response["error"]?["message"]?.GetValue<string>().Contains("future/approval", StringComparison.Ordinal) == true, "unsupported response identifies method");
     }
 
-    private static async Task InvalidatesResolvedServerRequestsAsync()
+    [Fact(DisplayName = "approval protocol invalidates resolved server requests")]
+    public async Task InvalidatesResolvedServerRequestsAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = CreateClient(transport);
@@ -122,7 +115,8 @@ internal static class ApprovalProtocolTests
         Assert(transport.ClientMessages.Count == 2, "a resolved request cannot write a late response");
     }
 
-    private static async Task ListsPermissionProfilesAsync()
+    [Fact(DisplayName = "permission profiles list with pagination and compatibility fallback")]
+    public async Task ListsPermissionProfilesAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = CreateClient(transport);
@@ -160,7 +154,8 @@ internal static class ApprovalProtocolTests
             "method-not-found becomes an explicit legacy capability state");
     }
 
-    private static async Task PermissionProfilesSerializeExclusivelyAsync()
+    [Fact(DisplayName = "permission profiles serialize exclusively on lifecycle requests")]
+    public async Task PermissionProfilesSerializeExclusivelyAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = CreateClient(transport);
@@ -225,7 +220,8 @@ internal static class ApprovalProtocolTests
         Assert(transport.ClientMessages.Count == writeCount, "invalid mixed policy is rejected before transport write");
     }
 
-    private static async Task ExecutionPoliciesSerializeAsync()
+    [Fact(DisplayName = "execution policies serialize on thread and turn requests")]
+    public async Task ExecutionPoliciesSerializeAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = CreateClient(transport);
@@ -267,7 +263,8 @@ internal static class ApprovalProtocolTests
         await inherited;
     }
 
-    private static async Task InstructionOverridesSerializeOnThreadLifecycleAsync()
+    [Fact(DisplayName = "instruction overrides serialize on thread lifecycle requests")]
+    public async Task InstructionOverridesSerializeOnThreadLifecycleAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = CreateClient(transport);
@@ -330,7 +327,8 @@ internal static class ApprovalProtocolTests
         await inherited;
     }
 
-    private static async Task UnsupportedInstructionOverridesExplainRuntimeRequirementAsync()
+    [Fact(DisplayName = "unsupported instruction overrides explain the Codex runtime requirement")]
+    public async Task UnsupportedInstructionOverridesExplainRuntimeRequirementAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = CreateClient(transport);
@@ -357,7 +355,8 @@ internal static class ApprovalProtocolTests
         throw new InvalidOperationException("unsupported instruction overrides should fail");
     }
 
-    private static async Task ReadsExecutionPolicyConfigAndRequirementsAsync()
+    [Fact(DisplayName = "execution policy config and requirements are read")]
+    public async Task ReadsExecutionPolicyConfigAndRequirementsAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = CreateClient(transport);

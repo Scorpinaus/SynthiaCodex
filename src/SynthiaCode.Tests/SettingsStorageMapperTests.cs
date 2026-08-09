@@ -5,6 +5,7 @@ using SynthiaCode.Core.Projects;
 using SynthiaCode.Core.Settings;
 using Xunit;
 
+[Trait("Category", TestCategories.Unit)]
 public sealed class SettingsStorageMapperTests
 {
     [Fact]

@@ -3,6 +3,8 @@ using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Settings;
 using Xunit;
 
+[Trait("Category", TestCategories.InfrastructureIntegration)]
+[Collection(TestCategories.NativeCollection)]
 public sealed class ThreadStatePersistenceUseCaseServiceTests
 {
     [Fact]

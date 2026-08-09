@@ -6,20 +6,14 @@ using SynthiaCode.Core.Git;
 using SynthiaCode.Core.Logging;
 using SynthiaCode.Core.Settings;
 
-internal static class InlineReviewCommentsTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class InlineReviewCommentsTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("inline review comments format deterministic prompt context", FormatsDeterministicPromptContextAsync),
-        ("inline review comments validate and normalize restored records", ValidatesAndNormalizesRecordsAsync),
-        ("inline review comments support diff row authoring and captured clearing", SupportsDiffRowAuthoringAsync),
-        ("inline review comments persist beside attachment drafts per chat", PersistBesideAttachmentDraftsAsync),
-        ("inline review comments survive queued follow-up snapshots", SurviveQueuedFollowUpSnapshotsAsync),
-        ("inline review comments wire start steer and queue lifecycle", WiresSubmissionLifecycleAsync),
-        ("inline review comments render accessible review and queue surfaces", RendersAccessibleSurfacesAsync)
-    ];
 
-    private static Task FormatsDeterministicPromptContextAsync()
+
+    [Fact(DisplayName = "inline review comments format deterministic prompt context")]
+    public Task FormatsDeterministicPromptContextAsync()
     {
         var root = Path.GetFullPath(@"D:\Repo");
         var now = DateTimeOffset.Parse("2026-08-07T12:00:00Z");
@@ -58,7 +52,8 @@ internal static class InlineReviewCommentsTests
         return Task.CompletedTask;
     }
 
-    private static Task ValidatesAndNormalizesRecordsAsync()
+    [Fact(DisplayName = "inline review comments validate and normalize restored records")]
+    public Task ValidatesAndNormalizesRecordsAsync()
     {
         var root = Path.GetFullPath(@"D:\Repo");
         var valid = GitInlineComment.Create(
@@ -82,7 +77,8 @@ internal static class InlineReviewCommentsTests
         return Task.CompletedTask;
     }
 
-    private static async Task SupportsDiffRowAuthoringAsync()
+    [Fact(DisplayName = "inline review comments support diff row authoring and captured clearing")]
+    public async Task SupportsDiffRowAuthoringAsync()
     {
         using var workspace = TempWorkspace.Create();
         var root = workspace.CreateDirectory("inline-comment-repo");
@@ -110,7 +106,7 @@ internal static class InlineReviewCommentsTests
         };
 
         await viewModel.RefreshAsync();
-        await WaitUntilAsync(() => viewModel.SelectedDiffLines.Any(row => row.Kind == GitDiffLineKind.Addition), "commentable diff loaded");
+        await StateProbe.WaitForAsync(() => viewModel.SelectedDiffLines.Any(row => row.Kind == GitDiffLineKind.Addition), "commentable diff loaded");
 
         var addition = viewModel.SelectedDiffLines.Single(row => row.Kind == GitDiffLineKind.Addition);
         viewModel.BeginAddCommentCommand.Execute(addition);
@@ -145,7 +141,8 @@ internal static class InlineReviewCommentsTests
         Assert(mutationCount >= 5, "committed mutations notify shell persistence");
     }
 
-    private static Task PersistBesideAttachmentDraftsAsync()
+    [Fact(DisplayName = "inline review comments persist beside attachment drafts per chat")]
+    public Task PersistBesideAttachmentDraftsAsync()
     {
         var root = Path.GetFullPath(@"D:\Repo");
         var comment = GitInlineComment.Create(
@@ -198,7 +195,8 @@ internal static class InlineReviewCommentsTests
         return Task.CompletedTask;
     }
 
-    private static Task SurviveQueuedFollowUpSnapshotsAsync()
+    [Fact(DisplayName = "inline review comments survive queued follow-up snapshots")]
+    public Task SurviveQueuedFollowUpSnapshotsAsync()
     {
         var root = Path.GetFullPath(@"D:\Repo");
         var comment = GitInlineComment.Create(
@@ -224,7 +222,8 @@ internal static class InlineReviewCommentsTests
         return Task.CompletedTask;
     }
 
-    private static Task WiresSubmissionLifecycleAsync()
+    [Fact(DisplayName = "inline review comments wire start steer and queue lifecycle")]
+    public Task WiresSubmissionLifecycleAsync()
     {
         var root = FindRepositoryRoot();
         var main = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "ViewModels", "MainViewModel.cs"));
@@ -252,7 +251,8 @@ internal static class InlineReviewCommentsTests
         return Task.CompletedTask;
     }
 
-    private static Task RendersAccessibleSurfacesAsync()
+    [Fact(DisplayName = "inline review comments render accessible review and queue surfaces")]
+    public Task RendersAccessibleSurfacesAsync()
     {
         var root = FindRepositoryRoot();
         var gitXaml = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "GitView.xaml"));
@@ -303,15 +303,6 @@ internal static class InlineReviewCommentsTests
         throw new InvalidOperationException(message);
     }
 
-    private static async Task WaitUntilAsync(Func<bool> condition, string label)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        while (!condition())
-        {
-            await Task.Delay(10, timeout.Token);
-        }
-        Assert(condition(), label);
-    }
 
     private static string FindRepositoryRoot()
     {

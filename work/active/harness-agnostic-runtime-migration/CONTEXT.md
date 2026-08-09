@@ -22,6 +22,7 @@ One job: separate conversation behavior from the Codex transport without changin
 - Evidence: `evidence/phase-2-separate-durable-state.html`
 - Evidence: `evidence/phase-3-harden-codex-protocol-boundary.html`
 - Evidence: `evidence/phase-4-decompose-presentation-by-feature.html`
+- Evidence: `evidence/phase-5-modernize-tests.html`
 
 Do NOT load: closed change records, all schemas, or unrelated product areas.
 

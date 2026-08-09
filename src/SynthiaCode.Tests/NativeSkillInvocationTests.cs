@@ -10,19 +10,14 @@ using SynthiaCode.App.Views;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Infrastructure.Codex;
 
-internal static class NativeSkillInvocationTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class NativeSkillInvocationTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("native skill selector projects enabled workspace skills", SelectorProjectsEnabledSkillsAsync),
-        ("native skill selector replaces dollar tokens and removes bindings", SelectorReplacesTokensAsync),
-        ("native skill selector surface is accessible and virtualized", SelectorSurfaceIsAccessibleAsync),
-        ("explicit skill inputs serialize on start and steer", ExplicitInputsSerializeAsync),
-        ("skill invocation resolves unique names and rejects ambiguity", InvocationResolutionIsExactAsync),
-        ("queued follow-ups preserve explicit skill bindings", QueuedFollowUpsPreserveBindingsAsync)
-    ];
 
-    private static async Task SelectorProjectsEnabledSkillsAsync()
+
+    [Fact(DisplayName = "native skill selector projects enabled workspace skills")]
+    public async Task SelectorProjectsEnabledSkillsAsync()
     {
         var loadCount = 0;
         var viewModel = CreateTaskViewModel(_ =>
@@ -55,7 +50,8 @@ internal static class NativeSkillInvocationTests
         AssertEqual(2, viewModel.SkillSelector.FilteredSkills.Count, "dollar prefix is ignored when filtering");
     }
 
-    private static async Task SelectorReplacesTokensAsync()
+    [Fact(DisplayName = "native skill selector replaces dollar tokens and removes bindings")]
+    public async Task SelectorReplacesTokensAsync()
     {
         var partialToken = ComposerSkillToken.Find("Run $review later", "Run $rev".Length);
         Assert(partialToken is not null, "partial caret token is found");
@@ -85,7 +81,8 @@ internal static class NativeSkillInvocationTests
         AssertEqual(0, viewModel.SkillSelector.SelectedSkills.Count, "binding removed");
     }
 
-    private static Task SelectorSurfaceIsAccessibleAsync() => WpfTestHost.RunAsync(() =>
+    [Fact(DisplayName = "native skill selector surface is accessible and virtualized")]
+    public Task SelectorSurfaceIsAccessibleAsync() => WpfTestHost.RunAsync(() =>
     {
         var resources = Application.Current.Resources;
         resources["BooleanToVisibilityConverter"] = new BooleanToVisibilityConverter();
@@ -131,7 +128,8 @@ internal static class NativeSkillInvocationTests
         Assert(selected is not null, "selected skill chips exist");
     });
 
-    private static async Task ExplicitInputsSerializeAsync()
+    [Fact(DisplayName = "explicit skill inputs serialize on start and steer")]
+    public async Task ExplicitInputsSerializeAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = new CodexAppServerClient(
@@ -180,7 +178,8 @@ internal static class NativeSkillInvocationTests
             CodexSandbox.WorkspaceWrite)));
     }
 
-    private static async Task InvocationResolutionIsExactAsync()
+    [Fact(DisplayName = "skill invocation resolves unique names and rejects ambiguity")]
+    public async Task InvocationResolutionIsExactAsync()
     {
         var repositoryPath = @"C:\Repo\.agents\skills\review\SKILL.md";
         var userPath = @"C:\Users\Test\.codex\skills\review\SKILL.md";
@@ -213,7 +212,8 @@ internal static class NativeSkillInvocationTests
         AssertEqual(0, viewModel.SkillSelector.ResolveSkillInputs(viewModel.Prompt).Count, "removed marker drops stale binding");
     }
 
-    private static Task QueuedFollowUpsPreserveBindingsAsync()
+    [Fact(DisplayName = "queued follow-ups preserve explicit skill bindings")]
+    public Task QueuedFollowUpsPreserveBindingsAsync()
     {
         var path = @"C:\Repo\.agents\skills\review\SKILL.md";
         var input = new CodexSkillInput("review", path);

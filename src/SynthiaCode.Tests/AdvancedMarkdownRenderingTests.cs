@@ -5,20 +5,14 @@ using System.Windows.Documents;
 using System.Windows.Media.Imaging;
 using SynthiaCode.App.Controls;
 
-internal static class AdvancedMarkdownRenderingTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class AdvancedMarkdownRenderingTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("markdown renderer embeds safe remote images", RendererEmbedsSafeRemoteImagesAsync),
-        ("markdown renderer supports safe raw HTML", RendererSupportsSafeRawHtmlAsync),
-        ("markdown renderer lays out nested lists", RendererLaysOutNestedListsAsync),
-        ("markdown renderer links and appends footnotes", RendererLinksAndAppendsFootnotesAsync),
-        ("markdown renderer lays out definition lists", RendererLaysOutDefinitionListsAsync),
-        ("markdown renderer highlights fenced code by language", RendererHighlightsFencedCodeAsync),
-        ("markdown fenced code exposes an exact copy action", RendererCopiesIndividualCodeBlockAsync)
-    ];
 
-    private static Task RendererEmbedsSafeRemoteImagesAsync() => RunOnStaAsync(() =>
+
+    [Fact(DisplayName = "markdown renderer embeds safe remote images")]
+    public Task RendererEmbedsSafeRemoteImagesAsync() => RunOnStaAsync(() =>
     {
         var renderer = new MarkdownTextBlock
         {
@@ -42,7 +36,8 @@ internal static class AdvancedMarkdownRenderingTests
         Assert(InlineText(unsafeRenderer) == unsafeSource, "unsupported remote image source remains literal");
     });
 
-    private static Task RendererSupportsSafeRawHtmlAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "markdown renderer supports safe raw HTML")]
+    public Task RendererSupportsSafeRawHtmlAsync() => RunOnStaAsync(() =>
     {
         const string source = "Use <strong>safe</strong>, <em>careful</em>, and <code>value</code>.<br>Next <!--hidden--> <a href=\"https://example.com/html\">reference</a>. <script>alert('x')</script>";
         var renderer = new MarkdownTextBlock { Markdown = source };
@@ -62,7 +57,8 @@ internal static class AdvancedMarkdownRenderingTests
         Assert(renderedText.Contains("<script>alert('x')</script>", StringComparison.Ordinal), "executable HTML stays visible and inert");
     });
 
-    private static Task RendererLaysOutNestedListsAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "markdown renderer lays out nested lists")]
+    public Task RendererLaysOutNestedListsAsync() => RunOnStaAsync(() =>
     {
         var renderer = new MarkdownTextBlock
         {
@@ -91,7 +87,8 @@ internal static class AdvancedMarkdownRenderingTests
             "nested task-list state remains accessible");
     });
 
-    private static Task RendererLinksAndAppendsFootnotesAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "markdown renderer links and appends footnotes")]
+    public Task RendererLinksAndAppendsFootnotesAsync() => RunOnStaAsync(() =>
     {
         var renderer = new MarkdownTextBlock
         {
@@ -126,7 +123,8 @@ internal static class AdvancedMarkdownRenderingTests
         Assert(InlineText(fencedCode) == "[^sample]: literal code", "footnote-like source inside a fence remains literal code");
     });
 
-    private static Task RendererLaysOutDefinitionListsAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "markdown renderer lays out definition lists")]
+    public Task RendererLaysOutDefinitionListsAsync() => RunOnStaAsync(() =>
     {
         var renderer = new MarkdownTextBlock
         {
@@ -157,7 +155,8 @@ internal static class AdvancedMarkdownRenderingTests
         Assert(descriptions.SelectMany(description => description.Inlines).OfType<Bold>().Any(), "inline Markdown remains active inside definitions");
     });
 
-    private static Task RendererHighlightsFencedCodeAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "markdown renderer highlights fenced code by language")]
+    public Task RendererHighlightsFencedCodeAsync() => RunOnStaAsync(() =>
     {
         var renderer = new MarkdownTextBlock
         {
@@ -181,7 +180,8 @@ internal static class AdvancedMarkdownRenderingTests
             "normalized language label is shown in the code-block header");
     });
 
-    private static Task RendererCopiesIndividualCodeBlockAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "markdown fenced code exposes an exact copy action")]
+    public Task RendererCopiesIndividualCodeBlockAsync() => RunOnStaAsync(() =>
     {
         const string expected = "var total = 42;\nConsole.WriteLine(total);";
         var renderer = new MarkdownTextBlock

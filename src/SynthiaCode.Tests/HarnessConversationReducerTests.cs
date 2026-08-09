@@ -1,4 +1,3 @@
-using SynthiaCode.App.Services;
 using SynthiaCode.Application.Harnesses;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Harnesses;
@@ -6,6 +5,7 @@ using SynthiaCode.Core.Settings;
 using SynthiaCode.Harnesses.InMemory;
 using Xunit;
 
+[Trait("Category", TestCategories.Unit)]
 public sealed class HarnessConversationReducerTests
 {
     [Fact]

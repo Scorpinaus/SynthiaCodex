@@ -1,8 +1,8 @@
-using SynthiaCode.App.Services;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Settings;
 using Xunit;
 
+[Trait("Category", TestCategories.Unit)]
 public sealed class ConversationWorkflowControllerTests
 {
     [Fact]

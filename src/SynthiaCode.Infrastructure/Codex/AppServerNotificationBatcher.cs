@@ -9,14 +9,17 @@ public sealed class AppServerNotificationBatcher : IDisposable
     private readonly object syncRoot = new();
     private readonly Action<AppServerNotification> emit;
     private readonly TimeSpan interval;
-    private readonly Timer timer;
+    private readonly ITimer timer;
     private PendingDelta? pending;
     private bool disposed;
     private long receivedCount;
     private long emittedCount;
     private long receivedDeltaCount;
 
-    public AppServerNotificationBatcher(Action<AppServerNotification> emit, TimeSpan? interval = null)
+    public AppServerNotificationBatcher(
+        Action<AppServerNotification> emit,
+        TimeSpan? interval = null,
+        TimeProvider? timeProvider = null)
     {
         this.emit = emit ?? throw new ArgumentNullException(nameof(emit));
         this.interval = interval ?? TimeSpan.FromMilliseconds(50);
@@ -25,7 +28,11 @@ public sealed class AppServerNotificationBatcher : IDisposable
             throw new ArgumentOutOfRangeException(nameof(interval));
         }
 
-        timer = new Timer(_ => Flush(), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        timer = (timeProvider ?? TimeProvider.System).CreateTimer(
+            _ => Flush(),
+            null,
+            Timeout.InfiniteTimeSpan,
+            Timeout.InfiniteTimeSpan);
     }
 
     public AppServerNotificationBatchMetrics Metrics

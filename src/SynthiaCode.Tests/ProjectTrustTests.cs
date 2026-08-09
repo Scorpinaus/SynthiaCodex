@@ -12,20 +12,14 @@ using SynthiaCode.Infrastructure.Codex;
 using SynthiaCode.Infrastructure.Projects;
 using SynthiaCode.Infrastructure.Workspaces;
 
-internal static class ProjectTrustTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class ProjectTrustTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("project trust reads remembered trusted and untrusted config", ReadsRememberedTrustAsync),
-        ("project trust serializes normalized Windows config key paths", SerializesWindowsTrustPathAsync),
-        ("project trust persists and remembers trusted decisions", PersistsAndRemembersTrustedDecisionAsync),
-        ("project trust persists and remembers untrusted decisions", PersistsAndRemembersUntrustedDecisionAsync),
-        ("project trust cancel and protocol failures fail closed", CancelAndFailuresFailClosedAsync),
-        ("project trust gates browse recent and startup activation paths", GatesEveryProjectActivationPathAsync),
-        ("project trust cancel preserves selection and settings", CancelPreservesSelectionAndSettingsAsync)
-    ];
 
-    private static async Task ReadsRememberedTrustAsync()
+
+    [Fact(DisplayName = "project trust reads remembered trusted and untrusted config")]
+    public async Task ReadsRememberedTrustAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = CreateClient(transport);
@@ -74,7 +68,8 @@ internal static class ProjectTrustTests
         AssertEqual(CodexProjectTrustLevel.Untrusted, await untrustedTask, "unicode untrusted path");
     }
 
-    private static async Task SerializesWindowsTrustPathAsync()
+    [Fact(DisplayName = "project trust serializes normalized Windows config key paths")]
+    public async Task SerializesWindowsTrustPathAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = CreateClient(transport);
@@ -105,7 +100,8 @@ internal static class ProjectTrustTests
         await writeTask;
     }
 
-    private static async Task PersistsAndRemembersTrustedDecisionAsync()
+    [Fact(DisplayName = "project trust persists and remembers trusted decisions")]
+    public async Task PersistsAndRemembersTrustedDecisionAsync()
     {
         var session = new FakeProjectTrustSession();
         var interaction = new FakeUserInteractionService { TrustDecision = ProjectTrustDecision.TrustProject };
@@ -121,7 +117,8 @@ internal static class ProjectTrustTests
         AssertEqual(@"C:\Work\Trusted", first.NormalizedPath, "trusted path is normalized before prompting");
     }
 
-    private static async Task PersistsAndRemembersUntrustedDecisionAsync()
+    [Fact(DisplayName = "project trust persists and remembers untrusted decisions")]
+    public async Task PersistsAndRemembersUntrustedDecisionAsync()
     {
         var session = new FakeProjectTrustSession();
         var interaction = new FakeUserInteractionService { TrustDecision = ProjectTrustDecision.OpenUntrusted };
@@ -136,7 +133,8 @@ internal static class ProjectTrustTests
         AssertSequenceEqual([CodexProjectTrustLevel.Untrusted], session.Writes, "untrusted decision is persisted once");
     }
 
-    private static async Task CancelAndFailuresFailClosedAsync()
+    [Fact(DisplayName = "project trust cancel and protocol failures fail closed")]
+    public async Task CancelAndFailuresFailClosedAsync()
     {
         var cancelSession = new FakeProjectTrustSession();
         var cancelInteraction = new FakeUserInteractionService { TrustDecision = ProjectTrustDecision.Cancel };
@@ -162,7 +160,8 @@ internal static class ProjectTrustTests
         }
     }
 
-    private static async Task GatesEveryProjectActivationPathAsync()
+    [Fact(DisplayName = "project trust gates browse recent and startup activation paths")]
+    public async Task GatesEveryProjectActivationPathAsync()
     {
         using var temp = TempWorkspace.Create();
         var browsePath = temp.CreateDirectory("browse");
@@ -208,7 +207,8 @@ internal static class ProjectTrustTests
         }
     }
 
-    private static async Task CancelPreservesSelectionAndSettingsAsync()
+    [Fact(DisplayName = "project trust cancel preserves selection and settings")]
+    public async Task CancelPreservesSelectionAndSettingsAsync()
     {
         using var temp = TempWorkspace.Create();
         var firstPath = temp.CreateDirectory("first");

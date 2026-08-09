@@ -4,6 +4,8 @@ using System.Xml.Linq;
 using SynthiaCode.App;
 using Xunit;
 
+[Trait("Category", TestCategories.InfrastructureIntegration)]
+[Collection(TestCategories.NativeCollection)]
 public sealed class ReleaseMetadataTests
 {
     [Fact]
@@ -36,10 +38,11 @@ public sealed class ReleaseMetadataTests
         Assert.Contains("# SynthiaCode: Current Architecture", architecture, StringComparison.Ordinal);
         Assert.Contains("**Recorded:** 9 August 2026", architecture, StringComparison.Ordinal);
         Assert.Contains($"**Release:** {expectedReleaseVersion}", architecture, StringComparison.Ordinal);
-        Assert.Contains("**Phase:** Architecture migration Phase 3", architecture, StringComparison.Ordinal);
-        Assert.Contains("xUnit-discovered behavioral and integration-style test suite", architecture, StringComparison.Ordinal);
+        Assert.Contains("**Phase:** Architecture migration Phase 5", architecture, StringComparison.Ordinal);
+        Assert.Contains("normal xUnit `[Fact]` discovery", architecture, StringComparison.Ordinal);
+        Assert.Contains("SynthiaCode.UnicodeEchoFixture", architecture, StringComparison.Ordinal);
         Assert.Contains("### Multi-folder project roots", architecture, StringComparison.Ordinal);
-        Assert.Contains("385 passing tests", architecture, StringComparison.Ordinal);
+        Assert.Contains("InfrastructureIntegration", architecture, StringComparison.Ordinal);
         Assert.DoesNotContain("Console-based behavioral and integration-style assertion runner", architecture, StringComparison.Ordinal);
         Assert.DoesNotContain("Phase 6A completes", architecture, StringComparison.Ordinal);
     }

@@ -1,6 +1,7 @@
 using System.Xml.Linq;
 using Xunit;
 
+[Trait("Category", TestCategories.Unit)]
 public sealed class ArchitectureBoundaryTests
 {
     private static readonly IReadOnlyDictionary<string, string[]> ExpectedProjectReferences =
@@ -222,6 +223,7 @@ public sealed class ArchitectureBoundaryTests
         return Directory
             .EnumerateFiles(sourceDirectory, "SynthiaCode.*.csproj", SearchOption.AllDirectories)
             .Where(path => !path.Contains("SynthiaCode.Tests", StringComparison.OrdinalIgnoreCase))
+            .Where(path => !path.Contains("SynthiaCode.UnicodeEchoFixture", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(path => Path.GetFileNameWithoutExtension(path)!, StringComparer.Ordinal);
     }
 

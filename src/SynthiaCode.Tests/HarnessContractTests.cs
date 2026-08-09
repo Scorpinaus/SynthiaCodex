@@ -7,6 +7,7 @@ using SynthiaCode.Harnesses.Codex;
 using SynthiaCode.Harnesses.InMemory;
 using Xunit;
 
+[Trait("Category", TestCategories.Unit)]
 public sealed class HarnessContractTests
 {
     [Fact]

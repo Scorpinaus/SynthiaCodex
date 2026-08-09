@@ -11,20 +11,14 @@ using SynthiaCode.Infrastructure.Codex;
 using SynthiaCode.Infrastructure.Projects;
 using SynthiaCode.Infrastructure.Workspaces;
 
-internal static class ProjectlessThreadTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class ProjectlessThreadTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("projectless thread store isolates General scope", ThreadStoreIsolatesGeneralScopeAsync),
-        ("General workspace is contained and idempotent", GeneralWorkspaceIsContainedAndIdempotentAsync),
-        ("thread start serializes an optional cwd", ThreadStartSerializesOptionalCwdAsync),
-        ("view model creates a General thread without a project", ViewModelCreatesGeneralThreadWithoutProjectAsync),
-        ("view model submits a first General turn without a project", ViewModelSubmitsFirstGeneralTurnWithoutProjectAsync),
-        ("General workspace failure leaves project thread creation available", GeneralWorkspaceFailureIsIsolatedAsync),
-        ("General threads support fork archive unarchive and resume", GeneralThreadLifecycleAsync)
-    ];
 
-    private static Task ThreadStoreIsolatesGeneralScopeAsync()
+
+    [Fact(DisplayName = "projectless thread store isolates General scope")]
+    public Task ThreadStoreIsolatesGeneralScopeAsync()
     {
         using var temp = TempWorkspace.Create();
         var projectPath = temp.CreateDirectory("Repo");
@@ -56,7 +50,8 @@ internal static class ProjectlessThreadTests
         return Task.CompletedTask;
     }
 
-    private static Task GeneralWorkspaceIsContainedAndIdempotentAsync()
+    [Fact(DisplayName = "General workspace is contained and idempotent")]
+    public Task GeneralWorkspaceIsContainedAndIdempotentAsync()
     {
         using var temp = TempWorkspace.Create();
         var service = new GeneralWorkspaceService(temp.Root);
@@ -72,7 +67,8 @@ internal static class ProjectlessThreadTests
         return Task.CompletedTask;
     }
 
-    private static async Task ThreadStartSerializesOptionalCwdAsync()
+    [Fact(DisplayName = "thread start serializes an optional cwd")]
+    public async Task ThreadStartSerializesOptionalCwdAsync()
     {
         using var temp = TempWorkspace.Create();
         var cwd = temp.CreateDirectory("General");
@@ -91,7 +87,8 @@ internal static class ProjectlessThreadTests
         Assert((await startTask).ThreadId == "general-thread", "thread start response");
     }
 
-    private static async Task ViewModelCreatesGeneralThreadWithoutProjectAsync()
+    [Fact(DisplayName = "view model creates a General thread without a project")]
+    public async Task ViewModelCreatesGeneralThreadWithoutProjectAsync()
     {
         using var temp = TempWorkspace.Create();
         await using var transport = new FakeAppServerTransport();
@@ -103,6 +100,14 @@ internal static class ProjectlessThreadTests
         Assert(viewModel.SelectedProjectPath is null, "no project is selected");
         Assert(viewModel.ActiveWorkspacePath == workspaceService.WorkspacePath, "General workspace is presented before a thread exists");
         Assert(viewModel.NewThreadCommand.CanExecute(null), "General thread command is enabled");
+        var navigationChanges = new MessageProbe<string>();
+        viewModel.ProjectWorkspace.GeneralThreads.CollectionChanged += (_, _) =>
+        {
+            foreach (var thread in viewModel.ProjectWorkspace.GeneralThreads)
+            {
+                navigationChanges.Publish(thread.ThreadId);
+            }
+        };
         viewModel.NewThreadCommand.Execute(null);
 
         await transport.WaitForClientMessageCountAsync(2);
@@ -113,14 +118,20 @@ internal static class ProjectlessThreadTests
         Assert(ReadString(start, "params.cwd") == workspaceService.WorkspacePath, "General creation uses managed cwd");
         transport.ServerSend("""{"id":1,"result":{"thread":{"id":"general-created"}}}""");
 
-        await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "general-created", "General thread selected");
+        await StateProbe.WaitForAsync(() => viewModel.SelectedThread?.ThreadId == "general-created", "General thread selected");
         Assert(viewModel.SelectedThread?.ScopeKind == ThreadScopeKind.General, "selected thread is General");
+        await navigationChanges.WaitForAsync(threadId => threadId == "general-created");
         Assert(viewModel.ProjectWorkspace.GeneralThreads.Single().ThreadId == "general-created", "General navigation contains thread");
-        Assert(settingsStore.SavedSettings.ProjectThreads.Single().ScopeKind == ThreadScopeKind.General, "General thread persisted");
+        var saved = await settingsStore.Saves.WaitForAsync(snapshot =>
+            snapshot.ProjectThreads.Any(thread =>
+                thread.ThreadId == "general-created" &&
+                thread.ScopeKind == ThreadScopeKind.General));
+        Assert(saved.ProjectThreads.Single().ScopeKind == ThreadScopeKind.General, "General thread persisted");
         await viewModel.DisposeAsync();
     }
 
-    private static async Task ViewModelSubmitsFirstGeneralTurnWithoutProjectAsync()
+    [Fact(DisplayName = "view model submits a first General turn without a project")]
+    public async Task ViewModelSubmitsFirstGeneralTurnWithoutProjectAsync()
     {
         using var temp = TempWorkspace.Create();
         await using var transport = new FakeAppServerTransport();
@@ -140,11 +151,12 @@ internal static class ProjectlessThreadTests
         Assert(ReadString(turn, "method") == "turn/start", "implicit General turn starts");
         Assert(ReadString(turn, "params.cwd") == workspaceService.WorkspacePath, "implicit General turn uses managed cwd");
         transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-general"}}}""");
-        await WaitUntilAsync(() => viewModel.IsTurnRunning, "General turn running");
+        await StateProbe.WaitForAsync(() => viewModel.IsTurnRunning, "General turn running");
         await viewModel.DisposeAsync();
     }
 
-    private static async Task GeneralThreadLifecycleAsync()
+    [Fact(DisplayName = "General threads support fork archive unarchive and resume")]
+    public async Task GeneralThreadLifecycleAsync()
     {
         using var temp = TempWorkspace.Create();
         await using var transport = new FakeAppServerTransport();
@@ -157,7 +169,7 @@ internal static class ProjectlessThreadTests
         transport.ServerSend("""{"id":0,"result":{"userAgent":"codex-test"}}""");
         await transport.WaitForClientMessageCountAsync(3);
         transport.ServerSend("""{"id":1,"result":{"thread":{"id":"general-source"}}}""");
-        await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "general-source", "General source selected");
+        await StateProbe.WaitForAsync(() => viewModel.SelectedThread?.ThreadId == "general-source", "General source selected");
 
         viewModel.ForkThreadCommand.Execute(null);
         await transport.WaitForClientMessageCountAsync(4);
@@ -165,18 +177,18 @@ internal static class ProjectlessThreadTests
         Assert(ReadString(fork, "method") == "thread/fork", "General fork request method");
         Assert(ReadString(fork, "params.cwd") == workspaceService.WorkspacePath, "General fork uses managed cwd");
         transport.ServerSend("""{"id":2,"result":{"thread":{"id":"general-fork"}}}""");
-        await WaitUntilAsync(() => viewModel.SelectedThread?.ThreadId == "general-fork", "General fork selected");
+        await StateProbe.WaitForAsync(() => viewModel.SelectedThread?.ThreadId == "general-fork", "General fork selected");
         Assert(viewModel.SelectedThread?.ScopeKind == ThreadScopeKind.General, "fork remains in General scope");
 
         viewModel.ArchiveThreadCommand.Execute(null);
         await transport.WaitForClientMessageCountAsync(5);
         transport.ServerSend("""{"id":3,"result":{}}""");
-        await WaitUntilAsync(() => viewModel.SelectedThread?.IsArchived == true, "General fork archived");
+        await StateProbe.WaitForAsync(() => viewModel.SelectedThread?.IsArchived == true, "General fork archived");
 
         viewModel.UnarchiveThreadCommand.Execute(null);
         await transport.WaitForClientMessageCountAsync(6);
         transport.ServerSend("""{"id":4,"result":{"thread":{"id":"general-fork"}}}""");
-        await WaitUntilAsync(() => viewModel.SelectedThread?.IsArchived == false, "General fork unarchived");
+        await StateProbe.WaitForAsync(() => viewModel.SelectedThread?.IsArchived == false, "General fork unarchived");
 
         viewModel.ResumeThreadCommand.Execute(null);
         await transport.WaitForClientMessageCountAsync(7);
@@ -184,11 +196,12 @@ internal static class ProjectlessThreadTests
         Assert(ReadString(resume, "method") == "thread/resume", "General resume request method");
         Assert(ReadString(resume, "params.cwd") == workspaceService.WorkspacePath, "General resume uses managed cwd");
         transport.ServerSend("""{"id":5,"result":{"thread":{"id":"general-fork"},"turns":[]}}""");
-        await WaitUntilAsync(() => viewModel.StatusMessage.Contains("resumed", StringComparison.OrdinalIgnoreCase), "General fork resumed");
+        await StateProbe.WaitForAsync(() => viewModel.StatusMessage.Contains("resumed", StringComparison.OrdinalIgnoreCase), "General fork resumed");
         await viewModel.DisposeAsync();
     }
 
-    private static async Task GeneralWorkspaceFailureIsIsolatedAsync()
+    [Fact(DisplayName = "General workspace failure leaves project thread creation available")]
+    public async Task GeneralWorkspaceFailureIsIsolatedAsync()
     {
         using var temp = TempWorkspace.Create();
         await using var transport = new FakeAppServerTransport();
@@ -202,7 +215,7 @@ internal static class ProjectlessThreadTests
         Assert(!viewModel.ProjectWorkspace.NewGeneralThreadCommand.CanExecute(null), "unavailable General creation is disabled");
         Assert(!viewModel.NewThreadCommand.CanExecute(null), "global creation is disabled when no current scope is available");
         viewModel.BrowseProjectCommand.Execute(null);
-        await WaitUntilAsync(() => viewModel.SelectedProjectPath is not null, "project selected after General failure");
+        await StateProbe.WaitForAsync(() => viewModel.SelectedProjectPath is not null, "project selected after General failure");
         Assert(viewModel.NewThreadCommand.CanExecute(null), "project thread creation remains available");
         await viewModel.DisposeAsync();
     }
@@ -259,21 +272,6 @@ internal static class ProjectlessThreadTests
         return current?.GetValue<string>();
     }
 
-    private static async Task WaitUntilAsync(Func<bool> condition, string label)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        while (!condition())
-        {
-            try
-            {
-                await Task.Delay(20, timeout.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                throw new InvalidOperationException($"Timed out waiting for {label}.");
-            }
-        }
-    }
 
     private static void Assert(bool condition, string message)
     {

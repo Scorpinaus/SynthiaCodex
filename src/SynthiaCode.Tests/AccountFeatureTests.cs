@@ -11,17 +11,14 @@ using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Projects;
 using SynthiaCode.Infrastructure.Codex;
 
-internal static class AccountFeatureTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class AccountFeatureTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("app-server client reads account and rate limits", ClientReadsAccountAndRateLimitsAsync),
-        ("account view model projects identity and remaining usage", AccountViewModelProjectsIdentityAndUsageAsync),
-        ("account notifications update usage without entering a thread", AccountNotificationUpdatesUsageAsync),
-        ("account footer remains fixed while project navigation scrolls", AccountFooterRemainsFixedAsync)
-    ];
 
-    private static async Task ClientReadsAccountAndRateLimitsAsync()
+
+    [Fact(DisplayName = "app-server client reads account and rate limits")]
+    public async Task ClientReadsAccountAndRateLimitsAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = new CodexAppServerClient(
@@ -62,7 +59,8 @@ internal static class AccountFeatureTests
         AssertEqual(2, limits.ResetCreditsAvailable, "reset credits");
     }
 
-    private static Task AccountViewModelProjectsIdentityAndUsageAsync()
+    [Fact(DisplayName = "account view model projects identity and remaining usage")]
+    public Task AccountViewModelProjectsIdentityAndUsageAsync()
     {
         var settingsOpened = 0;
         var viewModel = CreateAccountViewModel(() => settingsOpened++);
@@ -97,7 +95,8 @@ internal static class AccountFeatureTests
         return Task.CompletedTask;
     }
 
-    private static Task AccountNotificationUpdatesUsageAsync()
+    [Fact(DisplayName = "account notifications update usage without entering a thread")]
+    public Task AccountNotificationUpdatesUsageAsync()
     {
         var viewModel = CreateAccountViewModel(() => { });
         viewModel.ApplyAccount(new CodexAccountReadResult(
@@ -117,7 +116,8 @@ internal static class AccountFeatureTests
         return Task.CompletedTask;
     }
 
-    private static Task AccountFooterRemainsFixedAsync() => WpfTestHost.RunAsync(() =>
+    [Fact(DisplayName = "account footer remains fixed while project navigation scrolls")]
+    public Task AccountFooterRemainsFixedAsync() => WpfTestHost.RunAsync(() =>
     {
         ConfigureTestResources(Application.Current.Resources);
         var projectWorkspace = CreateProjectViewModel();

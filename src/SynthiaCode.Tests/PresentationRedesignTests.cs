@@ -2,7 +2,9 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Media;
 
-internal static partial class PresentationRedesignTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed partial class PresentationRedesignTests
 {
     private static readonly string[] RequiredThemeKeys =
     [
@@ -36,19 +38,10 @@ internal static partial class PresentationRedesignTests
         "InfoSubtleBrush"
     ];
 
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("redesign themes expose complete semantic resources", ThemesExposeSemanticResourcesAsync),
-        ("application resources are composed by design-system concern", ApplicationResourcesAreComposedAsync),
-        ("shared controls expose modern reusable primitives", SharedControlsExposeReusablePrimitivesAsync),
-        ("window shell uses custom chrome and adaptive docked regions", WindowShellUsesAdaptiveRegionsAsync),
-        ("feature surfaces follow the presentation accessibility contract", FeatureSurfacesFollowContractAsync),
-        ("turn activity uses a commentary-to-final channel handoff", TurnActivityUsesCommentaryHandoffAsync),
-        ("redesign preserves presentation performance guardrails", PerformanceGuardrailsAsync),
-        ("redesign phase ledger records completed implementation slices", PhaseLedgerRecordsCompletedSlicesAsync)
-    ];
 
-    private static Task ThemesExposeSemanticResourcesAsync() => WpfTestHost.RunAsync(() =>
+
+    [Fact(DisplayName = "redesign themes expose complete semantic resources")]
+    public Task ThemesExposeSemanticResourcesAsync() => WpfTestHost.RunAsync(() =>
     {
         var dark = LoadDictionary("Themes/DarkTheme.xaml");
         var light = LoadDictionary("Themes/LightTheme.xaml");
@@ -83,7 +76,8 @@ internal static partial class PresentationRedesignTests
         }
     });
 
-    private static Task ApplicationResourcesAreComposedAsync()
+    [Fact(DisplayName = "application resources are composed by design-system concern")]
+    public Task ApplicationResourcesAreComposedAsync()
     {
         var app = ReadAppFile("App.xaml");
         var expectedSources = new[]
@@ -108,7 +102,8 @@ internal static partial class PresentationRedesignTests
         return Task.CompletedTask;
     }
 
-    private static Task SharedControlsExposeReusablePrimitivesAsync()
+    [Fact(DisplayName = "shared controls expose modern reusable primitives")]
+    public Task SharedControlsExposeReusablePrimitivesAsync()
     {
         var foundations = ReadAppFile("Themes", "Foundations.xaml");
         var buttons = ReadAppFile("Themes", "Controls.Buttons.xaml");
@@ -149,7 +144,8 @@ internal static partial class PresentationRedesignTests
         return Task.CompletedTask;
     }
 
-    private static Task WindowShellUsesAdaptiveRegionsAsync()
+    [Fact(DisplayName = "window shell uses custom chrome and adaptive docked regions")]
+    public Task WindowShellUsesAdaptiveRegionsAsync()
     {
         var shell = ReadAppFile("MainWindow.xaml");
         var codeBehind = ReadAppFile("MainWindow.xaml.cs");
@@ -169,7 +165,8 @@ internal static partial class PresentationRedesignTests
         return Task.CompletedTask;
     }
 
-    private static Task FeatureSurfacesFollowContractAsync()
+    [Fact(DisplayName = "feature surfaces follow the presentation accessibility contract")]
+    public Task FeatureSurfacesFollowContractAsync()
     {
         var featureFiles = new[]
         {
@@ -215,7 +212,8 @@ internal static partial class PresentationRedesignTests
         return Task.CompletedTask;
     }
 
-    private static Task TurnActivityUsesCommentaryHandoffAsync()
+    [Fact(DisplayName = "turn activity uses a commentary-to-final channel handoff")]
+    public Task TurnActivityUsesCommentaryHandoffAsync()
     {
         var task = ReadTaskPresentation();
 
@@ -230,7 +228,8 @@ internal static partial class PresentationRedesignTests
         return Task.CompletedTask;
     }
 
-    private static Task PhaseLedgerRecordsCompletedSlicesAsync()
+    [Fact(DisplayName = "redesign phase ledger records completed implementation slices")]
+    public Task PhaseLedgerRecordsCompletedSlicesAsync()
     {
         var parity = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "feature_parity.md"));
         Assert(parity.Contains("## Modern WPF redesign implementation parity", StringComparison.Ordinal), "feature parity contains redesign ledger");
@@ -244,7 +243,8 @@ internal static partial class PresentationRedesignTests
         return Task.CompletedTask;
     }
 
-    private static Task PerformanceGuardrailsAsync()
+    [Fact(DisplayName = "redesign preserves presentation performance guardrails")]
+    public Task PerformanceGuardrailsAsync()
     {
         var task = ReadTaskPresentation();
         var navigation = ReadAppFile("Views", "ProjectThreadView.xaml");

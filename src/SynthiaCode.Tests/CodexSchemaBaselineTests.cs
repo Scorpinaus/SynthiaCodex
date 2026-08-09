@@ -1,5 +1,6 @@
 using Xunit;
 
+[Trait("Category", TestCategories.ProtocolContract)]
 public sealed class CodexSchemaBaselineTests
 {
     private const string CurrentCodexCliBaseline = "0.147.0";

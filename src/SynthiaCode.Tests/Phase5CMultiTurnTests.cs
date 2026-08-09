@@ -4,31 +4,14 @@ using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Settings;
 using SynthiaCode.Infrastructure.Codex;
 
-internal static class Phase5CMultiTurnTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class Phase5CMultiTurnTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("multi-turn reducer keeps sequential turns independent", ReducerKeepsTurnsIndependentAsync),
-        ("thread read parses canonical conversation history", ThreadReadParsesHistoryAsync),
-        ("thread read restores generated images", ThreadReadRestoresGeneratedImagesAsync),
-        ("conversation persistence remains backward compatible", ConversationPersistenceIsCompatibleAsync),
-        ("task composer distinguishes first turn and follow-up", ComposerLabelsFollowUpAsync),
-        ("turn activity presentation follows content and status", ActivityPresentationFollowsTurnStateAsync),
-        ("turn presentation retains expandable commentary with the final response", CommentaryRemainsExpandableWithFinalResponseAsync),
-        ("turn activity suppresses protocol noise", ActivitySuppressesProtocolNoiseAsync),
-        ("command and tool activity updates stable rows", ActivityUpdatesStableRowsAsync),
-        ("interleaved activities retain independent identity", InterleavedActivitiesRetainIdentityAsync),
-        ("assistant commentary stays separate from final response", CommentaryStaysSeparateFromFinalResponseAsync),
-        ("generated images remain visible with final response text", GeneratedImagesRemainVisibleWithFinalResponseAsync),
-        ("Unicode repair is conservative and idempotent", UnicodeRepairIsConservativeAsync),
-        ("streamed and restored mojibake is repaired for presentation", StreamedAndRestoredMojibakeIsRepairedAsync),
-        ("supported work items project friendly activity", SupportedWorkItemsProjectFriendlyActivityAsync),
-        ("activity details preserve complete source text", ActivityDetailsPreserveCompleteSourceTextAsync),
-        ("web search activity prefers complete structured queries", WebSearchActivityPrefersCompleteStructuredQueriesAsync),
-        ("restored activity removes legacy protocol noise", RestoredActivityRemovesLegacyNoiseAsync)
-    ];
 
-    private static Task ReducerKeepsTurnsIndependentAsync()
+
+    [Fact(DisplayName = "multi-turn reducer keeps sequential turns independent")]
+    public Task ReducerKeepsTurnsIndependentAsync()
     {
         var service = new CodexThreadService();
         service.Restore("thread-1", null, null, null);
@@ -55,7 +38,8 @@ internal static class Phase5CMultiTurnTests
         return Task.CompletedTask;
     }
 
-    private static async Task ThreadReadParsesHistoryAsync()
+    [Fact(DisplayName = "thread read parses canonical conversation history")]
+    public async Task ThreadReadParsesHistoryAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = new CodexAppServerClient(
@@ -84,7 +68,8 @@ internal static class Phase5CMultiTurnTests
         Assert(result.Turns[0].AssistantResponse == "I\u2019m ready", "canonical response is repaired while parsed");
     }
 
-    private static async Task ThreadReadRestoresGeneratedImagesAsync()
+    [Fact(DisplayName = "thread read restores generated images")]
+    public async Task ThreadReadRestoresGeneratedImagesAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = new CodexAppServerClient(
@@ -110,7 +95,8 @@ internal static class Phase5CMultiTurnTests
             "thread history retains the canonical image-generation saved path");
     }
 
-    private static Task ConversationPersistenceIsCompatibleAsync()
+    [Fact(DisplayName = "conversation persistence remains backward compatible")]
+    public Task ConversationPersistenceIsCompatibleAsync()
     {
         var legacy = new ProjectThreadState
         {
@@ -156,7 +142,8 @@ internal static class Phase5CMultiTurnTests
         return Task.CompletedTask;
     }
 
-    private static Task ComposerLabelsFollowUpAsync()
+    [Fact(DisplayName = "task composer distinguishes first turn and follow-up")]
+    public Task ComposerLabelsFollowUpAsync()
     {
         var viewModel = WorkspaceActionStubs.CreateTaskViewModel(WorkspaceActionStubs.Task(
             () => Task.CompletedTask,
@@ -173,7 +160,8 @@ internal static class Phase5CMultiTurnTests
         return Task.CompletedTask;
     }
 
-    private static Task ActivityPresentationFollowsTurnStateAsync()
+    [Fact(DisplayName = "turn activity presentation follows content and status")]
+    public Task ActivityPresentationFollowsTurnStateAsync()
     {
         var turn = new CodexConversationTurn();
         Assert(!turn.HasActivity, "new turn has no visible activity region");
@@ -196,7 +184,8 @@ internal static class Phase5CMultiTurnTests
         return Task.CompletedTask;
     }
 
-    private static Task CommentaryRemainsExpandableWithFinalResponseAsync()
+    [Fact(DisplayName = "turn presentation retains expandable commentary with the final response")]
+    public Task CommentaryRemainsExpandableWithFinalResponseAsync()
     {
         var turn = new CodexConversationTurn
         {
@@ -248,7 +237,8 @@ internal static class Phase5CMultiTurnTests
         return Task.CompletedTask;
     }
 
-    private static Task ActivitySuppressesProtocolNoiseAsync()
+    [Fact(DisplayName = "turn activity suppresses protocol noise")]
+    public Task ActivitySuppressesProtocolNoiseAsync()
     {
         var service = CreateRunningService("turn-noise");
         service.ApplyNotification(NotificationWithItem("item/started", "turn-noise", "reason-1", "reasoning"));
@@ -269,7 +259,8 @@ internal static class Phase5CMultiTurnTests
         return Task.CompletedTask;
     }
 
-    private static Task ActivityUpdatesStableRowsAsync()
+    [Fact(DisplayName = "command and tool activity updates stable rows")]
+    public Task ActivityUpdatesStableRowsAsync()
     {
         var service = CreateRunningService("turn-upsert");
         service.ApplyNotification(NotificationWithItem(
@@ -331,7 +322,8 @@ internal static class Phase5CMultiTurnTests
         return Task.CompletedTask;
     }
 
-    private static Task CommentaryStaysSeparateFromFinalResponseAsync()
+    [Fact(DisplayName = "assistant commentary stays separate from final response")]
+    public Task CommentaryStaysSeparateFromFinalResponseAsync()
     {
         var service = CreateRunningService("turn-message");
         service.ApplyNotification(NotificationWithItem(
@@ -381,7 +373,8 @@ internal static class Phase5CMultiTurnTests
         return Task.CompletedTask;
     }
 
-    private static Task GeneratedImagesRemainVisibleWithFinalResponseAsync()
+    [Fact(DisplayName = "generated images remain visible with final response text")]
+    public Task GeneratedImagesRemainVisibleWithFinalResponseAsync()
     {
         const string imagePath = @"C:\Temp\generated image (1).png";
         var service = CreateRunningService("turn-image");
@@ -464,7 +457,8 @@ internal static class Phase5CMultiTurnTests
         return Task.CompletedTask;
     }
 
-    private static Task InterleavedActivitiesRetainIdentityAsync()
+    [Fact(DisplayName = "interleaved activities retain independent identity")]
+    public Task InterleavedActivitiesRetainIdentityAsync()
     {
         var service = CreateRunningService("turn-interleaved");
         service.ApplyNotification(NotificationWithItem(
@@ -493,7 +487,8 @@ internal static class Phase5CMultiTurnTests
         return Task.CompletedTask;
     }
 
-    private static Task UnicodeRepairIsConservativeAsync()
+    [Fact(DisplayName = "Unicode repair is conservative and idempotent")]
+    public Task UnicodeRepairIsConservativeAsync()
     {
         const string corrupted = "I\u00E2\u20AC\u2122m ready\u00E2\u20AC\u201Dnow\u00E2\u20AC\u00A6";
         const string expected = "I\u2019m ready\u2014now\u2026";
@@ -511,7 +506,8 @@ internal static class Phase5CMultiTurnTests
         return Task.CompletedTask;
     }
 
-    private static Task StreamedAndRestoredMojibakeIsRepairedAsync()
+    [Fact(DisplayName = "streamed and restored mojibake is repaired for presentation")]
+    public Task StreamedAndRestoredMojibakeIsRepairedAsync()
     {
         const string corrupted = "I\u00E2\u20AC\u2122m ready\u00E2\u20AC\u201Dnow";
         const string expected = "I\u2019m ready\u2014now";
@@ -560,7 +556,8 @@ internal static class Phase5CMultiTurnTests
         return Task.CompletedTask;
     }
 
-    private static Task SupportedWorkItemsProjectFriendlyActivityAsync()
+    [Fact(DisplayName = "supported work items project friendly activity")]
+    public Task SupportedWorkItemsProjectFriendlyActivityAsync()
     {
         var service = CreateRunningService("turn-work");
         service.ApplyNotification(NotificationWithItem(
@@ -598,7 +595,8 @@ internal static class Phase5CMultiTurnTests
         return Task.CompletedTask;
     }
 
-    private static Task ActivityDetailsPreserveCompleteSourceTextAsync()
+    [Fact(DisplayName = "activity details preserve complete source text")]
+    public Task ActivityDetailsPreserveCompleteSourceTextAsync()
     {
         var service = CreateRunningService("turn-full-activity");
         var longCommand = $"dotnet test --filter {new string('c', 700)}";
@@ -673,7 +671,8 @@ internal static class Phase5CMultiTurnTests
         return Task.CompletedTask;
     }
 
-    private static Task WebSearchActivityPrefersCompleteStructuredQueriesAsync()
+    [Fact(DisplayName = "web search activity prefers complete structured queries")]
+    public Task WebSearchActivityPrefersCompleteStructuredQueriesAsync()
     {
         var service = CreateRunningService("turn-full-search");
         var firstQuery = $"site:example.com {new string('a', 650)}";
@@ -729,7 +728,8 @@ internal static class Phase5CMultiTurnTests
         return Task.CompletedTask;
     }
 
-    private static Task RestoredActivityRemovesLegacyNoiseAsync()
+    [Fact(DisplayName = "restored activity removes legacy protocol noise")]
+    public Task RestoredActivityRemovesLegacyNoiseAsync()
     {
         var snapshot = new CodexConversationTurnSnapshot
         {

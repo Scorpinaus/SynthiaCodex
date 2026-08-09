@@ -4,19 +4,14 @@ using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Git;
 using SynthiaCode.Core.Logging;
 
-internal static class StructuredReviewFindingsTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class StructuredReviewFindingsTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("structured review parses official plain-text findings", ParsesOfficialPlainTextAsync),
-        ("structured review parses validated JSON findings", ParsesValidatedJsonAsync),
-        ("structured review derives latest findings from persisted turns", DerivesLatestPersistedFindingsAsync),
-        ("structured review parses unified diff line numbers", ParsesUnifiedDiffLinesAsync),
-        ("structured review anchors findings in the Git inspector", AnchorsFindingsInGitInspectorAsync),
-        ("structured review renders accessible inline finding cards", RendersAccessibleInlineCardsAsync)
-    ];
 
-    private static Task ParsesOfficialPlainTextAsync()
+
+    [Fact(DisplayName = "structured review parses official plain-text findings")]
+    public Task ParsesOfficialPlainTextAsync()
     {
         const string review = """
             The patch has two actionable issues.
@@ -45,7 +40,8 @@ internal static class StructuredReviewFindingsTests
         return Task.CompletedTask;
     }
 
-    private static Task ParsesValidatedJsonAsync()
+    [Fact(DisplayName = "structured review parses validated JSON findings")]
+    public Task ParsesValidatedJsonAsync()
     {
         const string review = """
             reviewer output:
@@ -98,7 +94,8 @@ internal static class StructuredReviewFindingsTests
         return Task.CompletedTask;
     }
 
-    private static Task DerivesLatestPersistedFindingsAsync()
+    [Fact(DisplayName = "structured review derives latest findings from persisted turns")]
+    public Task DerivesLatestPersistedFindingsAsync()
     {
         var older = ReviewTurn(
             "review-1",
@@ -122,7 +119,8 @@ internal static class StructuredReviewFindingsTests
         return Task.CompletedTask;
     }
 
-    private static Task ParsesUnifiedDiffLinesAsync()
+    [Fact(DisplayName = "structured review parses unified diff line numbers")]
+    public Task ParsesUnifiedDiffLinesAsync()
     {
         const string diff = """
             diff --git a/src/App.cs b/src/App.cs
@@ -151,7 +149,8 @@ internal static class StructuredReviewFindingsTests
         return Task.CompletedTask;
     }
 
-    private static async Task AnchorsFindingsInGitInspectorAsync()
+    [Fact(DisplayName = "structured review anchors findings in the Git inspector")]
+    public async Task AnchorsFindingsInGitInspectorAsync()
     {
         using var workspace = TempWorkspace.Create();
         var root = workspace.CreateDirectory("review-repo");
@@ -177,7 +176,7 @@ internal static class StructuredReviewFindingsTests
             _ => { });
 
         await viewModel.RefreshAsync();
-        await WaitUntilAsync(() => viewModel.SelectedDiffLines.Any(row => row.NewLineNumber == 2), "structured diff loaded");
+        await StateProbe.WaitForAsync(() => viewModel.SelectedDiffLines.Any(row => row.NewLineNumber == 2), "structured diff loaded");
 
         var findings = CodexReviewFindingParser.Parse($"""
             Full review comments:
@@ -202,7 +201,8 @@ internal static class StructuredReviewFindingsTests
         Assert(!viewModel.HasUnmatchedReviewFindings, "replacing review clears unmatched findings");
     }
 
-    private static Task RendersAccessibleInlineCardsAsync()
+    [Fact(DisplayName = "structured review renders accessible inline finding cards")]
+    public Task RendersAccessibleInlineCardsAsync()
     {
         var root = FindRepositoryRoot();
         var xaml = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "GitView.xaml"));
@@ -228,15 +228,6 @@ internal static class StructuredReviewFindingsTests
         IsCodeReview = true
     };
 
-    private static async Task WaitUntilAsync(Func<bool> condition, string label)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        while (!condition())
-        {
-            await Task.Delay(10, timeout.Token);
-        }
-        Assert(condition(), label);
-    }
 
     private static string FindRepositoryRoot()
     {

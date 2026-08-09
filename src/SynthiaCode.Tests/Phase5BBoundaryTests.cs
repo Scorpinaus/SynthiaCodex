@@ -7,21 +7,14 @@ using SynthiaCode.Core.Settings;
 using SynthiaCode.Infrastructure.Settings;
 using SynthiaCode.Infrastructure.Codex;
 
-internal static class Phase5BBoundaryTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class Phase5BBoundaryTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("app-server coordinator owns typed session lifecycle", AppServerCoordinatorOwnsLifecycleAsync),
-        ("terminal view model owns sessions and commands", TerminalViewModelOwnsSessionsAsync),
-        ("diagnostics view model publishes environment state", DiagnosticsViewModelPublishesEnvironmentAsync),
-        ("git view model consumes explicit project context", GitViewModelConsumesContextAsync),
-        ("project thread view model owns selection state", ProjectThreadViewModelOwnsSelectionAsync),
-        ("task view model owns composer and response state", TaskViewModelOwnsStateAsync),
-        ("legacy thread settings load into storage DTOs", LegacyThreadSettingsRemainCompatibleAsync),
-        ("cancelled utility process cannot outlive its request", CancelledUtilityProcessIsTerminatedAsync)
-    ];
 
-    private static async Task AppServerCoordinatorOwnsLifecycleAsync()
+
+    [Fact(DisplayName = "app-server coordinator owns typed session lifecycle")]
+    public async Task AppServerCoordinatorOwnsLifecycleAsync()
     {
         await using var transport = new FakeAppServerTransport();
         var coordinator = new AppServerSessionCoordinator(
@@ -30,7 +23,12 @@ internal static class Phase5BBoundaryTests
             new CodexAppServerClientMetadata("phase_5b_tests", "Phase 5B Tests", "1.0.0"));
         var installation = new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation");
         var received = new List<CodexAppServerNotification>();
-        coordinator.NotificationReceived += (_, notification) => received.Add(notification);
+        var notifications = new MessageProbe<CodexAppServerNotification>();
+        coordinator.NotificationReceived += (_, notification) =>
+        {
+            received.Add(notification);
+            notifications.Publish(notification);
+        };
 
         var connect = coordinator.EnsureConnectedAsync(installation);
         await transport.WaitForClientMessageCountAsync(2);
@@ -41,7 +39,9 @@ internal static class Phase5BBoundaryTests
         transport.ServerSend("""{"method":"item/agentMessage/delta","params":{"threadId":"t","turnId":"u","itemId":"i","delta":"hello"}}""");
         transport.ServerSend("""{"method":"item/agentMessage/delta","params":{"threadId":"t","turnId":"u","itemId":"i","delta":" world"}}""");
         transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"t","turn":{"id":"u","status":"completed","items":[]}}}""");
-        await WaitUntilAsync(() => received.Count == 2, "batched notifications forwarded");
+        await notifications.WaitForAsync(
+            notification => notification.Kind == CodexAppServerNotificationKind.TurnCompleted,
+            "batched turn completion notification");
         Assert(
             received[0].Kind == CodexAppServerNotificationKind.AgentMessageDelta &&
             received[1].Kind == CodexAppServerNotificationKind.TurnCompleted,
@@ -59,7 +59,8 @@ internal static class Phase5BBoundaryTests
         Assert(transport.IsDisposed, "coordinator disposes transport through client");
     }
 
-    private static async Task TerminalViewModelOwnsSessionsAsync()
+    [Fact(DisplayName = "terminal view model owns sessions and commands")]
+    public async Task TerminalViewModelOwnsSessionsAsync()
     {
         using var temp = TempWorkspace.Create();
         var workspace = temp.CreateDirectory("TerminalFeature");
@@ -75,20 +76,21 @@ internal static class Phase5BBoundaryTests
             () => selected = true);
 
         viewModel.StartCommand.Execute(null);
-        await WaitUntilAsync(() => terminalService.Sessions.Count == 1, "terminal session created");
+        await StateProbe.WaitForAsync(() => terminalService.Sessions.Count == 1, "terminal session created");
         Assert(viewModel.IsRunning, "terminal reports running");
         Assert(viewModel.IsVisible && selected, "terminal requests its workspace when started");
 
         viewModel.Input = "pwd";
         viewModel.SendInputCommand.Execute(null);
-        await WaitUntilAsync(() => terminalService.Sessions[0].Inputs.Count == 1, "terminal input written");
+        await StateProbe.WaitForAsync(() => terminalService.Sessions[0].Inputs.Count == 1, "terminal input written");
         Assert(terminalService.Sessions[0].Inputs[0] == "pwd\r\n", "terminal appends a newline to input");
 
         await viewModel.ShutdownAsync();
         Assert(viewModel.SessionCount == 0 && terminalService.Sessions[0].IsDisposed, "terminal view model owns disposal");
     }
 
-    private static async Task DiagnosticsViewModelPublishesEnvironmentAsync()
+    [Fact(DisplayName = "diagnostics view model publishes environment state")]
+    public async Task DiagnosticsViewModelPublishesEnvironmentAsync()
     {
         var installation = new CodexInstallation(true, @"C:\Tools\codex.exe", "codex test", "Codex test", "Test installation");
         var changed = false;
@@ -109,7 +111,8 @@ internal static class Phase5BBoundaryTests
         Assert(viewModel.Lines.Any(line => line.Contains("Codex test", StringComparison.Ordinal)), "diagnostics builds presentation lines");
     }
 
-    private static async Task GitViewModelConsumesContextAsync()
+    [Fact(DisplayName = "git view model consumes explicit project context")]
+    public async Task GitViewModelConsumesContextAsync()
     {
         using var temp = TempWorkspace.Create();
         var workspace = temp.CreateDirectory("GitFeature");
@@ -127,7 +130,8 @@ internal static class Phase5BBoundaryTests
         Assert(viewModel.RefreshCommand.CanExecute(null), "git command eligibility uses explicit context");
     }
 
-    private static Task ProjectThreadViewModelOwnsSelectionAsync()
+    [Fact(DisplayName = "project thread view model owns selection state")]
+    public Task ProjectThreadViewModelOwnsSelectionAsync()
     {
         ProjectThreadState? selected = null;
         var viewModel = WorkspaceActionStubs.CreateProjectThreadViewModel(WorkspaceActionStubs.Project(
@@ -160,7 +164,8 @@ internal static class Phase5BBoundaryTests
         return Task.CompletedTask;
     }
 
-    private static Task TaskViewModelOwnsStateAsync()
+    [Fact(DisplayName = "task view model owns composer and response state")]
+    public Task TaskViewModelOwnsStateAsync()
     {
         var viewModel = WorkspaceActionStubs.CreateTaskViewModel(WorkspaceActionStubs.Task(
             () => Task.CompletedTask,
@@ -185,7 +190,8 @@ internal static class Phase5BBoundaryTests
         return Task.CompletedTask;
     }
 
-    private static async Task LegacyThreadSettingsRemainCompatibleAsync()
+    [Fact(DisplayName = "legacy thread settings load into storage DTOs")]
+    public async Task LegacyThreadSettingsRemainCompatibleAsync()
     {
         using var temp = TempWorkspace.Create();
         var settingsPath = Path.Combine(temp.Root, "settings.json");
@@ -215,7 +221,8 @@ internal static class Phase5BBoundaryTests
         Assert(projected.ThreadId == "legacy-thread" && projected.FinalResponse == "Legacy response", "legacy JSON projects into presentation state");
     }
 
-    private static async Task CancelledUtilityProcessIsTerminatedAsync()
+    [Fact(DisplayName = "cancelled utility process cannot outlive its request")]
+    public async Task CancelledUtilityProcessIsTerminatedAsync()
     {
         using var temp = TempWorkspace.Create();
         var marker = Path.Combine(temp.Root, "should-not-exist.txt");
@@ -240,14 +247,6 @@ internal static class Phase5BBoundaryTests
         Assert(!File.Exists(marker), "cancelled utility process tree is terminated");
     }
 
-    private static async Task WaitUntilAsync(Func<bool> condition, string label)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        while (!condition())
-        {
-            await Task.Delay(20, timeout.Token);
-        }
-    }
 
     private static void Assert(bool condition, string message)
     {

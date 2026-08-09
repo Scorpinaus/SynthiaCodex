@@ -11,7 +11,9 @@ using SynthiaCode.Core.Logging;
 using SynthiaCode.Core.Projects;
 using SynthiaCode.Infrastructure.Git;
 
-internal static class HunkGitOperationsTests
+[Trait("Category", TestCategories.InfrastructureIntegration)]
+[Collection(TestCategories.NativeCollection)]
+public sealed class HunkGitOperationsTests
 {
     private const string TwoHunkDiff = """
         diff --git a/notes.txt b/notes.txt
@@ -33,15 +35,10 @@ internal static class HunkGitOperationsTests
          line 37
         """;
 
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("git diff parser extracts independent hunk patches", ExtractsIndependentHunkPatchesAsync),
-        ("git service stages unstages and discards one hunk", MutatesOnlySelectedHunkAsync),
-        ("git view model routes eligible hunk actions with confirmation", RoutesEligibleHunkActionsAsync),
-        ("git review renders accessible hunk actions", RendersAccessibleHunkActionsAsync)
-    ];
 
-    private static Task ExtractsIndependentHunkPatchesAsync()
+
+    [Fact(DisplayName = "git diff parser extracts independent hunk patches")]
+    public Task ExtractsIndependentHunkPatchesAsync()
     {
         var hunks = GitUnifiedDiffParser.ParseHunks(TwoHunkDiff.Replace("\n", "\r\n", StringComparison.Ordinal));
 
@@ -56,7 +53,8 @@ internal static class HunkGitOperationsTests
         return Task.CompletedTask;
     }
 
-    private static async Task MutatesOnlySelectedHunkAsync()
+    [Fact(DisplayName = "git service stages unstages and discards one hunk")]
+    public async Task MutatesOnlySelectedHunkAsync()
     {
         using var workspace = TempWorkspace.Create();
         var root = workspace.CreateDirectory("hunk-service-repo");
@@ -105,7 +103,8 @@ internal static class HunkGitOperationsTests
         Assert(finalLines[34] == "changed second", "discard preserves the separately staged hunk");
     }
 
-    private static async Task RoutesEligibleHunkActionsAsync()
+    [Fact(DisplayName = "git view model routes eligible hunk actions with confirmation")]
+    public async Task RoutesEligibleHunkActionsAsync()
     {
         using var workspace = TempWorkspace.Create();
         var root = workspace.CreateDirectory("hunk-view-model-repo");
@@ -121,7 +120,7 @@ internal static class HunkGitOperationsTests
             _ => { });
 
         await viewModel.RefreshAsync();
-        await WaitUntilAsync(() => viewModel.SelectedDiffLines.Count(row => row.Kind == GitDiffLineKind.Hunk) == 2, "working hunks load");
+        await StateProbe.WaitForAsync(() => viewModel.SelectedDiffLines.Count(row => row.Kind == GitDiffLineKind.Hunk) == 2, "working hunks load");
         var workingHunk = viewModel.SelectedDiffLines.First(row => row.Kind == GitDiffLineKind.Hunk);
         Assert(workingHunk.CanStageHunk && workingHunk.CanDiscardHunk && !workingHunk.CanUnstageHunk, "working modified hunks expose stage and discard");
 
@@ -154,12 +153,13 @@ internal static class HunkGitOperationsTests
             () => false,
             _ => { });
         await unsupported.RefreshAsync();
-        await WaitUntilAsync(() => unsupported.SelectedDiffLines.Any(row => row.Kind == GitDiffLineKind.Hunk), "unsupported diff loads");
+        await StateProbe.WaitForAsync(() => unsupported.SelectedDiffLines.Any(row => row.Kind == GitDiffLineKind.Hunk), "unsupported diff loads");
         var unsupportedHunk = unsupported.SelectedDiffLines.First(row => row.Kind == GitDiffLineKind.Hunk);
         Assert(!unsupportedHunk.CanStageHunk && !unsupportedHunk.CanUnstageHunk && !unsupportedHunk.CanDiscardHunk, "file-level Git metadata disables ambiguous hunk actions");
     }
 
-    private static async Task RendersAccessibleHunkActionsAsync()
+    [Fact(DisplayName = "git review renders accessible hunk actions")]
+    public async Task RendersAccessibleHunkActionsAsync()
     {
         using var workspace = TempWorkspace.Create();
         var root = workspace.CreateDirectory("hunk-render-repo");
@@ -174,7 +174,7 @@ internal static class HunkGitOperationsTests
         var staged = CreateViewModel(new GitChangedFile("notes.txt", null, 'M', ' '));
         await working.RefreshAsync();
         await staged.RefreshAsync();
-        await WaitUntilAsync(() => !working.IsBusy && !staged.IsBusy &&
+        await StateProbe.WaitForAsync(() => !working.IsBusy && !staged.IsBusy &&
             working.SelectedDiffLines.Any(row => row.CanStageHunk) &&
             staged.SelectedDiffLines.Any(row => row.CanUnstageHunk), "hunk views load");
 
@@ -268,15 +268,6 @@ internal static class HunkGitOperationsTests
         }
     }
 
-    private static async Task WaitUntilAsync(Func<bool> condition, string label)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        while (!condition())
-        {
-            await Task.Delay(10, timeout.Token);
-        }
-        Assert(condition(), label);
-    }
 
     private static IEnumerable<T> Descendants<T>(DependencyObject root)
         where T : DependencyObject

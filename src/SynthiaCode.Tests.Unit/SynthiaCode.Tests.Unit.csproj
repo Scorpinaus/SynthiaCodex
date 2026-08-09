@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsTestProject>true</IsTestProject>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SynthiaCode.Application\SynthiaCode.Application.csproj" />
+    <ProjectReference Include="..\SynthiaCode.Core\SynthiaCode.Core.csproj" />
+    <ProjectReference Include="..\SynthiaCode.Harnesses.Codex\SynthiaCode.Harnesses.Codex.csproj" />
+    <ProjectReference Include="..\SynthiaCode.Harnesses.InMemory\SynthiaCode.Harnesses.InMemory.csproj" />
+    <ProjectReference Include="..\SynthiaCode.Presentation\SynthiaCode.Presentation.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="GlobalUsings.cs" />
+    <Compile Include="..\SynthiaCode.Tests\ArchitectureBoundaryTests.cs" Link="ArchitectureBoundaryTests.cs" />
+    <Compile Include="..\SynthiaCode.Tests\ConversationWorkflowControllerTests.cs" Link="ConversationWorkflowControllerTests.cs" />
+    <Compile Include="..\SynthiaCode.Tests\HarnessContractTests.cs" Link="HarnessContractTests.cs" />
+    <Compile Include="..\SynthiaCode.Tests\HarnessConversationReducerTests.cs" Link="HarnessConversationReducerTests.cs" />
+    <Compile Include="..\SynthiaCode.Tests\Phase4PresentationBoundaryTests.cs" Link="Phase4PresentationBoundaryTests.cs" />
+    <Compile Include="..\SynthiaCode.Tests\Phase5TestArchitectureTests.cs" Link="Phase5TestArchitectureTests.cs" />
+    <Compile Include="..\SynthiaCode.Tests\QueuedTurnOptionResolverTests.cs" Link="QueuedTurnOptionResolverTests.cs" />
+    <Compile Include="..\SynthiaCode.Tests\SettingsStorageMapperTests.cs" Link="SettingsStorageMapperTests.cs" />
+    <Compile Include="..\SynthiaCode.Tests\TestCategories.cs" Link="TestCategories.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\SynthiaCode.Tests\xunit.runner.json" Link="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

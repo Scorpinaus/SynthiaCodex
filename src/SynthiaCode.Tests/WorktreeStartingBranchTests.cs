@@ -9,6 +9,8 @@ using SynthiaCode.Harnesses.InMemory;
 using SynthiaCode.Infrastructure.Worktrees;
 using Xunit;
 
+[Trait("Category", TestCategories.InfrastructureIntegration)]
+[Collection(TestCategories.NativeCollection)]
 public sealed class WorktreeStartingBranchTests
 {
     [Fact]

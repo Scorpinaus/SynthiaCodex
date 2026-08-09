@@ -12,6 +12,8 @@ using SynthiaCode.Infrastructure.Codex;
 using SynthiaCode.Infrastructure.Settings;
 using Xunit;
 
+[Trait("Category", TestCategories.InfrastructureIntegration)]
+[Collection(TestCategories.NativeCollection)]
 public sealed class Phase0GoldenCharacterizationTests
 {
     private static readonly JsonSerializerOptions GoldenJsonOptions = new(JsonSerializerDefaults.Web);
@@ -242,12 +244,19 @@ public sealed class Phase0GoldenCharacterizationTests
             logger,
             new CodexAppServerClientMetadata("phase0-golden", "Phase 0 Golden Tests", "1.0"));
         var states = new ConcurrentQueue<string>();
-        coordinator.StateChanged += (_, args) => states.Enqueue(args.State.ToString());
+        var stateChanges = new MessageProbe<AppServerSessionState>();
+        coordinator.StateChanged += (_, args) =>
+        {
+            states.Enqueue(args.State.ToString());
+            stateChanges.Publish(args.State);
+        };
         var installation = CreateInstallation();
 
         await ConnectAsync(coordinator, firstTransport, installation);
         firstTransport.ServerFail(new IOException("golden simulated crash"));
-        await WaitUntilAsync(() => coordinator.State == AppServerSessionState.Reconnecting);
+        await stateChanges.WaitForAsync(
+            state => state == AppServerSessionState.Reconnecting,
+            "reconnecting state");
         await ConnectAsync(coordinator, secondTransport, installation);
 
         AssertGolden(
@@ -364,29 +373,16 @@ public sealed class Phase0GoldenCharacterizationTests
         FakeAppServerTransport transport,
         string method)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (true)
-        {
-            foreach (var line in transport.ClientMessages)
-            {
-                if (JsonNode.Parse(line) is JsonObject request &&
-                    string.Equals(request["method"]?.GetValue<string>(), method, StringComparison.Ordinal))
-                {
-                    return request;
-                }
-            }
-            await Task.Delay(10, timeout.Token);
-        }
+        var line = await transport.ClientMessageProbe.WaitForAsync(
+            candidate => string.Equals(
+                JsonNode.Parse(candidate)?["method"]?.GetValue<string>(),
+                method,
+                StringComparison.Ordinal),
+            $"{method} request");
+        return JsonNode.Parse(line)?.AsObject()
+            ?? throw new InvalidOperationException($"The {method} request was not a JSON object.");
     }
 
-    private static async Task WaitUntilAsync(Func<bool> condition)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (!condition())
-        {
-            await Task.Delay(10, timeout.Token);
-        }
-    }
 
     private static void AssertGolden(string expectedJson, object actual)
     {

@@ -7,6 +7,8 @@ using SynthiaCode.Harnesses.InMemory;
 using SynthiaCode.Infrastructure.Codex;
 using Xunit;
 
+[Trait("Category", TestCategories.InfrastructureIntegration)]
+[Collection(TestCategories.NativeCollection)]
 public sealed class ThreadLifecycleUseCaseServiceTests
 {
     [Fact]

@@ -11,18 +11,14 @@ using SynthiaCode.Core.Codex;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Infrastructure.Codex;
 
-internal static class SkillsSettingsTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class SkillsSettingsTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("skills protocol lists metadata errors and duplicate names", ListsMetadataErrorsAndDuplicateNamesAsync),
-        ("skills protocol writes path enablement and degrades when unsupported", WritesEnablementAndDegradesAsync),
-        ("effective settings protocol allowlists values and origins", ReadsAllowlistedEffectiveSettingsAsync),
-        ("skills view model filters toggles and reacts to invalidation", ViewModelFiltersTogglesAndInvalidatesAsync),
-        ("skills settings surface is accessible and virtualized", SettingsSurfaceIsAccessibleAndVirtualizedAsync)
-    ];
 
-    private static async Task ListsMetadataErrorsAndDuplicateNamesAsync()
+
+    [Fact(DisplayName = "skills protocol lists metadata errors and duplicate names")]
+    public async Task ListsMetadataErrorsAndDuplicateNamesAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = CreateClient(transport);
@@ -90,7 +86,8 @@ internal static class SkillsSettingsTests
         Assert(context.Errors[0].Message.Contains("description", StringComparison.Ordinal), "skill error message");
     }
 
-    private static async Task WritesEnablementAndDegradesAsync()
+    [Fact(DisplayName = "skills protocol writes path enablement and degrades when unsupported")]
+    public async Task WritesEnablementAndDegradesAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = CreateClient(transport);
@@ -117,7 +114,8 @@ internal static class SkillsSettingsTests
         Assert(client.IsHealthy, "unsupported skills method keeps app-server healthy");
     }
 
-    private static async Task ReadsAllowlistedEffectiveSettingsAsync()
+    [Fact(DisplayName = "effective settings protocol allowlists values and origins")]
+    public async Task ReadsAllowlistedEffectiveSettingsAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = CreateClient(transport);
@@ -178,7 +176,8 @@ internal static class SkillsSettingsTests
         Assert(!result.ToString()!.Contains("secret", StringComparison.Ordinal), "sensitive config is not retained");
     }
 
-    private static async Task ViewModelFiltersTogglesAndInvalidatesAsync()
+    [Fact(DisplayName = "skills view model filters toggles and reacts to invalidation")]
+    public async Task ViewModelFiltersTogglesAndInvalidatesAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var coordinator = CreateCoordinator(transport);
@@ -237,13 +236,14 @@ internal static class SkillsSettingsTests
         var invalidationRefresh = ParseMessage(transport.ClientMessages[5]);
         AssertEqual("skills/list", invalidationRefresh["method"]?.GetValue<string>(), "skills invalidation refresh");
         SendResult(transport, invalidationRefresh, SkillsResult(cwd, enabled: false));
-        await WaitUntilAsync(() => !viewModel.IsBusy, "skills invalidation refresh completes");
+        await StateProbe.WaitForAsync(() => !viewModel.IsBusy, "skills invalidation refresh completes");
         Assert(!viewModel.IsStale, "skills invalidation clears stale state");
 
         await viewModel.DisposeAsync();
     }
 
-    private static Task SettingsSurfaceIsAccessibleAndVirtualizedAsync() => WpfTestHost.RunAsync(() =>
+    [Fact(DisplayName = "skills settings surface is accessible and virtualized")]
+    public Task SettingsSurfaceIsAccessibleAndVirtualizedAsync() => WpfTestHost.RunAsync(() =>
     {
         var view = new SkillsSettingsView
         {
@@ -429,14 +429,6 @@ internal static class SkillsSettingsTests
         JsonNode.Parse(value)?.AsObject()
         ?? throw new InvalidOperationException("Expected a JSON object.");
 
-    private static async Task WaitUntilAsync(Func<bool> condition, string label)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        while (!condition())
-        {
-            await Task.Delay(20, timeout.Token);
-        }
-    }
 
     private static IEnumerable<T> LogicalDescendants<T>(DependencyObject root)
         where T : DependencyObject

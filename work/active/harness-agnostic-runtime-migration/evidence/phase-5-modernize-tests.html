@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Phase 5: Modernize Tests</title>
+  <style>
+    :root {
+      --page: #f4f7fb;
+      --surface: #ffffff;
+      --strong: #eaf0f7;
+      --ink: #172033;
+      --muted: #5d687b;
+      --line: #cbd6e5;
+      --accent: #375bb6;
+      --accent-soft: #e5edff;
+      --success: #14794b;
+      --success-soft: #e4f5ec;
+      --warning: #9a5b00;
+      --warning-soft: #fff1d6;
+      --shadow: 0 18px 45px rgba(28, 42, 73, .09);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111521;
+        --surface: #191f2d;
+        --strong: #222b3d;
+        --ink: #eef2fa;
+        --muted: #aeb8ca;
+        --line: #35415a;
+        --accent: #9eb7ff;
+        --accent-soft: #27375d;
+        --success: #72d4a5;
+        --success-soft: #173d30;
+        --warning: #f2bd69;
+        --warning-soft: #493719;
+        --shadow: none;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--page); color: var(--ink); font: 16px/1.58 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    a { color: var(--accent); }
+    code, pre { font-family: "Cascadia Code", Consolas, monospace; }
+    code { padding: .08rem .3rem; border-radius: .3rem; background: var(--strong); }
+    h1, h2, h3 { margin-top: 0; line-height: 1.16; }
+    h1 { max-width: 900px; margin-bottom: 1rem; font-size: clamp(2.2rem, 6vw, 4.7rem); letter-spacing: -.05em; }
+    h2 { margin-bottom: .7rem; font-size: clamp(1.7rem, 3.5vw, 2.7rem); }
+    h3 { margin-bottom: .25rem; font-size: 1.02rem; }
+    .shell { width: min(1180px, calc(100% - 2rem)); margin-inline: auto; }
+    .hero { padding: 4.7rem 0 2.8rem; }
+    .eyebrow, .tag { color: var(--accent); font-size: .72rem; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; }
+    .lede, .intro { max-width: 820px; color: var(--muted); }
+    .meta, .phase-links { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: 1.3rem; }
+    .pill { display: inline-flex; align-items: center; padding: .42rem .72rem; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); text-decoration: none; }
+    .pill.success { border-color: var(--success); background: var(--success-soft); color: var(--success); font-weight: 800; }
+    .scoreboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; }
+    .score, .card, .check, .node { border: 1px solid var(--line); border-radius: .9rem; background: var(--surface); box-shadow: var(--shadow); }
+    .score { padding: 1.15rem; }
+    .score strong { display: block; color: var(--accent); font-size: 1.8rem; }
+    .score span { color: var(--muted); }
+    .layout { display: grid; grid-template-columns: 220px 1fr; gap: 2rem; padding: 3rem 0; }
+    nav { position: sticky; top: 1rem; align-self: start; display: grid; gap: .5rem; padding-left: 1rem; border-left: 2px solid var(--line); }
+    nav a { color: var(--muted); text-decoration: none; }
+    main { min-width: 0; }
+    section { margin-bottom: 4rem; scroll-margin-top: 1rem; }
+    .checklist, .cards, .timeline { display: grid; gap: .85rem; margin-top: 1.2rem; }
+    .check { display: grid; grid-template-columns: 1.5rem 1fr; gap: .8rem; padding: 1rem 1.1rem; box-shadow: none; }
+    .check-mark { color: var(--success); font-weight: 900; }
+    .check p, .card p, .node p, .timeline p { margin: .25rem 0 0; color: var(--muted); }
+    .flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.3rem; margin-top: 1.3rem; }
+    .node { position: relative; min-height: 9rem; padding: 1rem; box-shadow: none; }
+    .node:not(:last-child)::after { content: "\2192"; position: absolute; top: 50%; right: -1rem; color: var(--accent); font-weight: 900; }
+    .node small { display: block; margin-bottom: .45rem; color: var(--accent); font-size: .7rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+    .card { padding: 1.15rem; box-shadow: none; }
+    .card.change { border-left: 4px solid var(--accent); }
+    .card.guard { border-left: 4px solid var(--success); }
+    .card.lesson { border-left: 4px solid var(--warning); }
+    .timeline { counter-reset: item; }
+    .timeline article { position: relative; padding: 0 0 1.3rem 2.6rem; border-left: 2px solid var(--line); }
+    .timeline article::before { counter-increment: item; content: counter(item); position: absolute; left: -.95rem; display: grid; width: 1.8rem; height: 1.8rem; place-items: center; border-radius: 50%; background: var(--warning-soft); color: var(--warning); font-weight: 900; }
+    .correction { padding: .65rem .8rem; border-radius: .6rem; background: var(--warning-soft); color: var(--ink) !important; }
+    .table-wrap { margin-top: 1.1rem; overflow-x: auto; border: 1px solid var(--line); border-radius: .9rem; }
+    table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: .91rem; }
+    th, td { padding: .85rem .95rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--strong); color: var(--muted); font-size: .72rem; letter-spacing: .07em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    pre { overflow-x: auto; padding: 1rem; border: 1px solid var(--line); border-radius: .8rem; background: var(--strong); }
+    footer { margin-top: 2rem; padding: 2rem 0 3rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .86rem; }
+    @media (max-width: 900px) { .scoreboard, .flow { grid-template-columns: repeat(2, 1fr); } .layout { grid-template-columns: 1fr; } nav { position: static; } }
+    @media (max-width: 620px) { .scoreboard, .flow { grid-template-columns: 1fr; } .node::after { display: none; } }
+    @media print { body { background: #fff; color: #000; } nav { display: none; } .layout { display: block; } }
+  </style>
+</head>
+<body>
+  <header class="hero shell">
+    <p class="eyebrow">SynthiaCode architecture migration</p>
+    <h1>Phase 5: Modernize Tests</h1>
+    <p class="lede">The old delegate matrix and polling helpers are gone. Each behavior is a normal xUnit fact with one test-boundary owner. Pure tests run in a non-Windows project, the Unicode process fixture has one job, and asynchronous tests wait for events, messages, or command completion.</p>
+    <div class="meta">
+      <span class="pill success">&#10003; Complete</span>
+      <span class="pill"><time datetime="2026-08-09">9 August 2026</time></span>
+      <span class="pill">397 of 397 tests passed</span>
+      <span class="pill">0 build warnings</span>
+    </div>
+    <div class="phase-links">
+      <a class="pill" href="phase-4-decompose-presentation-by-feature.html">&#8592; Phase 4 presentation</a>
+      <a class="pill" href="../../../../docs/current-architecture.md">Current architecture</a>
+    </div>
+  </header>
+
+  <div class="shell scoreboard" aria-label="Phase 5 results">
+    <div class="score"><strong>307</strong><span>Legacy cases converted to facts</span></div>
+    <div class="score"><strong>39</strong><span>Pure net10.0 tests</span></div>
+    <div class="score"><strong>175</strong><span>Polling call sites removed</span></div>
+    <div class="score"><strong>397/397</strong><span>Release tests passed</span></div>
+  </div>
+
+  <div class="shell layout">
+    <nav aria-label="On this page">
+      <strong>Phase 5 record</strong>
+      <a href="#objectives">Objectives</a>
+      <a href="#shape">Test shape</a>
+      <a href="#changes">Changes</a>
+      <a href="#mistakes">Mistakes</a>
+      <a href="#lessons">Lessons</a>
+      <a href="#verification">Verification</a>
+      <a href="#files">Files</a>
+      <a href="#handoff">Handoff</a>
+    </nav>
+
+    <main>
+      <section id="objectives">
+        <p class="eyebrow">Approved scope</p>
+        <h2>Objectives completed</h2>
+        <div class="checklist">
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Use normal xUnit classes</h3><p>All 307 old delegate cases are public <code>[Fact]</code> methods. The old <code>MemberData</code> runner and case registries were removed.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Isolate the Unicode fixture</h3><p><code>SynthiaCode.UnicodeEchoFixture</code> is a small console project. The test assembly is a library again.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Separate test responsibilities</h3><p><code>SynthiaCode.Tests.Unit</code> targets <code>net10.0</code> and does not reference App, Infrastructure, Windows, or WPF. The Windows project owns protocol, infrastructure, native, and WPF tests.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Control time and messages</h3><p>A manual <code>TimeProvider</code> drives settings coalescing and notification batching. Event, property, collection, command, and retained-message probes replaced 175 state-polling calls and 16 local helpers.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Use safe parallelism</h3><p>xUnit can run pure and fake-only tests in parallel. Native, infrastructure, and WPF collections have explicit serialization rules.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Split the legacy owner</h3><p>The old mixed class is now a non-test case-body class. Protocol, infrastructure, and WPF owners contain 20, 21, and 34 direct facts.</p></div></div>
+        </div>
+      </section>
+
+      <section id="shape">
+        <p class="eyebrow">Execution model</p>
+        <h2>Fast tests can move; stateful tests wait</h2>
+        <div class="flow" role="img" aria-label="Unit and protocol tests can run in parallel. Infrastructure and WPF tests run in serialized collections.">
+          <div class="node"><small>Parallel project</small><strong>Unit</strong><p>Pure state, reducers, and small coordinators on <code>net10.0</code>.</p></div>
+          <div class="node"><small>Parallel</small><strong>Protocol contract</strong><p>Codecs, parsers, JSON-RPC routing, and fake transports.</p></div>
+          <div class="node"><small>Serialized</small><strong>Infrastructure</strong><p>Files, Git repositories, native processes, and transport fixtures.</p></div>
+          <div class="node"><small>Serialized</small><strong>WPF</strong><p>Dispatcher, application state, controls, and presentation flows.</p></div>
+        </div>
+      </section>
+
+      <section id="changes">
+        <p class="eyebrow">Implementation record</p>
+        <h2>What changed</h2>
+        <div class="cards">
+          <article class="card change"><span class="tag">Discovery</span><h3>Removed the dynamic behavior runner</h3><p>Each feature test class now owns its fact methods and display names. A failure points to the method that contains its setup and assertions.</p></article>
+          <article class="card change"><span class="tag">Fixture</span><h3>Added a one-purpose executable</h3><p>The Unicode fixture reads one UTF-8 line and writes it back. It has no product or test framework dependency.</p></article>
+          <article class="card change"><span class="tag">Boundaries</span><h3>Added test traits and collections</h3><p>Focused commands can select each category. Two non-parallel collections protect native and WPF ownership.</p></article>
+          <article class="card change"><span class="tag">Time</span><h3>Injected TimeProvider</h3><p><code>CoalescingSettingsStore</code> and <code>AppServerNotificationBatcher</code> accept a clock. Production uses the system clock. Tests advance a manual clock.</p></article>
+          <article class="card change"><span class="tag">Messages</span><h3>Added retained probes</h3><p>The probe stores messages before or after a waiter starts. Persistence and navigation tests now wait for the exact state transition.</p></article>
+          <article class="card change"><span class="tag">Projects</span><h3>Added a pure test assembly</h3><p><code>SynthiaCode.Tests.Unit</code> runs without a Windows target or a WPF dependency. Tests that need App, Infrastructure, native state, or WPF remain in the Windows assembly.</p></article>
+          <article class="card change"><span class="tag">Legacy</span><h3>Split mixed test ownership</h3><p>The three boundary-specific classes contain their own fact bodies and collection policy. <code>LegacyRuntimeTestSupport</code> contains only shared helpers and test doubles.</p></article>
+          <article class="card change"><span class="tag">Signals</span><h3>Removed state polling</h3><p><code>StateProbe</code> listens to property, collection, command, and test signals. Transport request waits use a retained <code>MessageProbe</code>. Command tests await the command task when it is the exact completion boundary.</p></article>
+          <article class="card guard"><span class="tag">Guard</span><h3>Expanded Phase 5 architecture tests</h3><p>Tests reject polling helper names and delayed polling loops. They also pin the non-Windows unit project, pure-test removal from the Windows build, legacy owner counts, and non-mixed collection ownership.</p></article>
+        </div>
+      </section>
+
+      <section id="mistakes">
+        <p class="eyebrow">Honest migration log</p>
+        <h2>Mistakes and corrections</h2>
+        <div class="timeline">
+          <article><h3>The no-build baseline used stale output</h3><p>It showed an old Phase 3 metadata assertion and one polling timeout.</p><p class="correction"><strong>Correction:</strong> a full build became the source baseline. The stale assertion was updated, and the timeout path moved to a message probe.</p></article>
+          <article><h3>The first restore could not authenticate NuGet TLS</h3><p>The build stopped before compilation.</p><p class="correction"><strong>Correction:</strong> repeated the same restore with approved network access. The Release build then passed with no warnings.</p></article>
+          <article><h3>The first fact conversion still used registry indexes</h3><p>xUnit discovery was correct, but the test source still had a large wrapper and old delegate lists.</p><p class="correction"><strong>Correction:</strong> removed the wrapper and every registry. The original feature methods became the facts.</p></article>
+          <article><h3>The first WPF category run found two ordering assumptions</h3><p>One test read navigation before its collection update. Another depended on the old runner synchronization context.</p><p class="correction"><strong>Correction:</strong> waited for exact save and collection messages. Direct fact execution then passed.</p></article>
+          <article><h3>The project-graph test treated the fixture as production</h3><p>The fixture appeared as an unexpected production project.</p><p class="correction"><strong>Correction:</strong> classified the fixture as test support and added a separate Phase 5 fixture boundary test.</p></article>
+          <article><h3>Four focused commands built into one folder at the same time</h3><p>The WPF command could not copy the test assembly because another command still used it.</p><p class="correction"><strong>Correction:</strong> completed the shared build first and ran the remaining WPF command with <code>--no-build</code>. xUnit parallelism stays inside one test process.</p></article>
+          <article><h3>The first completion review was too shallow</h3><p>The suite was green, but one mixed legacy owner, 175 polling calls, and the Windows-only test project still broke the approved boundaries.</p><p class="correction"><strong>Correction:</strong> audited source ownership and wait patterns, reopened Phase 5, and added architecture rules that make the omitted work visible.</p></article>
+          <article><h3>The first generated boundary classes were empty</h3><p>A PowerShell line object was converted as an object instead of as its text value.</p><p class="correction"><strong>Correction:</strong> read the original registry as plain strings, rebuilt the three direct-fact classes, and ran all legacy cases before the next edit.</p></article>
+          <article><h3>The first signal conversion exposed six weak waits</h3><p>Some predicates watched plain lists or local variables that did not publish a change event. One model test also completed before its default reasoning value was ready.</p><p class="correction"><strong>Correction:</strong> used retained transport and coordinator messages, awaited exact command tasks, and strengthened the model-ready predicate.</p></article>
+          <article><h3>The first Release WPF repeat found a reconnect race</h3><p>The general state probe did not receive the required health transition in one broad run. Awaiting the full model command then waited for unrelated follow-on protocol work.</p><p class="correction"><strong>Correction:</strong> interrupted the stalled focused run and used an explicit property-message probe for the exact reconnect boundary. The repeated WPF gate and full Release gate passed.</p></article>
+        </div>
+      </section>
+
+      <section id="lessons">
+        <p class="eyebrow">What this phase taught us</p>
+        <h2>Lessons</h2>
+        <div class="cards">
+          <article class="card lesson"><span class="tag">Discovery</span><h3>One fact must equal one behavior</h3><p>Direct fact methods give stable names, direct source navigation, and useful filters.</p></article>
+          <article class="card lesson"><span class="tag">Timing</span><h3>A timeout is not a state signal</h3><p>A manual clock controls when time moves. A message probe controls when state is ready.</p></article>
+          <article class="card lesson"><span class="tag">Parallelism</span><h3>Parallelism needs ownership rules</h3><p>Pure tests can share CPU. Native and WPF tests must own their process and dispatcher state.</p></article>
+          <article class="card lesson"><span class="tag">Builds</span><h3>Parallel tests are not parallel build commands</h3><p>One build must produce the assembly. Focused test commands can then reuse it with <code>--no-build</code>.</p></article>
+          <article class="card lesson"><span class="tag">Fixtures</span><h3>A process fixture must have one job</h3><p>A separate executable makes the tested process boundary visible and keeps the test assembly conventional.</p></article>
+          <article class="card lesson"><span class="tag">Migration</span><h3>Move behavior bodies with their owners</h3><p>One-line wrappers can prove discovery, but maintainable test boundaries need the setup and assertions in the boundary class.</p></article>
+          <article class="card lesson"><span class="tag">Projects</span><h3>A trait is not a compile boundary</h3><p>A pure category inside a Windows project still compiles against Windows. A separate project makes the dependency rule real.</p></article>
+          <article class="card lesson"><span class="tag">Signals</span><h3>Wait for the smallest true completion boundary</h3><p>Use the event or command that proves the assertion. Do not await a larger workflow that can start unrelated work.</p></article>
+          <article class="card lesson"><span class="tag">Guards</span><h3>An audit result must become a rule</h3><p>The architecture suite now rejects the same polling and ownership patterns that made the first completion claim incomplete.</p></article>
+        </div>
+      </section>
+
+      <section id="verification">
+        <p class="eyebrow">Release checks</p>
+        <h2>Verification passed</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Check</th><th>Result</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td>Release build</td><td>Passed, 0 warnings, 0 errors</td><td>Built all ten solution projects.</td></tr>
+              <tr><td>Unit category</td><td>39 of 39 passed</td><td>Checked the non-Windows pure-test project.</td></tr>
+              <tr><td>Protocol contract category</td><td>43 of 43 passed</td><td>Checked codecs, parsers, routing, and notification behavior.</td></tr>
+              <tr><td>Infrastructure integration category</td><td>84 of 84 passed</td><td>Checked file, Git, process, application-integration, and fixture behavior under serialized ownership.</td></tr>
+              <tr><td>WPF category</td><td>231 of 231 passed</td><td>Checked Windows presentation behavior under serialized dispatcher ownership.</td></tr>
+              <tr><td>Full solution Release suite</td><td>397 of 397 passed</td><td>Checked both test assemblies and all architecture and migration tests.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <pre><code>dotnet test SynthiaCode.sln --configuration Release --no-build --no-restore
+Passed: 397  Failed: 0  Skipped: 0</code></pre>
+      </section>
+
+      <section id="files">
+        <p class="eyebrow">Primary files</p>
+        <h2>Files added or changed</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Area</th><th>Files</th><th>Role</th></tr></thead>
+            <tbody>
+              <tr><td>Fixture</td><td><code>src/SynthiaCode.UnicodeEchoFixture/*</code></td><td>Dedicated UTF-8 process fixture.</td></tr>
+              <tr><td>Facts</td><td><code>src/SynthiaCode.Tests/*Tests.cs</code></td><td>Direct feature-owned xUnit facts.</td></tr>
+              <tr><td>Pure tests</td><td><code>src/SynthiaCode.Tests.Unit/*</code></td><td>Non-Windows project for pure unit and architecture tests.</td></tr>
+              <tr><td>Legacy boundaries</td><td><code>LegacyProtocolContractTests.cs</code>, <code>LegacyInfrastructureIntegrationTests.cs</code>, <code>LegacyWpfTests.cs</code></td><td>Direct discovery and one collection owner per boundary.</td></tr>
+              <tr><td>Boundaries</td><td><code>TestCategories.cs</code>, <code>xunit.runner.json</code></td><td>Traits, parallel collections, and serialized collections.</td></tr>
+              <tr><td>Determinism</td><td><code>TestPrimitives.cs</code></td><td>Manual clock, state signal probe, and retained message probe.</td></tr>
+              <tr><td>Production seams</td><td><code>CoalescingSettingsStore.cs</code>, <code>AppServerNotificationBatcher.cs</code></td><td>Optional TimeProvider injection.</td></tr>
+              <tr><td>Guard tests</td><td><code>Phase5TestArchitectureTests.cs</code></td><td>Locks the Phase 5 test architecture.</td></tr>
+              <tr><td>Documentation</td><td><code>README.md</code>, <code>docs/current-architecture.md</code>, and this file</td><td>Commands, architecture, changes, mistakes, and lessons.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="handoff">
+        <p class="eyebrow">Stage result</p>
+        <h2>Phase 5 is complete</h2>
+        <p class="intro">The approved test modernization is implemented and verified. The migration record is at the next human gate. Do not start another numbered phase until a person approves it.</p>
+        <div class="phase-links">
+          <a class="pill" href="phase-4-decompose-presentation-by-feature.html">Review Phase 4</a>
+          <a class="pill" href="../../../../docs/current-architecture.md">Read current architecture</a>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="shell">SynthiaCode migration record &middot; Phase 5 &middot; Verified on 9 August 2026.</footer>
+</body>
+</html>

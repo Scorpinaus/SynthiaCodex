@@ -1,15 +1,13 @@
 using SynthiaCode.App.Views;
 
-internal static class ConversationScrollingTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class ConversationScrollingTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("chat scrolling follows growing content while pinned to latest", FollowsGrowingContentWhilePinnedAsync),
-        ("chat scrolling preserves an intentional scroll-away during streaming", PreservesIntentionalScrollAwayAsync),
-        ("chat scrolling resumes near latest and resets for another chat", ResumesNearLatestAndResetsForAnotherChatAsync)
-    ];
 
-    private static Task FollowsGrowingContentWhilePinnedAsync()
+
+    [Fact(DisplayName = "chat scrolling follows growing content while pinned to latest")]
+    public Task FollowsGrowingContentWhilePinnedAsync()
     {
         var state = new ConversationScrollCoordinator();
 
@@ -25,7 +23,8 @@ internal static class ConversationScrollingTests
         return Task.CompletedTask;
     }
 
-    private static Task PreservesIntentionalScrollAwayAsync()
+    [Fact(DisplayName = "chat scrolling preserves an intentional scroll-away during streaming")]
+    public Task PreservesIntentionalScrollAwayAsync()
     {
         var state = new ConversationScrollCoordinator();
 
@@ -51,7 +50,8 @@ internal static class ConversationScrollingTests
         return Task.CompletedTask;
     }
 
-    private static Task ResumesNearLatestAndResetsForAnotherChatAsync()
+    [Fact(DisplayName = "chat scrolling resumes near latest and resets for another chat")]
+    public Task ResumesNearLatestAndResetsForAnotherChatAsync()
     {
         var state = new ConversationScrollCoordinator();
         state.UpdateFromScroll(

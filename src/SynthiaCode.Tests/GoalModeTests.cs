@@ -14,18 +14,14 @@ using SynthiaCode.Infrastructure.Codex;
 using SynthiaCode.Infrastructure.Projects;
 using SynthiaCode.Infrastructure.Workspaces;
 
-internal static class GoalModeTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class GoalModeTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("goal protocol sets gets clears and decodes notifications", GoalProtocolRoundTripsAsync),
-        ("goal view model sets edits pauses resumes and clears", GoalViewModelManagesLifecycleAsync),
-        ("goal view model rejects a stale result after chat switching", GoalViewModelRejectsStaleResultAsync),
-        ("main workflow loads routes and starts a selected chat goal", MainWorkflowOwnsSelectedGoalAsync),
-        ("task view renders an accessible responsive goal row", TaskViewRendersGoalRowAsync)
-    ];
 
-    private static async Task GoalProtocolRoundTripsAsync()
+
+    [Fact(DisplayName = "goal protocol sets gets clears and decodes notifications")]
+    public async Task GoalProtocolRoundTripsAsync()
     {
         var transport = new FakeAppServerTransport();
         await using var client = new CodexAppServerClient(
@@ -79,7 +75,8 @@ internal static class GoalModeTests
         Assert(cleared.Kind == CodexAppServerNotificationKind.ThreadGoalCleared, "cleared notification is classified");
     }
 
-    private static async Task GoalViewModelManagesLifecycleAsync()
+    [Fact(DisplayName = "goal view model sets edits pauses resumes and clears")]
+    public async Task GoalViewModelManagesLifecycleAsync()
     {
         var started = new List<(string ThreadId, string Objective)>();
         var setObjectives = new List<string>();
@@ -116,26 +113,26 @@ internal static class GoalModeTests
         viewModel.GoalDraft = "  Ship Goal mode  ";
         Assert(viewModel.SaveGoalCommand.CanExecute(null), "a valid new objective can be saved");
         viewModel.SaveGoalCommand.Execute(null);
-        await WaitUntilAsync(() => viewModel.HasGoal && started.Count == 1, "new goal saved and started");
+        await StateProbe.WaitForAsync(() => viewModel.HasGoal && started.Count == 1, "new goal saved and started");
         Assert(setObjectives.SequenceEqual(["Ship Goal mode"]), "new objective is trimmed and persisted once");
         Assert(started.Single() == ("thread-1", "Ship Goal mode"), "new goal starts as work on the owning chat");
         Assert(viewModel.GoalUsageSummary.Contains("200/1k tokens", StringComparison.Ordinal), "usage shows budget progress");
         Assert(viewModel.GoalUsageSummary.EndsWith("1m", StringComparison.Ordinal), "usage shows elapsed time");
 
         viewModel.ToggleGoalStatusCommand.Execute(null);
-        await WaitUntilAsync(() => viewModel.Goal?.Status == CodexThreadGoalStatus.Paused, "goal paused");
+        await StateProbe.WaitForAsync(() => viewModel.Goal?.Status == CodexThreadGoalStatus.Paused, "goal paused");
         viewModel.ToggleGoalStatusCommand.Execute(null);
-        await WaitUntilAsync(() => viewModel.Goal?.Status == CodexThreadGoalStatus.Active, "goal resumed");
+        await StateProbe.WaitForAsync(() => viewModel.Goal?.Status == CodexThreadGoalStatus.Active, "goal resumed");
         Assert(statuses.SequenceEqual([CodexThreadGoalStatus.Paused, CodexThreadGoalStatus.Active]), "pause and resume use status-only updates");
 
         viewModel.BeginGoalEditCommand.Execute(null);
         viewModel.GoalDraft = "Ship Goal mode with tests";
         viewModel.SaveGoalCommand.Execute(null);
-        await WaitUntilAsync(() => viewModel.Goal?.Objective == "Ship Goal mode with tests", "goal objective edited");
+        await StateProbe.WaitForAsync(() => viewModel.Goal?.Objective == "Ship Goal mode with tests", "goal objective edited");
         Assert(started.Count == 1, "editing an existing goal does not fabricate another prompt");
 
         viewModel.ClearGoalCommand.Execute(null);
-        await WaitUntilAsync(() => !viewModel.HasGoal, "goal cleared");
+        await StateProbe.WaitForAsync(() => !viewModel.HasGoal, "goal cleared");
         Assert(clearCount == 1, "clear is sent once");
 
         viewModel.BeginGoalEditCommand.Execute(null);
@@ -144,7 +141,8 @@ internal static class GoalModeTests
         Assert(viewModel.GoalEditorValidationMessage.Contains("4,000", StringComparison.Ordinal), "objective limit is explained");
     }
 
-    private static async Task GoalViewModelRejectsStaleResultAsync()
+    [Fact(DisplayName = "goal view model rejects a stale result after chat switching")]
+    public async Task GoalViewModelRejectsStaleResultAsync()
     {
         var firstPending = new TaskCompletionSource<CodexThreadGoal>(TaskCreationOptions.RunContinuationsAsynchronously);
         var secondPending = new TaskCompletionSource<CodexThreadGoal>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -164,17 +162,17 @@ internal static class GoalModeTests
         viewModel.ResetGoalContext(isCodexThread: true);
         viewModel.BeginGoalEditCommand.Execute(null);
         viewModel.GoalDraft = "Thread one goal";
-        viewModel.SaveGoalCommand.Execute(null);
-        await WaitUntilAsync(() => viewModel.IsGoalBusy, "first chat goal request started");
+        var firstSave = ((AsyncRelayCommand)viewModel.SaveGoalCommand).ExecuteAsync();
+        await StateProbe.WaitForAsync(() => viewModel.IsGoalBusy, "first chat goal request started");
 
         viewModel.ApplyConversationSnapshot(Snapshot("thread-2"));
         viewModel.ResetGoalContext(isCodexThread: true);
         viewModel.ApplyGoal(Goal("thread-2", "Thread two goal", CodexThreadGoalStatus.Active));
-        viewModel.ToggleGoalStatusCommand.Execute(null);
-        await WaitUntilAsync(() => viewModel.IsGoalBusy, "second chat status request started");
+        var secondStatusChange = ((AsyncRelayCommand)viewModel.ToggleGoalStatusCommand).ExecuteAsync();
+        await StateProbe.WaitForAsync(() => viewModel.IsGoalBusy, "second chat status request started");
 
         firstPending.SetResult(Goal("thread-1", "Thread one goal", CodexThreadGoalStatus.Active));
-        await Task.Delay(100);
+        await firstSave;
 
         Assert(viewModel.ConversationThreadId == "thread-2", "second chat remains selected");
         Assert(viewModel.Goal?.ThreadId == "thread-2" && string.IsNullOrEmpty(viewModel.GoalError), "late first-chat result does not leak into the second chat");
@@ -182,10 +180,12 @@ internal static class GoalModeTests
         Assert(started == 0, "late first-chat result cannot start work in the second chat");
 
         secondPending.SetResult(Goal("thread-2", "Thread two goal", CodexThreadGoalStatus.Paused));
-        await WaitUntilAsync(() => viewModel.Goal?.Status == CodexThreadGoalStatus.Paused, "second chat status completed");
+        await secondStatusChange;
+        Assert(viewModel.Goal?.Status == CodexThreadGoalStatus.Paused, "second chat status completed");
     }
 
-    private static async Task MainWorkflowOwnsSelectedGoalAsync()
+    [Fact(DisplayName = "main workflow loads routes and starts a selected chat goal")]
+    public async Task MainWorkflowOwnsSelectedGoalAsync()
     {
         using var temp = TempWorkspace.Create();
         var projectPath = temp.CreateDirectory("GoalRepo");
@@ -239,7 +239,7 @@ internal static class GoalModeTests
         Assert(ReadString(get, "method") == "thread/goal/get", "selecting a Codex chat loads its server-owned goal");
         Assert(ReadString(get, "params.threadId") == "thread-goal", "goal load is scoped to the selected chat");
         transport.ServerSend("""{"id":2,"result":{"goal":null}}""");
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => viewModel.TaskWorkspace.IsGoalFeatureAvailable && !viewModel.TaskWorkspace.IsGoalLoading,
             "selected goal load completed");
 
@@ -262,22 +262,23 @@ internal static class GoalModeTests
             ReadString(turn, "params.input.0.text") == "Complete the parity slice",
             $"goal objective is the first prompt: {turn.ToJsonString()}");
         transport.ServerSend("""{"id":4,"result":{"turn":{"id":"turn-goal"}}}""");
-        await WaitUntilAsync(() => viewModel.TaskWorkspace.HasGoal, "new goal shown");
+        await StateProbe.WaitForAsync(() => viewModel.TaskWorkspace.HasGoal, "new goal shown");
 
         transport.ServerSend(
             """
             {"method":"thread/goal/updated","params":{"threadId":"thread-goal","goal":{"threadId":"thread-goal","objective":"Complete the parity slice","status":"paused","tokenBudget":10000,"tokensUsed":900,"timeUsedSeconds":125,"createdAt":10,"updatedAt":20}}}
             """);
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => viewModel.TaskWorkspace.Goal?.Status == CodexThreadGoalStatus.Paused,
             "matching goal notification routed");
         Assert(viewModel.TaskWorkspace.Goal?.TokensUsed == 900, "notification refreshes goal accounting");
 
         transport.ServerSend("""{"method":"thread/goal/cleared","params":{"threadId":"thread-goal"}}""");
-        await WaitUntilAsync(() => !viewModel.TaskWorkspace.HasGoal, "matching clear notification routed");
+        await StateProbe.WaitForAsync(() => !viewModel.TaskWorkspace.HasGoal, "matching clear notification routed");
     }
 
-    private static Task TaskViewRendersGoalRowAsync() => WpfTestHost.RunAsync(() =>
+    [Fact(DisplayName = "task view renders an accessible responsive goal row")]
+    public Task TaskViewRendersGoalRowAsync() => WpfTestHost.RunAsync(() =>
     {
         var resources = Application.Current.Resources;
         resources["BooleanToVisibilityConverter"] = new BooleanToVisibilityConverter();
@@ -368,15 +369,6 @@ internal static class GoalModeTests
         return current;
     }
 
-    private static async Task WaitUntilAsync(Func<bool> condition, string label)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        while (!condition())
-        {
-            await Task.Delay(10, timeout.Token);
-        }
-        Assert(condition(), label);
-    }
 
     private static void Assert(bool condition, string message)
     {

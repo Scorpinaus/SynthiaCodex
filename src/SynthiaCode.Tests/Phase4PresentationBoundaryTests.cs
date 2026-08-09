@@ -2,6 +2,7 @@ using System.Xml.Linq;
 using SynthiaCode.Presentation.Markdown;
 using Xunit;
 
+[Trait("Category", TestCategories.Unit)]
 public sealed class Phase4PresentationBoundaryTests
 {
     [Fact]

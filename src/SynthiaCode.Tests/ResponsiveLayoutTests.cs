@@ -17,14 +17,14 @@ using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Projects;
 using SynthiaCode.Core.Settings;
 
-internal static class ResponsiveLayoutTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class ResponsiveLayoutTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("responsive navigation and transcript constrain long content", ResponsiveViewsConstrainLongContentAsync)
-    ];
 
-    private static Task ResponsiveViewsConstrainLongContentAsync() => WpfTestHost.RunAsync(() =>
+
+    [Fact(DisplayName = "responsive navigation and transcript constrain long content")]
+    public Task ResponsiveViewsConstrainLongContentAsync() => WpfTestHost.RunAsync(() =>
     {
         ConfigureTestResources(Application.Current.Resources);
         ApplyDarkThemeForTest(Application.Current.Resources);

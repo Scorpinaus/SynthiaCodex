@@ -3,18 +3,14 @@ using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Settings;
 using SynthiaCode.Infrastructure.Settings;
 
-internal static class PermissionModeTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class PermissionModeTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("permission modes resolve exact modern and legacy policies", ResolvesPoliciesAsync),
-        ("permission modes respect managed reviewer and profile restrictions", RespectsRequirementsAsync),
-        ("permission mode settings migrate without broadening access", MigratesSettingsAsync),
-        ("permission mode view model presents three modes and named profiles", PresentsModesAsync),
-        ("main view model routes every lifecycle request through resolved permissions", MainLifecycleUsesResolverAsync)
-    ];
 
-    private static Task ResolvesPoliciesAsync()
+
+    [Fact(DisplayName = "permission modes resolve exact modern and legacy policies")]
+    public Task ResolvesPoliciesAsync()
     {
         var modern = new CodexPermissionCapabilities(SupportsPermissionProfiles: true, SupportsAutoReview: true);
 
@@ -72,7 +68,8 @@ internal static class PermissionModeTests
         return Task.CompletedTask;
     }
 
-    private static Task RespectsRequirementsAsync()
+    [Fact(DisplayName = "permission modes respect managed reviewer and profile restrictions")]
+    public Task RespectsRequirementsAsync()
     {
         var requirements = new CodexExecutionPolicyRequirements(
             [CodexSandbox.WorkspaceWrite],
@@ -116,7 +113,8 @@ internal static class PermissionModeTests
         return Task.CompletedTask;
     }
 
-    private static async Task MigratesSettingsAsync()
+    [Fact(DisplayName = "permission mode settings migrate without broadening access")]
+    public async Task MigratesSettingsAsync()
     {
         var safeLegacy = new AppSettings
         {
@@ -168,7 +166,8 @@ internal static class PermissionModeTests
             "mode and profile survive a JSON settings round trip");
     }
 
-    private static Task PresentsModesAsync()
+    [Fact(DisplayName = "permission mode view model presents three modes and named profiles")]
+    public Task PresentsModesAsync()
     {
         var changed = 0;
         var viewModel = new ExecutionPolicyViewModel((_, _) => true, () => changed++);
@@ -198,7 +197,8 @@ internal static class PermissionModeTests
         return Task.CompletedTask;
     }
 
-    private static Task MainLifecycleUsesResolverAsync()
+    [Fact(DisplayName = "main view model routes every lifecycle request through resolved permissions")]
+    public Task MainLifecycleUsesResolverAsync()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null && !Directory.Exists(Path.Combine(directory.FullName, "src", "SynthiaCode.App")))

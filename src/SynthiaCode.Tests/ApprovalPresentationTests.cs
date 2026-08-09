@@ -4,20 +4,14 @@ using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Settings;
 using SynthiaCode.Infrastructure.Settings;
 
-internal static class ApprovalPresentationTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class ApprovalPresentationTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("approval queue serializes prompts and responses", SerializesPromptsAndResponsesAsync),
-        ("approval queue resolves stale prompts", ResolvesStalePromptsAsync),
-        ("permission approvals preserve requested permissions and scope", PreservesPermissionScopeAsync),
-        ("execution policy defaults and explicit inheritance persist", PersistsExecutionPolicyAsync),
-        ("execution policy enforces confirmations and requirements", EnforcesPolicySafetyAsync),
-        ("approval and execution-policy controls are present in WPF", PresentsApprovalControlsAsync),
-        ("SynthiaCode branding and independence notice are present", PresentsSynthiaCodeBrandingAsync)
-    ];
 
-    private static async Task SerializesPromptsAndResponsesAsync()
+
+    [Fact(DisplayName = "approval queue serializes prompts and responses")]
+    public async Task SerializesPromptsAndResponsesAsync()
     {
         var responses = new List<(CodexServerRequest Request, CodexServerRequestResponse Response)>();
         var queue = new ApprovalQueueViewModel((request, response, _) =>
@@ -39,7 +33,8 @@ internal static class ApprovalPresentationTests
         Assert(queue.ActivePrompt?.Request.RequestId == second.RequestId, "the next request becomes active");
     }
 
-    private static Task ResolvesStalePromptsAsync()
+    [Fact(DisplayName = "approval queue resolves stale prompts")]
+    public Task ResolvesStalePromptsAsync()
     {
         var queue = new ApprovalQueueViewModel((_, _, _) => Task.CompletedTask);
         var first = CommandRequest("request-3");
@@ -53,7 +48,8 @@ internal static class ApprovalPresentationTests
         return Task.CompletedTask;
     }
 
-    private static async Task PreservesPermissionScopeAsync()
+    [Fact(DisplayName = "permission approvals preserve requested permissions and scope")]
+    public async Task PreservesPermissionScopeAsync()
     {
         CodexServerRequestResponse? captured = null;
         var queue = new ApprovalQueueViewModel((_, response, _) =>
@@ -84,7 +80,8 @@ internal static class ApprovalPresentationTests
         Assert(captured?.Result["permissions"]?["fileSystem"]?.ToJsonString() == permissions["fileSystem"]?.ToJsonString(), "selected permissions retain their requested scope");
     }
 
-    private static async Task PersistsExecutionPolicyAsync()
+    [Fact(DisplayName = "execution policy defaults and explicit inheritance persist")]
+    public async Task PersistsExecutionPolicyAsync()
     {
         var settings = new AppSettings();
         Assert(settings.SandboxModeOverride == "workspace-write", "new installations default to workspace-write");
@@ -102,7 +99,8 @@ internal static class ApprovalPresentationTests
         Assert(reloaded.SandboxModeOverride is null && reloaded.ApprovalPolicyOverride is null, "explicit inheritance survives a settings round trip");
     }
 
-    private static Task EnforcesPolicySafetyAsync()
+    [Fact(DisplayName = "execution policy enforces confirmations and requirements")]
+    public Task EnforcesPolicySafetyAsync()
     {
         var confirmations = 0;
         var policy = new ExecutionPolicyViewModel((_, _) =>
@@ -126,7 +124,8 @@ internal static class ApprovalPresentationTests
         return Task.CompletedTask;
     }
 
-    private static Task PresentsApprovalControlsAsync()
+    [Fact(DisplayName = "approval and execution-policy controls are present in WPF")]
+    public Task PresentsApprovalControlsAsync()
     {
         var root = FindRepositoryRoot();
         var mainWindow = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "MainWindow.xaml"));
@@ -148,7 +147,8 @@ internal static class ApprovalPresentationTests
         return Task.CompletedTask;
     }
 
-    private static Task PresentsSynthiaCodeBrandingAsync()
+    [Fact(DisplayName = "SynthiaCode branding and independence notice are present")]
+    public Task PresentsSynthiaCodeBrandingAsync()
     {
         var root = FindRepositoryRoot();
         var mainWindow = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "MainWindow.xaml"));

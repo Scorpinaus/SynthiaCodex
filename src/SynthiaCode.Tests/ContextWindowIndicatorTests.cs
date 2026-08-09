@@ -8,21 +8,14 @@ using SynthiaCode.App.Views;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Settings;
 
-internal static class ContextWindowIndicatorTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class ContextWindowIndicatorTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("context usage notifications are enabled by default", ContextUsageNotificationsAreEnabledByDefaultAsync),
-        ("context usage is calculated and routed per chat", ContextUsageIsCalculatedAndRoutedPerChatAsync),
-        ("context usage handles reasoning token edge cases", ContextUsageHandlesReasoningTokenEdgeCasesAsync),
-        ("context compactions count current and legacy notifications once", ContextCompactionsCountCurrentAndLegacyNotificationsOnceAsync),
-        ("app-server compaction notifications render as transcript activity", AppServerCompactionNotificationsRenderAsTranscriptActivityAsync),
-        ("token pressure does not trigger client-side summarization", TokenPressureDoesNotTriggerClientSideSummarizationAsync),
-        ("context usage and compactions survive chat persistence", ContextUsageAndCompactionsSurviveChatPersistenceAsync),
-        ("composer shows context used beside send with usage tooltip", ComposerShowsContextUsedBesideSendAsync)
-    ];
 
-    private static Task ContextUsageNotificationsAreEnabledByDefaultAsync()
+
+    [Fact(DisplayName = "context usage notifications are enabled by default")]
+    public Task ContextUsageNotificationsAreEnabledByDefaultAsync()
     {
         Assert(
             CodexInitializeOptions.Default.OptOutNotificationMethods?.Contains(
@@ -32,7 +25,8 @@ internal static class ContextWindowIndicatorTests
         return Task.CompletedTask;
     }
 
-    private static Task ContextUsageIsCalculatedAndRoutedPerChatAsync()
+    [Fact(DisplayName = "context usage is calculated and routed per chat")]
+    public Task ContextUsageIsCalculatedAndRoutedPerChatAsync()
     {
         var workspace = new CodexThreadWorkspace();
         var first = workspace.GetOrCreate("thread-a");
@@ -61,7 +55,8 @@ internal static class ContextWindowIndicatorTests
         return Task.CompletedTask;
     }
 
-    private static Task ContextUsageHandlesReasoningTokenEdgeCasesAsync()
+    [Fact(DisplayName = "context usage handles reasoning token edge cases")]
+    public Task ContextUsageHandlesReasoningTokenEdgeCasesAsync()
     {
         var missingReasoning = new CodexThreadService();
         missingReasoning.ApplyNotification(Notification(
@@ -85,7 +80,8 @@ internal static class ContextWindowIndicatorTests
         return Task.CompletedTask;
     }
 
-    private static Task ContextCompactionsCountCurrentAndLegacyNotificationsOnceAsync()
+    [Fact(DisplayName = "context compactions count current and legacy notifications once")]
+    public Task ContextCompactionsCountCurrentAndLegacyNotificationsOnceAsync()
     {
         var service = new CodexThreadService();
 
@@ -103,7 +99,8 @@ internal static class ContextWindowIndicatorTests
         return Task.CompletedTask;
     }
 
-    private static Task AppServerCompactionNotificationsRenderAsTranscriptActivityAsync()
+    [Fact(DisplayName = "app-server compaction notifications render as transcript activity")]
+    public Task AppServerCompactionNotificationsRenderAsTranscriptActivityAsync()
     {
         var current = new CodexThreadService();
         current.BeginTurn("Continue the task.");
@@ -133,7 +130,8 @@ internal static class ContextWindowIndicatorTests
         return Task.CompletedTask;
     }
 
-    private static Task TokenPressureDoesNotTriggerClientSideSummarizationAsync()
+    [Fact(DisplayName = "token pressure does not trigger client-side summarization")]
+    public Task TokenPressureDoesNotTriggerClientSideSummarizationAsync()
     {
         var service = new CodexThreadService();
         service.BeginTurn("Keep working without rewriting this prompt.");
@@ -152,7 +150,8 @@ internal static class ContextWindowIndicatorTests
         return Task.CompletedTask;
     }
 
-    private static Task ContextUsageAndCompactionsSurviveChatPersistenceAsync()
+    [Fact(DisplayName = "context usage and compactions survive chat persistence")]
+    public Task ContextUsageAndCompactionsSurviveChatPersistenceAsync()
     {
         var store = new ThreadStore();
         var settings = new AppSettings();
@@ -176,7 +175,8 @@ internal static class ContextWindowIndicatorTests
         return Task.CompletedTask;
     }
 
-    private static Task ComposerShowsContextUsedBesideSendAsync() => WpfTestHost.RunAsync(() =>
+    [Fact(DisplayName = "composer shows context used beside send with usage tooltip")]
+    public Task ComposerShowsContextUsedBesideSendAsync() => WpfTestHost.RunAsync(() =>
     {
         ConfigureTestResources(Application.Current.Resources);
         var service = new CodexThreadService();

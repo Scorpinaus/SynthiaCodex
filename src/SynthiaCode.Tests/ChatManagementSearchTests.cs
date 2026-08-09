@@ -9,18 +9,14 @@ using SynthiaCode.Infrastructure.Codex;
 using SynthiaCode.Infrastructure.Projects;
 using SynthiaCode.Infrastructure.Workspaces;
 
-internal static class ChatManagementSearchTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class ChatManagementSearchTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("thread store pins and permanently deletes chats", ThreadStorePinsAndDeletesChatsAsync),
-        ("sidebar pin and delete commands delegate selected chat actions", SidebarCommandsDelegateSelectedChatActionsAsync),
-        ("main view model persists pins and deletes archived chats", MainViewModelPersistsPinsAndDeletesArchivedChatsAsync),
-        ("cross-chat search finds content and opens results across scopes", CrossChatSearchFindsAndOpensAcrossScopesAsync),
-        ("find in chat counts navigates and clears transcript matches", FindInChatCountsNavigatesAndClearsMatchesAsync)
-    ];
 
-    private static Task ThreadStorePinsAndDeletesChatsAsync()
+
+    [Fact(DisplayName = "thread store pins and permanently deletes chats")]
+    public Task ThreadStorePinsAndDeletesChatsAsync()
     {
         var now = DateTimeOffset.UtcNow;
         var settings = new AppSettings
@@ -47,7 +43,8 @@ internal static class ChatManagementSearchTests
         return Task.CompletedTask;
     }
 
-    private static async Task SidebarCommandsDelegateSelectedChatActionsAsync()
+    [Fact(DisplayName = "sidebar pin and delete commands delegate selected chat actions")]
+    public async Task SidebarCommandsDelegateSelectedChatActionsAsync()
     {
         ProjectThreadViewModel? viewModel = null;
         var pinCount = 0;
@@ -75,16 +72,17 @@ internal static class ChatManagementSearchTests
 
         Assert(viewModel.TogglePinThreadCommand.CanExecute(null), "pin is enabled for the selected chat");
         viewModel.TogglePinThreadCommand.Execute(null);
-        await WaitUntilAsync(() => pinCount == 1, "pin callback");
+        await StateProbe.WaitForAsync(() => pinCount == 1, "pin callback");
         Assert(thread.IsPinned, "pin callback updates the selected chat");
         Assert(viewModel.PinActionLabel == "Unpin", "pin action label reflects the selected chat state");
 
         Assert(viewModel.DeleteThreadCommand.CanExecute(null), "delete is enabled for the selected chat");
         viewModel.DeleteThreadCommand.Execute(null);
-        await WaitUntilAsync(() => deleteCount == 1, "delete callback");
+        await StateProbe.WaitForAsync(() => deleteCount == 1, "delete callback");
     }
 
-    private static async Task CrossChatSearchFindsAndOpensAcrossScopesAsync()
+    [Fact(DisplayName = "cross-chat search finds content and opens results across scopes")]
+    public async Task CrossChatSearchFindsAndOpensAcrossScopesAsync()
     {
         ProjectThreadViewModel? viewModel = null;
         var projectThread = Thread(
@@ -131,7 +129,7 @@ internal static class ChatManagementSearchTests
         Assert(projectResult.Snippet.Contains("NEEDLE", StringComparison.Ordinal), "result includes matching context");
 
         viewModel.OpenChatSearchResultCommand.Execute(projectResult);
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => viewModel.SelectedThread?.ThreadId == projectThread.ThreadId,
             "cross-project search result selection");
         Assert(
@@ -140,7 +138,8 @@ internal static class ChatManagementSearchTests
         Assert(string.IsNullOrEmpty(viewModel.ChatSearchText), "opening a result clears the search");
     }
 
-    private static async Task MainViewModelPersistsPinsAndDeletesArchivedChatsAsync()
+    [Fact(DisplayName = "main view model persists pins and deletes archived chats")]
+    public async Task MainViewModelPersistsPinsAndDeletesArchivedChatsAsync()
     {
         using var temp = TempWorkspace.Create();
         var generalPath = temp.CreateDirectory("general");
@@ -186,13 +185,13 @@ internal static class ChatManagementSearchTests
         viewModel.SelectedThread = viewModel.ProjectThreads.Single();
 
         viewModel.TogglePinThreadCommand.Execute(null);
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => settingsStore.SavedSettings.ProjectThreads.Single().IsPinned,
             "persisted chat pin");
         Assert(viewModel.ProjectThreads.Single().IsPinned, "pin refreshes sidebar presentation");
 
         viewModel.DeleteThreadCommand.Execute(null);
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => settingsStore.SavedSettings.ProjectThreads.Count == 0,
             "archived chat deletion");
         Assert(viewModel.ProjectThreads.Count == 0, "delete removes the chat from navigation");
@@ -201,7 +200,8 @@ internal static class ChatManagementSearchTests
         await viewModel.DisposeAsync();
     }
 
-    private static Task FindInChatCountsNavigatesAndClearsMatchesAsync()
+    [Fact(DisplayName = "find in chat counts navigates and clears transcript matches")]
+    public Task FindInChatCountsNavigatesAndClearsMatchesAsync()
     {
         var service = new CodexThreadService();
         service.Restore(
@@ -310,21 +310,6 @@ internal static class ChatManagementSearchTests
         Status = CodexTurnStatus.Completed
     };
 
-    private static async Task WaitUntilAsync(Func<bool> condition, string label)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        while (!condition())
-        {
-            try
-            {
-                await Task.Delay(20, timeout.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                throw new InvalidOperationException($"Timed out waiting for {label}.");
-            }
-        }
-    }
 
     private static void Assert(bool condition, string message)
     {

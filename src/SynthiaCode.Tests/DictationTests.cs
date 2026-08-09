@@ -2,19 +2,14 @@ using SynthiaCode.App.Services;
 using SynthiaCode.App.ViewModels;
 using System.Xml.Linq;
 
-internal static class DictationTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class DictationTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("dictation toggles and appends finalized speech to the prompt", DictationTogglesAndAppendsToPromptAsync),
-        ("dictation targets active task guidance", DictationTargetsActiveGuidanceAsync),
-        ("dictation surfaces microphone startup failures", DictationSurfacesStartupFailureAsync),
-        ("dictation reports unavailable Windows speech recognition", DictationReportsUnavailableRecognitionAsync),
-        ("dictation stops and disposes with the task workspace", DictationStopsAndDisposesAsync),
-        ("composer renders an accessible microphone control", ComposerRendersMicrophoneControlAsync)
-    ];
 
-    private static async Task DictationTogglesAndAppendsToPromptAsync()
+
+    [Fact(DisplayName = "dictation toggles and appends finalized speech to the prompt")]
+    public async Task DictationTogglesAndAppendsToPromptAsync()
     {
         var speech = new FakeSpeechRecognitionService();
         var viewModel = CreateViewModel(speech);
@@ -38,7 +33,8 @@ internal static class DictationTests
         Assert(viewModel.DictationStatusText == "Dictation stopped", "stopped state is announced");
     }
 
-    private static async Task DictationTargetsActiveGuidanceAsync()
+    [Fact(DisplayName = "dictation targets active task guidance")]
+    public async Task DictationTargetsActiveGuidanceAsync()
     {
         var speech = new FakeSpeechRecognitionService();
         var viewModel = CreateViewModel(speech);
@@ -53,7 +49,8 @@ internal static class DictationTests
         Assert(viewModel.Prompt == "Unsent prompt", "inactive prompt remains unchanged");
     }
 
-    private static async Task DictationSurfacesStartupFailureAsync()
+    [Fact(DisplayName = "dictation surfaces microphone startup failures")]
+    public async Task DictationSurfacesStartupFailureAsync()
     {
         var speech = new FakeSpeechRecognitionService
         {
@@ -69,7 +66,8 @@ internal static class DictationTests
             "startup failure is actionable");
     }
 
-    private static Task DictationReportsUnavailableRecognitionAsync()
+    [Fact(DisplayName = "dictation reports unavailable Windows speech recognition")]
+    public Task DictationReportsUnavailableRecognitionAsync()
     {
         var speech = new FakeSpeechRecognitionService(
             new SpeechRecognitionAvailability(false, "Install a Windows speech recognizer to use dictation."));
@@ -83,7 +81,8 @@ internal static class DictationTests
         return Task.CompletedTask;
     }
 
-    private static async Task DictationStopsAndDisposesAsync()
+    [Fact(DisplayName = "dictation stops and disposes with the task workspace")]
+    public async Task DictationStopsAndDisposesAsync()
     {
         var speech = new FakeSpeechRecognitionService();
         var viewModel = CreateViewModel(speech);
@@ -95,7 +94,8 @@ internal static class DictationTests
         Assert(speech.DisposeCount == 1, "workspace disposal releases recognition resources");
     }
 
-    private static Task ComposerRendersMicrophoneControlAsync()
+    [Fact(DisplayName = "composer renders an accessible microphone control")]
+    public Task ComposerRendersMicrophoneControlAsync()
     {
         var root = FindRepositoryRoot();
         var taskView = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "TaskComposerView.xaml"));

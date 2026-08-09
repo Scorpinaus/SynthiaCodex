@@ -11,19 +11,14 @@ using SynthiaCode.Infrastructure.Codex;
 using SynthiaCode.Infrastructure.Projects;
 using SynthiaCode.Infrastructure.Workspaces;
 
-internal static class PromptEditingTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class PromptEditingTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("app-server client rolls back prompt history", AppServerClientRollsBackPromptHistoryAsync),
-        ("thread service retains previous prompt versions", ThreadServiceRetainsPreviousPromptVersionsAsync),
-        ("task view model edits and resubmits a prompt", TaskViewModelEditsAndResubmitsPromptAsync),
-        ("prompt edit rolls back and continues the selected thread", PromptEditRollsBackAndContinuesSelectedThreadAsync),
-        ("assistant response forks a new chat at that turn", AssistantResponseForksNewChatAtTurnAsync),
-        ("task transcript exposes prompt edit controls", TaskTranscriptExposesPromptEditControlsAsync)
-    ];
 
-    private static async Task AppServerClientRollsBackPromptHistoryAsync()
+
+    [Fact(DisplayName = "app-server client rolls back prompt history")]
+    public async Task AppServerClientRollsBackPromptHistoryAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = new CodexAppServerClient(
@@ -49,7 +44,8 @@ internal static class PromptEditingTests
         Assert(result.Turns.Single().AssistantResponse == "Keep this answer", "rollback parses retained response");
     }
 
-    private static Task ThreadServiceRetainsPreviousPromptVersionsAsync()
+    [Fact(DisplayName = "thread service retains previous prompt versions")]
+    public Task ThreadServiceRetainsPreviousPromptVersionsAsync()
     {
         var service = new CodexThreadService();
         service.Restore(
@@ -82,7 +78,8 @@ internal static class PromptEditingTests
         return Task.CompletedTask;
     }
 
-    private static async Task TaskViewModelEditsAndResubmitsPromptAsync()
+    [Fact(DisplayName = "task view model edits and resubmits a prompt")]
+    public async Task TaskViewModelEditsAndResubmitsPromptAsync()
     {
         CodexConversationTurn? submittedTurn = null;
         string? submittedText = null;
@@ -114,13 +111,14 @@ internal static class PromptEditingTests
         Assert(turn.EditedPrompt == "Original prompt", "editor starts with the submitted prompt");
         turn.EditedPrompt = "Edited prompt";
         viewModel.SubmitPromptEditCommand.Execute(turn);
-        await WaitUntilAsync(() => !turn.IsPromptEditing, "prompt edit submission");
+        await StateProbe.WaitForAsync(() => !turn.IsPromptEditing, "prompt edit submission");
 
         Assert(ReferenceEquals(submittedTurn, turn), "the selected turn is resubmitted");
         Assert(submittedText == "Edited prompt", "trimmed edited text is resubmitted");
     }
 
-    private static async Task PromptEditRollsBackAndContinuesSelectedThreadAsync()
+    [Fact(DisplayName = "prompt edit rolls back and continues the selected thread")]
+    public async Task PromptEditRollsBackAndContinuesSelectedThreadAsync()
     {
         using var temp = TempWorkspace.Create();
         await using var transport = new FakeAppServerTransport();
@@ -128,7 +126,7 @@ internal static class PromptEditingTests
         var viewModel = CreateViewModel(transport, projectPath);
         await viewModel.InitializeAsync();
         viewModel.BrowseProjectCommand.Execute(null);
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => string.Equals(viewModel.SelectedProjectPath, projectPath, StringComparison.OrdinalIgnoreCase),
             "prompt edit project selection");
 
@@ -140,20 +138,20 @@ internal static class PromptEditingTests
         transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thread-edit"}}}""");
         await transport.WaitForClientMessageCountAsync(4);
         transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-original"}}}""");
-        await WaitUntilAsync(() => viewModel.IsTurnRunning, "original prompt running");
+        await StateProbe.WaitForAsync(() => viewModel.IsTurnRunning, "original prompt running");
         await CompleteAutomaticThreadRenameAsync(transport, "thread-edit");
         transport.ServerSend("""{"method":"item/agentMessage/delta","params":{"threadId":"thread-edit","turnId":"turn-original","itemId":"answer-original","delta":"Original answer"}}""");
         transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-edit","turn":{"id":"turn-original","status":"completed","items":[]}}}""");
-        await WaitUntilAsync(() => !viewModel.IsTurnRunning, "original prompt completed");
+        await StateProbe.WaitForAsync(() => !viewModel.IsTurnRunning, "original prompt completed");
 
         viewModel.PromptText = "Later prompt";
         viewModel.SubmitPromptCommand.Execute(null);
         await transport.WaitForClientMessageCountAsync(6);
         transport.ServerSend("""{"id":4,"result":{"turn":{"id":"turn-later"}}}""");
-        await WaitUntilAsync(() => viewModel.IsTurnRunning, "later prompt running");
+        await StateProbe.WaitForAsync(() => viewModel.IsTurnRunning, "later prompt running");
         transport.ServerSend("""{"method":"item/agentMessage/delta","params":{"threadId":"thread-edit","turnId":"turn-later","itemId":"answer-later","delta":"Later answer"}}""");
         transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-edit","turn":{"id":"turn-later","status":"completed","items":[]}}}""");
-        await WaitUntilAsync(() => !viewModel.IsTurnRunning, "later prompt completed");
+        await StateProbe.WaitForAsync(() => !viewModel.IsTurnRunning, "later prompt completed");
 
         var original = viewModel.TaskWorkspace.ConversationTurns[0];
         viewModel.TaskWorkspace.BeginPromptEditCommand.Execute(original);
@@ -170,7 +168,7 @@ internal static class PromptEditingTests
         Assert(ReadString(editedStart, "method") == "turn/start", "edited prompt starts a replacement turn");
         Assert(ReadString(editedStart, "params.input.0.text") == "Edited prompt", "replacement turn uses edited text");
         transport.ServerSend("""{"id":6,"result":{"turn":{"id":"turn-edited"}}}""");
-        await WaitUntilAsync(() => viewModel.IsTurnRunning, "edited prompt running");
+        await StateProbe.WaitForAsync(() => viewModel.IsTurnRunning, "edited prompt running");
 
         Assert(viewModel.TaskWorkspace.ConversationTurns.Count == 3, "old prompts and edited prompt remain in the transcript");
         Assert(viewModel.TaskWorkspace.ConversationTurns[0].IsSuperseded, "original prompt is a previous version");
@@ -180,12 +178,13 @@ internal static class PromptEditingTests
         Assert(viewModel.TaskWorkspace.ConversationTurns[2].UserPrompt == "Edited prompt", "edited prompt is visible");
         transport.ServerSend("""{"method":"item/agentMessage/delta","params":{"threadId":"thread-edit","turnId":"turn-edited","itemId":"answer-edited","delta":"Edited answer"}}""");
         transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-edit","turn":{"id":"turn-edited","status":"completed","items":[]}}}""");
-        await WaitUntilAsync(() => !viewModel.IsTurnRunning, "edited prompt completed");
+        await StateProbe.WaitForAsync(() => !viewModel.IsTurnRunning, "edited prompt completed");
         Assert(viewModel.TaskWorkspace.ConversationTurns[2].AssistantResponse == "Edited answer", "edited response is visible beside previous responses");
         await viewModel.DisposeAsync();
     }
 
-    private static async Task AssistantResponseForksNewChatAtTurnAsync()
+    [Fact(DisplayName = "assistant response forks a new chat at that turn")]
+    public async Task AssistantResponseForksNewChatAtTurnAsync()
     {
         using var temp = TempWorkspace.Create();
         await using var transport = new FakeAppServerTransport();
@@ -193,7 +192,7 @@ internal static class PromptEditingTests
         var viewModel = CreateViewModel(transport, projectPath);
         await viewModel.InitializeAsync();
         viewModel.BrowseProjectCommand.Execute(null);
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => string.Equals(viewModel.SelectedProjectPath, projectPath, StringComparison.OrdinalIgnoreCase),
             "response fork project selection");
 
@@ -205,20 +204,20 @@ internal static class PromptEditingTests
         transport.ServerSend("""{"id":1,"result":{"thread":{"id":"thread-fork-source"}}}""");
         await transport.WaitForClientMessageCountAsync(4);
         transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-original"}}}""");
-        await WaitUntilAsync(() => viewModel.IsTurnRunning, "fork source first turn running");
+        await StateProbe.WaitForAsync(() => viewModel.IsTurnRunning, "fork source first turn running");
         await CompleteAutomaticThreadRenameAsync(transport, "thread-fork-source");
         transport.ServerSend("""{"method":"item/agentMessage/delta","params":{"threadId":"thread-fork-source","turnId":"turn-original","itemId":"answer-original","delta":"Original answer"}}""");
         transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-fork-source","turn":{"id":"turn-original","status":"completed","items":[]}}}""");
-        await WaitUntilAsync(() => !viewModel.IsTurnRunning, "fork source first turn completed");
+        await StateProbe.WaitForAsync(() => !viewModel.IsTurnRunning, "fork source first turn completed");
 
         viewModel.PromptText = "Later prompt";
         viewModel.SubmitPromptCommand.Execute(null);
         await transport.WaitForClientMessageCountAsync(6);
         transport.ServerSend("""{"id":4,"result":{"turn":{"id":"turn-later"}}}""");
-        await WaitUntilAsync(() => viewModel.IsTurnRunning, "fork source later turn running");
+        await StateProbe.WaitForAsync(() => viewModel.IsTurnRunning, "fork source later turn running");
         transport.ServerSend("""{"method":"item/agentMessage/delta","params":{"threadId":"thread-fork-source","turnId":"turn-later","itemId":"answer-later","delta":"Later answer"}}""");
         transport.ServerSend("""{"method":"turn/completed","params":{"threadId":"thread-fork-source","turn":{"id":"turn-later","status":"completed","items":[]}}}""");
-        await WaitUntilAsync(() => !viewModel.IsTurnRunning, "fork source later turn completed");
+        await StateProbe.WaitForAsync(() => !viewModel.IsTurnRunning, "fork source later turn completed");
 
         var forkPoint = viewModel.TaskWorkspace.ConversationTurns[0];
         Assert(viewModel.TaskWorkspace.ForkConversationCommand.CanExecute(forkPoint), "completed assistant response can be forked");
@@ -234,7 +233,7 @@ internal static class PromptEditingTests
             """{"id":REQUEST_ID,"result":{"thread":{"id":"thread-fork-result"}}}"""
                 .Replace("REQUEST_ID", forkRequestId.ToString(), StringComparison.Ordinal));
 
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => viewModel.StatusMessage == "Conversation forked from the selected response",
             "response fork completion");
         Assert(transport.ClientMessages.Count == 7, "response fork sends no post-fork rollback request");
@@ -250,7 +249,8 @@ internal static class PromptEditingTests
         await viewModel.DisposeAsync();
     }
 
-    private static Task TaskTranscriptExposesPromptEditControlsAsync()
+    [Fact(DisplayName = "task transcript exposes prompt edit controls")]
+    public Task TaskTranscriptExposesPromptEditControlsAsync()
     {
         var root = FindRepositoryRoot();
         var xaml = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "TaskConversationView.xaml"));
@@ -327,27 +327,12 @@ internal static class PromptEditingTests
         return current;
     }
 
-    private static async Task WaitUntilAsync(Func<bool> condition, string label)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (!condition())
-        {
-            try
-            {
-                await Task.Delay(20, timeout.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                throw new InvalidOperationException($"Timed out waiting for {label}.");
-            }
-        }
-    }
 
     private static async Task CompleteAutomaticThreadRenameAsync(
         FakeAppServerTransport transport,
         string threadId)
     {
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(
             () => transport.ClientMessages.Any(message =>
                 ReadString(ParseMessage(message), "method") == "thread/name/set" &&
                 ReadString(ParseMessage(message), "params.threadId") == threadId),

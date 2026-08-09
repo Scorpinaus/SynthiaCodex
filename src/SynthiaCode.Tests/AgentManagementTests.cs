@@ -8,17 +8,14 @@ using SynthiaCode.App.Views;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Infrastructure.Codex;
 
-internal static class AgentManagementTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class AgentManagementTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("collaboration events project active and done agents", CollaborationEventsProjectAgentGroupsAsync),
-        ("thread read retains collaboration agents for restored panels", ThreadReadRetainsCollaborationAgentsAsync),
-        ("agent transcript open steer and stop controls target the subagent", AgentControlsTargetSubagentAsync),
-        ("task view renders accessible agent groups controls and transcript", TaskViewRendersAgentManagementAsync)
-    ];
 
-    private static Task CollaborationEventsProjectAgentGroupsAsync()
+
+    [Fact(DisplayName = "collaboration events project active and done agents")]
+    public Task CollaborationEventsProjectAgentGroupsAsync()
     {
         var viewModel = CreateViewModel(new AgentActionStub());
         viewModel.ApplyConversationSnapshot(CreateAgentSnapshot());
@@ -34,7 +31,8 @@ internal static class AgentManagementTests
         return Task.CompletedTask;
     }
 
-    private static async Task ThreadReadRetainsCollaborationAgentsAsync()
+    [Fact(DisplayName = "thread read retains collaboration agents for restored panels")]
+    public async Task ThreadReadRetainsCollaborationAgentsAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = new CodexAppServerClient(
@@ -60,7 +58,8 @@ internal static class AgentManagementTests
         Assert(activity.CollaborationPrompt == "Restore me.", "restored activity keeps the spawn prompt");
     }
 
-    private static async Task AgentControlsTargetSubagentAsync()
+    [Fact(DisplayName = "agent transcript open steer and stop controls target the subagent")]
+    public async Task AgentControlsTargetSubagentAsync()
     {
         var actions = new AgentActionStub
         {
@@ -105,7 +104,8 @@ internal static class AgentManagementTests
         Assert(!viewModel.IsAgentTranscriptOpen && viewModel.SelectedAgent is null, "transcript closes without discarding agent history");
     }
 
-    private static Task TaskViewRendersAgentManagementAsync() => WpfTestHost.RunAsync(() =>
+    [Fact(DisplayName = "task view renders accessible agent groups controls and transcript")]
+    public Task TaskViewRendersAgentManagementAsync() => WpfTestHost.RunAsync(() =>
     {
         Application.Current.Resources["BooleanToVisibilityConverter"] = new BooleanToVisibilityConverter();
         Application.Current.Resources["InverseBooleanToVisibilityConverter"] = new InverseBooleanToVisibilityConverter();

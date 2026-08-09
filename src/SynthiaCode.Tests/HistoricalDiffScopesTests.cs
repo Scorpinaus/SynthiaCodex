@@ -8,7 +8,9 @@ using SynthiaCode.Core.Logging;
 using SynthiaCode.Harnesses.Codex;
 using SynthiaCode.Infrastructure.Git;
 
-internal static class HistoricalDiffScopesTests
+[Trait("Category", TestCategories.InfrastructureIntegration)]
+[Collection(TestCategories.NativeCollection)]
+public sealed class HistoricalDiffScopesTests
 {
     private const string LatestTurnDiff = """
         diff --git a/src/latest.cs b/src/latest.cs
@@ -20,15 +22,10 @@ internal static class HistoricalDiffScopesTests
         +new
         """;
 
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("historical diff: aggregate diffs split into per-file comparison documents", ParsesAggregateDiffDocumentsAsync),
-        ("historical diff: git commit and branch scopes use exact comparisons", LoadsExactCommitAndMergeBaseBranchAsync),
-        ("historical diff: app-server turn diffs survive bounded latest-turn persistence", PersistsLatestTurnDiffAsync),
-        ("historical diff: scopes render through the changes view model read-only", RoutesHistoricalScopesReadOnlyAsync)
-    ];
 
-    private static Task ParsesAggregateDiffDocumentsAsync()
+
+    [Fact(DisplayName = "historical diff: aggregate diffs split into per-file comparison documents")]
+    public Task ParsesAggregateDiffDocumentsAsync()
     {
         var diff = """
             diff --git a/old.cs b/new.cs
@@ -57,7 +54,8 @@ internal static class HistoricalDiffScopesTests
         return Task.CompletedTask;
     }
 
-    private static async Task LoadsExactCommitAndMergeBaseBranchAsync()
+    [Fact(DisplayName = "historical diff: git commit and branch scopes use exact comparisons")]
+    public async Task LoadsExactCommitAndMergeBaseBranchAsync()
     {
         using var workspace = TempWorkspace.Create();
         var root = workspace.CreateDirectory("historical-scope-repo");
@@ -84,7 +82,8 @@ internal static class HistoricalDiffScopesTests
         Assert(commit[0].File.StatusSummary == "Commit" && branch[0].File.StatusSummary == "Branch", "comparison labels identify their scopes");
     }
 
-    private static Task PersistsLatestTurnDiffAsync()
+    [Fact(DisplayName = "historical diff: app-server turn diffs survive bounded latest-turn persistence")]
+    public Task PersistsLatestTurnDiffAsync()
     {
         var notification = CodexAppServerNotification.Decode(new AppServerNotification(
             CodexAppServerNotificationMethods.TurnDiffUpdated,
@@ -123,7 +122,8 @@ internal static class HistoricalDiffScopesTests
         return Task.CompletedTask;
     }
 
-    private static async Task RoutesHistoricalScopesReadOnlyAsync()
+    [Fact(DisplayName = "historical diff: scopes render through the changes view model read-only")]
+    public async Task RoutesHistoricalScopesReadOnlyAsync()
     {
         using var workspace = TempWorkspace.Create();
         var root = workspace.CreateDirectory("historical-view-model-repo");
@@ -141,7 +141,7 @@ internal static class HistoricalDiffScopesTests
 
         Assert(viewModel.SelectedDiffScope.Scope == GitDiffScope.Unstaged, "unstaged remains the default scope");
         viewModel.SelectedDiffScope = viewModel.DiffScopes.Single(scope => scope.Scope == GitDiffScope.Commit);
-        await WaitUntilAsync(() => !viewModel.IsBusy && viewModel.ChangedFiles.Any(file => file.Path == "commit.cs"));
+        await StateProbe.WaitForAsync(() => !viewModel.IsBusy && viewModel.ChangedFiles.Any(file => file.Path == "commit.cs"));
         Assert(!viewModel.StageCommand.CanExecute(null) && !viewModel.DiscardCommand.CanExecute(null), "commit comparisons are read-only");
 
         viewModel.SelectedDiffScope = viewModel.DiffScopes.Single(scope => scope.Scope == GitDiffScope.LastTurn);
@@ -180,14 +180,6 @@ internal static class HistoricalDiffScopesTests
         return output;
     }
 
-    private static async Task WaitUntilAsync(Func<bool> condition)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        while (!condition())
-        {
-            await Task.Delay(10, timeout.Token);
-        }
-    }
 
     private static void Assert(bool condition, string message)
     {

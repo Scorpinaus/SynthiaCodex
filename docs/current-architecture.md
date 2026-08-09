@@ -3,12 +3,12 @@
 **Recorded:** 9 August 2026
 **Last code-verified:** 9 August 2026
 **Release:** 0.1.0
-**Phase:** Architecture migration Phase 4, with presentation split by feature
-**Purpose:** Describe the current architecture, presentation shell, runtime and persistence boundaries, implemented desktop workflows, and release verification baseline.
+**Phase:** Architecture migration Phase 5, with modern xUnit test boundaries
+**Purpose:** Describe the current architecture, presentation shell, runtime and persistence boundaries, test boundaries, implemented desktop workflows, and release verification baseline.
 
 ## System shape
 
-The solution is a Windows-only WPF desktop application with eight projects:
+The solution is a Windows-only WPF desktop application with ten projects:
 
 | Project | Responsibility | Dependencies |
 | --- | --- | --- |
@@ -19,7 +19,9 @@ The solution is a Windows-only WPF desktop application with eight projects:
 | `SynthiaCode.Harnesses.Codex` | Adapter from neutral harness commands/events to Codex app-server types, operations, and notifications | Application and Core |
 | `SynthiaCode.Harnesses.InMemory` | Deterministic, process-free harness implementation used to prove and test the provider boundary | Application and Core |
 | `SynthiaCode.App` | WPF composition root, windows, theme resources, feature view models, Markdown policies and rendering, UI services, and Codex-specific side features such as review, goals, and skills | Application, Core, Codex harness, Infrastructure, and Presentation |
-| `SynthiaCode.Tests` | xUnit-discovered behavioral and integration-style test suite; the executable entry point remains only as a UTF-8 transport fixture | All production projects plus the in-memory harness |
+| `SynthiaCode.Tests.Unit` | Portable xUnit unit and architecture tests | Application, Core, Presentation, and both harnesses |
+| `SynthiaCode.Tests` | Windows xUnit library with protocol-contract, infrastructure-integration, native-process, and WPF categories | All production projects, both harnesses, and the Unicode fixture |
+| `SynthiaCode.UnicodeEchoFixture` | Tiny process fixture that echoes one UTF-8 line for transport integration tests | None |
 
 The actual project-reference graph is:
 
@@ -40,6 +42,12 @@ flowchart LR
     Tests --> Presentation
     Tests --> InMemory
     Tests --> CodexHarness
+    Tests --> UnicodeFixture["SynthiaCode.UnicodeEchoFixture"]
+    UnitTests["SynthiaCode.Tests.Unit"] --> Application
+    UnitTests --> Core
+    UnitTests --> Presentation
+    UnitTests --> InMemory
+    UnitTests --> CodexHarness
 ```
 
 `AppServices.Create()` is the manual composition root. It constructs concrete infrastructure, wraps `SplitJsonSettingsStore` in `CoalescingSettingsStore`, registers the production `CodexHarness`, creates one `ConversationFeatureFacade`, and supplies that facade to `MainViewModel`. `SynthiaCode.Harnesses.InMemory` is referenced by tests but is not registered in the production app. There is no external dependency-injection container.
@@ -400,9 +408,11 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 
 ## Testing, build, and delivery
 
-`dotnet test SynthiaCode.sln` is the authoritative local gate on Windows with the .NET 10 SDK selected by `global.json`. The test project references every production layer plus the in-memory harness. Coverage combines pure contract/reducer/use-case tests, fake app-server transports, deterministic harness parity tests, temporary-repository Git/worktree tests, local bare-repository push integration tests, and WPF presentation tests hosted on a dedicated STA dispatcher. Test collections and process-level test parallelism are disabled because WPF application state, native terminal resources, and shared process fixtures require deterministic ownership.
+`dotnet test SynthiaCode.sln` is the authoritative local gate on Windows with the .NET 10 SDK selected by `global.json`. `SynthiaCode.Tests.Unit` targets `net10.0` and references only the portable Application, Core, Presentation, and harness projects. It has no App, Infrastructure, Windows, or WPF dependency. `SynthiaCode.Tests` targets Windows and owns protocol, infrastructure, native-process, and WPF coverage. The dedicated Unicode echo fixture remains a separate executable.
 
-Repository-wide build policy lives in `.editorconfig`, `Directory.Build.props`, and `Directory.Packages.props`. Builds are deterministic, CI treats warnings as errors, and external package versions are centrally owned. `ArchitectureBoundaryTests` locks the production project graph, namespace ownership and forbidden upward imports, and confines WPF/Windows targeting to the App project. Phase 0 golden characterization tests preserve conversation reduction, queued dispatch, reconnect, and persistence-migration behavior. Phase 1 architecture tests pin Application ownership, the single facade constructor boundary, callback-free requests, detached workspace events, and terminal turn ordering. Phase 2 tests pin repository ownership, the unchanged in-memory settings shape, split-file contents, one-time release import, strictly sequential migrations, and generation recovery. Phase 3 tests pin the public protocol facade, internal connection and parser parts, feature codec groups, out-of-order response matching, incoming-message routing, and invalid JSON failure. Phase 4 tests pin the WPF-free Presentation project, the five task controls and feature models, Markdown parser-policy-renderer separation, and the four Git presentation components.
+The 307 former delegate-driven behavioral cases now have normal xUnit `[Fact]` discovery and stable display names. The old mixed legacy class is split into protocol, infrastructure, and WPF test classes, with shared helpers in a fact-free base. Traits separate `Unit`, `ProtocolContract`, `InfrastructureIntegration`, and `Wpf` gates. Pure and fake-only tests can run in parallel. Infrastructure, native-process, and WPF collections have explicit non-parallel ownership. Timing-sensitive tests use an injectable `TimeProvider`, a manual test clock, state-event probes, and retained message probes. Architecture tests reject state-polling helpers, delayed polling loops, pure tests compiled by the Windows project, and mixed serial collection ownership. Both test assemblies are libraries.
+
+Repository-wide build policy lives in `.editorconfig`, `Directory.Build.props`, and `Directory.Packages.props`. Builds are deterministic, CI treats warnings as errors, and external package versions are centrally owned. `ArchitectureBoundaryTests` locks the production project graph, namespace ownership and forbidden upward imports, and confines WPF/Windows targeting to the App project. Phase 0 golden characterization tests preserve conversation reduction, queued dispatch, reconnect, and persistence-migration behavior. Phase 1 architecture tests pin Application ownership, the single facade constructor boundary, callback-free requests, detached workspace events, and terminal turn ordering. Phase 2 tests pin repository ownership, the unchanged in-memory settings shape, split-file contents, one-time release import, strictly sequential migrations, and generation recovery. Phase 3 tests pin the public protocol facade, internal connection and parser parts, feature codec groups, out-of-order response matching, incoming-message routing, and invalid JSON failure. Phase 4 tests pin the WPF-free Presentation project, the five task controls and feature models, Markdown parser-policy-renderer separation, and the four Git presentation components. Phase 5 tests pin fact discovery, the dedicated fixture executable, the portable unit project, polling rejection, category parallelism, serialized collection ownership, and controllable timing primitives.
 
 GitHub Actions restores and runs the Release test suite on `windows-latest`. Main-branch, tag, and manual workflows publish a self-contained `win-x64` portable folder; a tag matching the app project's semantic version also produces a ZIP and SHA-256 checksum GitHub release. The app project is `net10.0-windows`/WPF; the non-WPF Core, Presentation, Application, harness, and Infrastructure libraries target `net10.0`.
 

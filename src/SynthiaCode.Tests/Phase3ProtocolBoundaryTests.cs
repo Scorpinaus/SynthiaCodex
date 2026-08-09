@@ -5,6 +5,7 @@ using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Infrastructure.Codex;
 using Xunit;
 
+[Trait("Category", TestCategories.ProtocolContract)]
 public sealed class Phase3ProtocolBoundaryTests
 {
     [Fact]

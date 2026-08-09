@@ -4,6 +4,8 @@ using SynthiaCode.Core.Settings;
 using SynthiaCode.Infrastructure.Settings;
 using Xunit;
 
+[Trait("Category", TestCategories.InfrastructureIntegration)]
+[Collection(TestCategories.NativeCollection)]
 public sealed class HarnessPersistenceMigrationTests
 {
     [Fact]

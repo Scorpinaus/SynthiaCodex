@@ -6,6 +6,8 @@ using SynthiaCode.Core.Settings;
 using SynthiaCode.Harnesses.InMemory;
 using Xunit;
 
+[Trait("Category", TestCategories.InfrastructureIntegration)]
+[Collection(TestCategories.NativeCollection)]
 public sealed class HarnessWorkflowParityTests
 {
     [Fact]

@@ -2,18 +2,14 @@ using SynthiaCode.App.ViewModels;
 using SynthiaCode.Core.Projects;
 using SynthiaCode.Core.Settings;
 
-internal static class Phase5DNavigationTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class Phase5DNavigationTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("project navigation groups threads and expands selection", NavigationGroupsThreadsAsync),
-        ("expanding a project retains the active chat", ExpandingProjectRetainsActiveChatAsync),
-        ("chat and project sections toggle independently", NavigationSectionsToggleIndependentlyAsync),
-        ("project navigation preserves compact actionable statuses", CompactStatusesAreActionableAsync),
-        ("project plus creates current-checkout threads", ProjectCreationActionsChooseWorkspaceAsync)
-    ];
 
-    private static Task NavigationGroupsThreadsAsync()
+
+    [Fact(DisplayName = "project navigation groups threads and expands selection")]
+    public Task NavigationGroupsThreadsAsync()
     {
         ProjectThreadViewModel? viewModel = null;
         viewModel = CreateViewModel(parameter =>
@@ -62,7 +58,8 @@ internal static class Phase5DNavigationTests
         return Task.CompletedTask;
     }
 
-    private static Task ExpandingProjectRetainsActiveChatAsync()
+    [Fact(DisplayName = "expanding a project retains the active chat")]
+    public Task ExpandingProjectRetainsActiveChatAsync()
     {
         ProjectThreadViewModel? viewModel = null;
         var openedProjects = new List<string>();
@@ -113,7 +110,8 @@ internal static class Phase5DNavigationTests
         return Task.CompletedTask;
     }
 
-    private static Task CompactStatusesAreActionableAsync()
+    [Fact(DisplayName = "project navigation preserves compact actionable statuses")]
+    public Task CompactStatusesAreActionableAsync()
     {
         var thread = new ProjectThreadState { TurnStatus = "Completed" };
         Assert(!thread.HasActionableStatus, "completed status is hidden");
@@ -135,7 +133,8 @@ internal static class Phase5DNavigationTests
         return Task.CompletedTask;
     }
 
-    private static Task NavigationSectionsToggleIndependentlyAsync()
+    [Fact(DisplayName = "chat and project sections toggle independently")]
+    public Task NavigationSectionsToggleIndependentlyAsync()
     {
         var viewModel = CreateViewModel(_ => Task.CompletedTask);
 
@@ -160,7 +159,8 @@ internal static class Phase5DNavigationTests
         return Task.CompletedTask;
     }
 
-    private static Task ProjectCreationActionsChooseWorkspaceAsync()
+    [Fact(DisplayName = "project plus creates current-checkout threads")]
+    public Task ProjectCreationActionsChooseWorkspaceAsync()
     {
         ProjectThreadViewModel? viewModel = null;
         var createdModes = new List<string>();

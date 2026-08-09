@@ -17,21 +17,14 @@ using SynthiaCode.Infrastructure.Git;
 using SynthiaCode.Infrastructure.Projects;
 using SynthiaCode.Infrastructure.Workspaces;
 
-internal static class CodeReviewWorkflowTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class CodeReviewWorkflowTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("code review protocol sends every official target", ProtocolSendsOfficialTargetsAsync),
-        ("code review protocol restores dedicated reviewer history", ProtocolRestoresReviewerHistoryAsync),
-        ("code review reducer projects and persists findings", ReducerProjectsAndPersistsFindingsAsync),
-        ("code review use case owns pending and failed transitions", UseCaseOwnsTransitionsAsync),
-        ("code review Git catalog discovers branches and commits", GitCatalogDiscoversTargetsAsync),
-        ("code review main workflow streams findings through review start", MainWorkflowStreamsFindingsAsync),
-        ("code review composer routes exact slash command", ComposerRoutesExactSlashCommandAsync),
-        ("code review picker renders accessible target controls", PickerRendersAccessibleTargetsAsync)
-    ];
 
-    private static async Task ProtocolSendsOfficialTargetsAsync()
+
+    [Fact(DisplayName = "code review protocol sends every official target")]
+    public async Task ProtocolSendsOfficialTargetsAsync()
     {
         var transport = new FakeAppServerTransport();
         await using var client = new CodexAppServerClient(
@@ -130,7 +123,8 @@ internal static class CodeReviewWorkflowTests
             "empty custom instructions are rejected");
     }
 
-    private static async Task ProtocolRestoresReviewerHistoryAsync()
+    [Fact(DisplayName = "code review protocol restores dedicated reviewer history")]
+    public async Task ProtocolRestoresReviewerHistoryAsync()
     {
         var transport = new FakeAppServerTransport();
         await using var client = new CodexAppServerClient(
@@ -152,7 +146,8 @@ internal static class CodeReviewWorkflowTests
         Assert(turn.AssistantResponse.Contains("[P1]", StringComparison.Ordinal), "history restores final findings");
     }
 
-    private static Task ReducerProjectsAndPersistsFindingsAsync()
+    [Fact(DisplayName = "code review reducer projects and persists findings")]
+    public Task ReducerProjectsAndPersistsFindingsAsync()
     {
         var service = new CodexThreadService();
         service.Restore("thread-review", null, null, null);
@@ -188,7 +183,8 @@ internal static class CodeReviewWorkflowTests
         return Task.CompletedTask;
     }
 
-    private static async Task UseCaseOwnsTransitionsAsync()
+    [Fact(DisplayName = "code review use case owns pending and failed transitions")]
+    public async Task UseCaseOwnsTransitionsAsync()
     {
         var threadWorkspace = new CodexThreadWorkspace();
         threadWorkspace.GetOrCreate("thread-review");
@@ -228,7 +224,8 @@ internal static class CodeReviewWorkflowTests
         Assert(!failedConversations.IsRunning("thread-failed"), "failed review is not left running");
     }
 
-    private static async Task GitCatalogDiscoversTargetsAsync()
+    [Fact(DisplayName = "code review Git catalog discovers branches and commits")]
+    public async Task GitCatalogDiscoversTargetsAsync()
     {
         using var temp = TempWorkspace.Create();
         var repository = temp.CreateDirectory("ReviewRepo");
@@ -253,7 +250,8 @@ internal static class CodeReviewWorkflowTests
         Assert(catalog.Commits.All(commit => commit.Sha.Length == 40 && commit.ShortSha.Length > 0), "commit identities are selectable");
     }
 
-    private static async Task ComposerRoutesExactSlashCommandAsync()
+    [Fact(DisplayName = "code review composer routes exact slash command")]
+    public async Task ComposerRoutesExactSlashCommandAsync()
     {
         var normalSubmitCount = 0;
         var conversation = new TaskConversationActionStub
@@ -276,16 +274,17 @@ internal static class CodeReviewWorkflowTests
 
         viewModel.Prompt = " /review ";
         viewModel.SubmitCommand.Execute(null);
-        await WaitUntilAsync(() => reviews.StartCount == 1, "exact review command routed");
+        await StateProbe.WaitForAsync(() => reviews.StartCount == 1, "exact review command routed");
         Assert(reviews.StartCount == 1 && normalSubmitCount == 0, "exact slash command avoids a normal turn");
 
         viewModel.Prompt = "/review focus on tests";
         viewModel.SubmitCommand.Execute(null);
-        await WaitUntilAsync(() => normalSubmitCount == 1, "non-exact command submitted normally");
+        await StateProbe.WaitForAsync(() => normalSubmitCount == 1, "non-exact command submitted normally");
         Assert(viewModel.StartCodeReviewCommand.CanExecute(null), "visible review action shares review availability");
     }
 
-    private static async Task MainWorkflowStreamsFindingsAsync()
+    [Fact(DisplayName = "code review main workflow streams findings through review start")]
+    public async Task MainWorkflowStreamsFindingsAsync()
     {
         using var temp = TempWorkspace.Create();
         var projectPath = temp.CreateDirectory("ReviewWorkflow");
@@ -342,7 +341,7 @@ internal static class CodeReviewWorkflowTests
         Assert(ReadString(reviewStart, "method") == "review/start", "main workflow uses the dedicated review method");
         Assert(ReadString(reviewStart, "params.target.type") == "uncommittedChanges", "picker target reaches app-server");
         transport.ServerSend("""{"id":2,"result":{"turn":{"id":"turn-review"},"reviewThreadId":"thread-review"}}""");
-        await WaitUntilAsync(() => viewModel.IsTurnRunning, "review turn running");
+        await StateProbe.WaitForAsync(() => viewModel.IsTurnRunning, "review turn running");
 
         transport.ServerSend(
             """
@@ -356,8 +355,8 @@ internal static class CodeReviewWorkflowTests
             """
             {"method":"turn/completed","params":{"threadId":"thread-review","turn":{"id":"turn-review","status":"completed","items":[]}}}
             """);
-        await WaitUntilAsync(() => !viewModel.IsTurnRunning, "review turn completed");
-        await WaitUntilAsync(
+        await StateProbe.WaitForAsync(() => !viewModel.IsTurnRunning, "review turn completed");
+        await StateProbe.WaitForAsync(
             () => viewModel.TaskWorkspace.ConversationTurns.SingleOrDefault()?.AssistantResponse.Contains("[P1]", StringComparison.Ordinal) == true,
             "review findings projected");
 
@@ -369,7 +368,8 @@ internal static class CodeReviewWorkflowTests
         Assert(string.IsNullOrEmpty(viewModel.TaskWorkspace.Prompt), "successful slash review clears the composer");
     }
 
-    private static Task PickerRendersAccessibleTargetsAsync() => WpfTestHost.RunAsync(() =>
+    [Fact(DisplayName = "code review picker renders accessible target controls")]
+    public Task PickerRendersAccessibleTargetsAsync() => WpfTestHost.RunAsync(() =>
     {
         var resources = Application.Current.Resources;
         resources["CompactButton"] = new Style(typeof(Button));
@@ -452,15 +452,6 @@ internal static class CodeReviewWorkflowTests
         }
     }
 
-    private static async Task WaitUntilAsync(Func<bool> condition, string label)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        while (!condition())
-        {
-            await Task.Delay(10, timeout.Token);
-        }
-        Assert(condition(), label);
-    }
 
     private static void AssertThrows<TException>(Action action, string message) where TException : Exception
     {

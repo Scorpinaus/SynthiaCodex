@@ -1,6 +1,7 @@
 using SynthiaCode.Core.Codex.AppServer;
 using Xunit;
 
+[Trait("Category", TestCategories.Unit)]
 public sealed class QueuedTurnOptionResolverTests
 {
     [Fact]

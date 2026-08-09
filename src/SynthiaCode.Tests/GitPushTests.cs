@@ -6,24 +6,14 @@ using SynthiaCode.Core.Git;
 using SynthiaCode.Core.Projects;
 using SynthiaCode.Infrastructure.Git;
 
-internal static class GitPushTests
+[Trait("Category", TestCategories.InfrastructureIntegration)]
+[Collection(TestCategories.NativeCollection)]
+public sealed class GitPushTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("git push uses an existing upstream", PushesToExistingUpstreamAsync),
-        ("git push creates the first upstream with one remote", CreatesFirstUpstreamAsync),
-        ("git push reports a missing remote", ReportsMissingRemoteAsync),
-        ("git push refuses ambiguous remotes", RefusesAmbiguousRemotesAsync),
-        ("git push refuses detached HEAD", RefusesDetachedHeadAsync),
-        ("git push preserves slash branch names", PreservesSlashBranchNamesAsync),
-        ("canceling git push performs no mutation", CancelsWithoutMutationAsync),
-        ("git push reports a sanitized rejection", ReportsSanitizedRejectionAsync),
-        ("git push targets the displayed repository root", TargetsDisplayedRepositoryRootAsync),
-        ("git push refreshes repository state after success", RefreshesStateAfterSuccessAsync),
-        ("git push command tracks named branch and busy state", TracksCommandStateAsync)
-    ];
 
-    private static async Task PushesToExistingUpstreamAsync()
+
+    [Fact(DisplayName = "git push uses an existing upstream")]
+    public async Task PushesToExistingUpstreamAsync()
     {
         using var workspace = TempWorkspace.Create();
         var repository = await CreateRepositoryAsync(workspace, "existing-upstream");
@@ -46,7 +36,8 @@ internal static class GitPushTests
         Assert(remoteHead == expectedHead, "existing upstream receives the new commit");
     }
 
-    private static async Task CreatesFirstUpstreamAsync()
+    [Fact(DisplayName = "git push creates the first upstream with one remote")]
+    public async Task CreatesFirstUpstreamAsync()
     {
         using var workspace = TempWorkspace.Create();
         var repository = await CreateRepositoryAsync(workspace, "first-upstream");
@@ -65,7 +56,8 @@ internal static class GitPushTests
         Assert(!string.IsNullOrWhiteSpace(await RunGitAsync(remote, "rev-parse", "refs/heads/main")), "remote branch is created");
     }
 
-    private static async Task ReportsMissingRemoteAsync()
+    [Fact(DisplayName = "git push reports a missing remote")]
+    public async Task ReportsMissingRemoteAsync()
     {
         using var workspace = TempWorkspace.Create();
         var repository = await CreateRepositoryAsync(workspace, "no-remote");
@@ -75,7 +67,8 @@ internal static class GitPushTests
         Assert(exception.Message.Contains("No Git remotes", StringComparison.Ordinal), "missing remote error is actionable");
     }
 
-    private static async Task RefusesAmbiguousRemotesAsync()
+    [Fact(DisplayName = "git push refuses ambiguous remotes")]
+    public async Task RefusesAmbiguousRemotesAsync()
     {
         using var workspace = TempWorkspace.Create();
         var repository = await CreateRepositoryAsync(workspace, "ambiguous-remotes");
@@ -90,7 +83,8 @@ internal static class GitPushTests
         Assert(exception.Message.Contains("Configure an upstream", StringComparison.Ordinal), "ambiguous remotes require explicit configuration");
     }
 
-    private static async Task RefusesDetachedHeadAsync()
+    [Fact(DisplayName = "git push refuses detached HEAD")]
+    public async Task RefusesDetachedHeadAsync()
     {
         using var workspace = TempWorkspace.Create();
         var repository = await CreateRepositoryAsync(workspace, "detached-head");
@@ -103,7 +97,8 @@ internal static class GitPushTests
         Assert(exception.Message.Contains("detached HEAD", StringComparison.Ordinal), "detached HEAD error is explicit");
     }
 
-    private static async Task PreservesSlashBranchNamesAsync()
+    [Fact(DisplayName = "git push preserves slash branch names")]
+    public async Task PreservesSlashBranchNamesAsync()
     {
         using var workspace = TempWorkspace.Create();
         const string branch = "feature/native-push";
@@ -120,7 +115,8 @@ internal static class GitPushTests
         Assert(!string.IsNullOrWhiteSpace(await RunGitAsync(remote, "rev-parse", $"refs/heads/{branch}")), "slash branch is created remotely");
     }
 
-    private static async Task CancelsWithoutMutationAsync()
+    [Fact(DisplayName = "canceling git push performs no mutation")]
+    public async Task CancelsWithoutMutationAsync()
     {
         using var workspace = TempWorkspace.Create();
         var repository = workspace.CreateDirectory("cancel-push");
@@ -140,7 +136,8 @@ internal static class GitPushTests
         Assert(interactions.LastConfirmation?.Contains("Upstream: will be created", StringComparison.Ordinal) == true, "confirmation explains upstream creation");
     }
 
-    private static async Task ReportsSanitizedRejectionAsync()
+    [Fact(DisplayName = "git push reports a sanitized rejection")]
+    public async Task ReportsSanitizedRejectionAsync()
     {
         using var workspace = TempWorkspace.Create();
         var repository = await CreateRepositoryAsync(workspace, "rejected-local");
@@ -162,7 +159,8 @@ internal static class GitPushTests
         Assert(!exception.Message.Contains(remote, StringComparison.OrdinalIgnoreCase), "rejection does not expose the remote URL or path");
     }
 
-    private static async Task TargetsDisplayedRepositoryRootAsync()
+    [Fact(DisplayName = "git push targets the displayed repository root")]
+    public async Task TargetsDisplayedRepositoryRootAsync()
     {
         using var workspace = TempWorkspace.Create();
         var primary = workspace.CreateDirectory("primary-repository");
@@ -181,7 +179,8 @@ internal static class GitPushTests
         Assert(PathsEqual(service.PushRoots[0], secondary), "push uses the displayed repository root");
     }
 
-    private static async Task RefreshesStateAfterSuccessAsync()
+    [Fact(DisplayName = "git push refreshes repository state after success")]
+    public async Task RefreshesStateAfterSuccessAsync()
     {
         using var workspace = TempWorkspace.Create();
         var repository = workspace.CreateDirectory("refresh-after-push");
@@ -196,7 +195,8 @@ internal static class GitPushTests
         Assert(viewModel.StatusMessage.Contains("Pushed main", StringComparison.Ordinal), "successful push is reported after refresh");
     }
 
-    private static async Task TracksCommandStateAsync()
+    [Fact(DisplayName = "git push command tracks named branch and busy state")]
+    public async Task TracksCommandStateAsync()
     {
         using var workspace = TempWorkspace.Create();
         var namedRoot = workspace.CreateDirectory("named-branch");

@@ -11,26 +11,17 @@ using SynthiaCode.Core.Settings;
 using SynthiaCode.Infrastructure.Attachments;
 using SynthiaCode.Infrastructure.Codex;
 
-internal static class AttachmentInputTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class AttachmentInputTests
 {
     private static readonly byte[] TinyPng = Convert.FromBase64String(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
 
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("attachment protocol serializes ordered multimodal input", ProtocolSerializesOrderedInputAsync),
-        ("attachment protocol serializes file and folder mentions", ProtocolSerializesMentionsAsync),
-        ("model catalog advertises image input capability", ModelCatalogAdvertisesImageCapabilityAsync),
-        ("managed attachment store copies validates and deduplicates images", StoreCopiesValidatesAndDeduplicatesAsync),
-        ("managed attachment store snapshots external files and folders", StoreSnapshotsExternalFilesAndFoldersAsync),
-        ("external snapshots build file folder and image prompt parts", ExternalSnapshotsBuildPromptPartsAsync),
-        ("workspace attachment resolver contains files and folders", WorkspaceResolverContainsReferencesAsync),
-        ("attachment references survive queue and settings snapshots", ReferencesSurviveQueueAndSettingsSnapshotsAsync),
-        ("composer attachment state validates model capability", ComposerAttachmentStateValidatesCapabilityAsync),
-        ("task view exposes attachment picker previews and drop target", TaskViewExposesAttachmentSurfaceAsync)
-    ];
 
-    private static async Task ProtocolSerializesOrderedInputAsync()
+
+    [Fact(DisplayName = "attachment protocol serializes ordered multimodal input")]
+    public async Task ProtocolSerializesOrderedInputAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = new CodexAppServerClient(
@@ -67,7 +58,8 @@ internal static class AttachmentInputTests
         Assert((await steerTask).TurnId == "turn_images", "steer result");
     }
 
-    private static async Task ProtocolSerializesMentionsAsync()
+    [Fact(DisplayName = "attachment protocol serializes file and folder mentions")]
+    public async Task ProtocolSerializesMentionsAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = new CodexAppServerClient(
@@ -108,7 +100,8 @@ internal static class AttachmentInputTests
         await steerTask;
     }
 
-    private static async Task ModelCatalogAdvertisesImageCapabilityAsync()
+    [Fact(DisplayName = "model catalog advertises image input capability")]
+    public async Task ModelCatalogAdvertisesImageCapabilityAsync()
     {
         await using var transport = new FakeAppServerTransport();
         await using var client = new CodexAppServerClient(
@@ -131,7 +124,8 @@ internal static class AttachmentInputTests
         Assert(!models.Single(model => model.Model == "gpt-text").SupportsImageInput, "text model rejects images");
     }
 
-    private static async Task StoreCopiesValidatesAndDeduplicatesAsync()
+    [Fact(DisplayName = "managed attachment store copies validates and deduplicates images")]
+    public async Task StoreCopiesValidatesAndDeduplicatesAsync()
     {
         using var temp = TempWorkspace.Create();
         var source = Path.Combine(temp.Root, "source.png");
@@ -153,7 +147,8 @@ internal static class AttachmentInputTests
         await AssertThrowsAsync<InvalidDataException>(() => store.ImportFileAsync(invalid), "invalid image rejected");
     }
 
-    private static async Task StoreSnapshotsExternalFilesAndFoldersAsync()
+    [Fact(DisplayName = "managed attachment store snapshots external files and folders")]
+    public async Task StoreSnapshotsExternalFilesAndFoldersAsync()
     {
         using var temp = TempWorkspace.Create();
         var sourceFile = Path.Combine(temp.Root, "article.md");
@@ -216,7 +211,8 @@ internal static class AttachmentInputTests
         Assert(queued.Attachments[1].SnapshotFileCount == 2, "queue preserves folder metadata");
     }
 
-    private static async Task ExternalSnapshotsBuildPromptPartsAsync()
+    [Fact(DisplayName = "external snapshots build file folder and image prompt parts")]
+    public async Task ExternalSnapshotsBuildPromptPartsAsync()
     {
         using var temp = TempWorkspace.Create();
         var sourceFile = Path.Combine(temp.Root, "outside.txt");
@@ -240,7 +236,8 @@ internal static class AttachmentInputTests
         Assert(inputs[3] is CodexLocalImageInput imageInput && imageInput.Path == store.ResolvePath(image), "managed image remains local image");
     }
 
-    private static Task WorkspaceResolverContainsReferencesAsync()
+    [Fact(DisplayName = "workspace attachment resolver contains files and folders")]
+    public Task WorkspaceResolverContainsReferencesAsync()
     {
         using var workspace = TempWorkspace.Create();
         var sourceFolder = Path.Combine(workspace.Root, "src");
@@ -276,7 +273,8 @@ internal static class AttachmentInputTests
         return Task.CompletedTask;
     }
 
-    private static Task ReferencesSurviveQueueAndSettingsSnapshotsAsync()
+    [Fact(DisplayName = "attachment references survive queue and settings snapshots")]
+    public Task ReferencesSurviveQueueAndSettingsSnapshotsAsync()
     {
         var image = Reference("objects/aa/image.png");
         var file = new AttachmentReference
@@ -341,7 +339,8 @@ internal static class AttachmentInputTests
         return Task.CompletedTask;
     }
 
-    private static Task ComposerAttachmentStateValidatesCapabilityAsync()
+    [Fact(DisplayName = "composer attachment state validates model capability")]
+    public Task ComposerAttachmentStateValidatesCapabilityAsync()
     {
         var viewModel = WorkspaceActionStubs.CreateTaskViewModel(WorkspaceActionStubs.Task(
             () => Task.CompletedTask,
@@ -394,7 +393,8 @@ internal static class AttachmentInputTests
         return Task.CompletedTask;
     }
 
-    private static Task TaskViewExposesAttachmentSurfaceAsync() => WpfTestHost.RunAsync(() =>
+    [Fact(DisplayName = "task view exposes attachment picker previews and drop target")]
+    public Task TaskViewExposesAttachmentSurfaceAsync() => WpfTestHost.RunAsync(() =>
     {
         var resources = Application.Current.Resources;
         resources["BooleanToVisibilityConverter"] = new BooleanToVisibilityConverter();

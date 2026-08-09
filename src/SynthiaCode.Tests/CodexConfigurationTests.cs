@@ -6,17 +6,14 @@ using SynthiaCode.App.Views;
 using SynthiaCode.Core.Codex.Configuration;
 using SynthiaCode.Infrastructure.Codex.Configuration;
 
-internal static class CodexConfigurationTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class CodexConfigurationTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("shared Codex files save atomically and reject stale edits", SharedFilesSaveAndRejectStaleEditsAsync),
-        ("Codex configuration provenance follows workspace precedence", ProvenanceFollowsWorkspacePrecedenceAsync),
-        ("Codex configuration view model edits and deep links shared files", ViewModelEditsAndDeepLinksAsync),
-        ("settings expose shared Codex editors and provenance", SettingsExposeEditorsAndProvenanceAsync)
-    ];
 
-    private static async Task SharedFilesSaveAndRejectStaleEditsAsync()
+
+    [Fact(DisplayName = "shared Codex files save atomically and reject stale edits")]
+    public async Task SharedFilesSaveAndRejectStaleEditsAsync()
     {
         using var temp = TempWorkspace.Create();
         var codexHome = temp.CreateDirectory("codex-home");
@@ -49,7 +46,8 @@ internal static class CodexConfigurationTests
             "atomic save leaves no temporary file");
     }
 
-    private static async Task ProvenanceFollowsWorkspacePrecedenceAsync()
+    [Fact(DisplayName = "Codex configuration provenance follows workspace precedence")]
+    public async Task ProvenanceFollowsWorkspacePrecedenceAsync()
     {
         using var temp = TempWorkspace.Create();
         var codexHome = temp.CreateDirectory("codex-home");
@@ -85,7 +83,8 @@ internal static class CodexConfigurationTests
             "provenance precedence increases in display order");
     }
 
-    private static async Task ViewModelEditsAndDeepLinksAsync()
+    [Fact(DisplayName = "Codex configuration view model edits and deep links shared files")]
+    public async Task ViewModelEditsAndDeepLinksAsync()
     {
         using var temp = TempWorkspace.Create();
         var codexHome = temp.CreateDirectory("codex-home");
@@ -134,7 +133,8 @@ internal static class CodexConfigurationTests
         AssertEqual("# External edit\n", await File.ReadAllTextAsync(viewModel.SharedInstructionsPath), "conflict does not overwrite");
     }
 
-    private static Task SettingsExposeEditorsAndProvenanceAsync() => WpfTestHost.RunAsync(() =>
+    [Fact(DisplayName = "settings expose shared Codex editors and provenance")]
+    public Task SettingsExposeEditorsAndProvenanceAsync() => WpfTestHost.RunAsync(() =>
     {
         var view = new DetailsView
         {

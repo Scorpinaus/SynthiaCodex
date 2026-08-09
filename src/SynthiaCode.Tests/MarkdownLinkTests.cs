@@ -10,27 +10,14 @@ using SynthiaCode.App.Services;
 using SynthiaCode.App.ViewModels;
 using SynthiaCode.Core.Codex.AppServer;
 
-internal static class MarkdownLinkTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class MarkdownLinkTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("markdown renderer formats strong assistant text", RendererFormatsStrongTextAsync),
-        ("markdown renderer formats emphasis code strike and escapes", RendererFormatsEmphasisCodeStrikeAndEscapesAsync),
-        ("markdown renderer formats headings lists tasks and rules", RendererFormatsHeadingsListsTasksAndRulesAsync),
-        ("markdown renderer formats quotes and fenced code", RendererFormatsQuotesAndFencedCodeAsync),
-        ("markdown renderer lays out pipe tables", RendererLaysOutPipeTablesAsync),
-        ("markdown link renderer recognizes safe assistant links", RendererRecognizesSafeLinksAsync),
-        ("markdown renderer embeds generated local images", RendererEmbedsGeneratedLocalImagesAsync),
-        ("image-generation notifications render an inline chat preview", ImageGenerationNotificationsRenderInlinePreviewAsync),
-        ("generated image viewer loads an expanded image", GeneratedImageViewerLoadsExpandedImageAsync),
-        ("generated image editor renders rectangle and freehand region guides", GeneratedImageEditorRendersRegionGuidesAsync),
-        ("generated image editor increases and decreases the draw brush size", GeneratedImageEditorAdjustsDrawBrushSizeAsync),
-        ("markdown link renderer preserves unsafe and malformed links", RendererPreservesUnsafeAndMalformedLinksAsync),
-        ("markdown link renderer routes link activation through its command", RendererRoutesLinkActivationAsync),
-        ("external link policy permits only web destinations", ExternalLinkPolicyPermitsOnlyWebDestinations)
-    ];
 
-    private static Task RendererFormatsStrongTextAsync() => RunOnStaAsync(() =>
+
+    [Fact(DisplayName = "markdown renderer formats strong assistant text")]
+    public Task RendererFormatsStrongTextAsync() => RunOnStaAsync(() =>
     {
         var renderer = new MarkdownTextBlock
         {
@@ -52,7 +39,8 @@ internal static class MarkdownLinkTests
         Assert(InlineText(unmatchedRenderer) == unmatched, "unmatched strong syntax remains visible");
     });
 
-    private static Task RendererFormatsEmphasisCodeStrikeAndEscapesAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "markdown renderer formats emphasis code strike and escapes")]
+    public Task RendererFormatsEmphasisCodeStrikeAndEscapesAsync() => RunOnStaAsync(() =>
     {
         var renderer = new MarkdownTextBlock
         {
@@ -74,7 +62,8 @@ internal static class MarkdownLinkTests
         Assert(InlineText(renderer).EndsWith("keep *literal*.", StringComparison.Ordinal), "escaped markdown punctuation remains literal");
     });
 
-    private static Task RendererFormatsHeadingsListsTasksAndRulesAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "markdown renderer formats headings lists tasks and rules")]
+    public Task RendererFormatsHeadingsListsTasksAndRulesAsync() => RunOnStaAsync(() =>
     {
         var renderer = new MarkdownTextBlock
         {
@@ -118,7 +107,8 @@ internal static class MarkdownLinkTests
         Assert(rule.Child is Border { Height: 1 }, "horizontal rules render as a one-pixel divider");
     });
 
-    private static Task RendererFormatsQuotesAndFencedCodeAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "markdown renderer formats quotes and fenced code")]
+    public Task RendererFormatsQuotesAndFencedCodeAsync() => RunOnStaAsync(() =>
     {
         var renderer = new MarkdownTextBlock
         {
@@ -161,7 +151,8 @@ internal static class MarkdownLinkTests
         Assert(InlineText(unclosedRenderer) == unclosed, "unclosed code fences remain visible verbatim");
     });
 
-    private static Task RendererLaysOutPipeTablesAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "markdown renderer lays out pipe tables")]
+    public Task RendererLaysOutPipeTablesAsync() => RunOnStaAsync(() =>
     {
         var renderer = new MarkdownTextBlock
         {
@@ -208,7 +199,8 @@ internal static class MarkdownLinkTests
         Assert(InlineText(malformedRenderer) == malformed, "invalid table-like text remains visible verbatim");
     });
 
-    private static Task RendererRecognizesSafeLinksAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "markdown link renderer recognizes safe assistant links")]
+    public Task RendererRecognizesSafeLinksAsync() => RunOnStaAsync(() =>
     {
         var renderer = new MarkdownTextBlock
         {
@@ -224,7 +216,8 @@ internal static class MarkdownLinkTests
         Assert(InlineText(links[2]) == "https://docs.example.com/guide", "bare URL is its own label");
     });
 
-    private static Task RendererEmbedsGeneratedLocalImagesAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "markdown renderer embeds generated local images")]
+    public Task RendererEmbedsGeneratedLocalImagesAsync() => RunOnStaAsync(() =>
     {
         var tempDirectory = Path.Combine(Path.GetTempPath(), $"synthiacode-markdown-image-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDirectory);
@@ -328,7 +321,8 @@ internal static class MarkdownLinkTests
         }
     });
 
-    private static Task ImageGenerationNotificationsRenderInlinePreviewAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "image-generation notifications render an inline chat preview")]
+    public Task ImageGenerationNotificationsRenderInlinePreviewAsync() => RunOnStaAsync(() =>
     {
         var tempDirectory = Path.Combine(Path.GetTempPath(), $"synthiacode-image-event-({Guid.NewGuid():N})");
         Directory.CreateDirectory(tempDirectory);
@@ -409,7 +403,8 @@ internal static class MarkdownLinkTests
         }
     });
 
-    private static Task GeneratedImageViewerLoadsExpandedImageAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "generated image viewer loads an expanded image")]
+    public Task GeneratedImageViewerLoadsExpandedImageAsync() => RunOnStaAsync(() =>
     {
         var tempDirectory = Path.Combine(Path.GetTempPath(), $"synthiacode-expanded-image-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDirectory);
@@ -432,7 +427,8 @@ internal static class MarkdownLinkTests
         }
     });
 
-    private static Task GeneratedImageEditorRendersRegionGuidesAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "generated image editor renders rectangle and freehand region guides")]
+    public Task GeneratedImageEditorRendersRegionGuidesAsync() => RunOnStaAsync(() =>
     {
         const int width = 100;
         const int height = 80;
@@ -515,7 +511,8 @@ internal static class MarkdownLinkTests
         }
     });
 
-    private static Task GeneratedImageEditorAdjustsDrawBrushSizeAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "generated image editor increases and decreases the draw brush size")]
+    public Task GeneratedImageEditorAdjustsDrawBrushSizeAsync() => RunOnStaAsync(() =>
     {
         const int width = 100;
         const int height = 80;
@@ -609,7 +606,8 @@ internal static class MarkdownLinkTests
         }
     });
 
-    private static Task RendererPreservesUnsafeAndMalformedLinksAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "markdown link renderer preserves unsafe and malformed links")]
+    public Task RendererPreservesUnsafeAndMalformedLinksAsync() => RunOnStaAsync(() =>
     {
         const string source = "[local](file:///C:/secret.txt) [script](javascript:alert(1)) [redirect](javascript:https://example.com) [unfinished](https://example.com";
         var renderer = new MarkdownTextBlock { Markdown = source };
@@ -618,7 +616,8 @@ internal static class MarkdownLinkTests
         Assert(InlineText(renderer) == source, "unsupported or malformed source remains visible verbatim");
     });
 
-    private static Task RendererRoutesLinkActivationAsync() => RunOnStaAsync(() =>
+    [Fact(DisplayName = "markdown link renderer routes link activation through its command")]
+    public Task RendererRoutesLinkActivationAsync() => RunOnStaAsync(() =>
     {
         Uri? activatedUri = null;
         var renderer = new MarkdownTextBlock
@@ -633,7 +632,8 @@ internal static class MarkdownLinkTests
         Assert(activatedUri?.AbsoluteUri == "https://example.com/docs", "link activation receives the validated URI");
     });
 
-    private static Task ExternalLinkPolicyPermitsOnlyWebDestinations()
+    [Fact(DisplayName = "external link policy permits only web destinations")]
+    public Task ExternalLinkPolicyPermitsOnlyWebDestinations()
     {
         Assert(ExternalUriPolicy.IsSupported(new Uri("https://example.com")), "https is supported");
         Assert(ExternalUriPolicy.IsSupported(new Uri("http://example.com")), "http is supported");

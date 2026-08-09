@@ -17,19 +17,14 @@ using SynthiaCode.Infrastructure.Codex;
 using SynthiaCode.Infrastructure.Projects;
 using SynthiaCode.Infrastructure.Settings;
 
-internal static class MultiFolderProjectTests
+[Trait("Category", TestCategories.Wpf)]
+[Collection(TestCategories.WpfCollection)]
+public sealed class MultiFolderProjectTests
 {
-    public static IReadOnlyList<(string Name, Func<Task> Run)> All { get; } =
-    [
-        ("multi-folder project migration preserves scoped state", ProjectMigrationPreservesState),
-        ("multi-folder Codex turns send bounded writable roots", CodexTurnSendsWritableRootsAsync),
-        ("multi-folder attachments preserve their owning root", AttachmentsPreserveOwningRoot),
-        ("multi-folder project navigation exposes edit management", ProjectNavigationExposesEditAsync),
-        ("multi-folder Git selection routes repository actions", GitSelectionRoutesActionsAsync),
-        ("multi-folder editor renders accessible folder controls", ProjectEditorRendersAccessibleControlsAsync)
-    ];
 
-    private static async Task ProjectMigrationPreservesState()
+
+    [Fact(DisplayName = "multi-folder project migration preserves scoped state")]
+    public async Task ProjectMigrationPreservesState()
     {
         using var temp = TempWorkspace.Create();
         var primary = temp.CreateDirectory("App");
@@ -129,7 +124,8 @@ internal static class MultiFolderProjectTests
         Assert(PathsEqual(restored.RecentProjects[0].FolderPaths[0], secondary), "settings round trip preserves the primary folder");
     }
 
-    private static async Task CodexTurnSendsWritableRootsAsync()
+    [Fact(DisplayName = "multi-folder Codex turns send bounded writable roots")]
+    public async Task CodexTurnSendsWritableRootsAsync()
     {
         using var temp = TempWorkspace.Create();
         var primary = temp.CreateDirectory("Primary");
@@ -169,7 +165,8 @@ internal static class MultiFolderProjectTests
         Assert(CodexSandbox.ReadOnly.ToTurnSandboxPolicy(roots)["writableRoots"] is null, "read-only is not broadened by attached roots");
     }
 
-    private static Task AttachmentsPreserveOwningRoot()
+    [Fact(DisplayName = "multi-folder attachments preserve their owning root")]
+    public Task AttachmentsPreserveOwningRoot()
     {
         using var temp = TempWorkspace.Create();
         var primary = temp.CreateDirectory("Primary");
@@ -187,7 +184,8 @@ internal static class MultiFolderProjectTests
         return Task.CompletedTask;
     }
 
-    private static async Task ProjectNavigationExposesEditAsync()
+    [Fact(DisplayName = "multi-folder project navigation exposes edit management")]
+    public async Task ProjectNavigationExposesEditAsync()
     {
         object? edited = null;
         var actions = new ProjectThreadActionStub
@@ -202,11 +200,12 @@ internal static class MultiFolderProjectTests
         var viewModel = WorkspaceActionStubs.CreateProjectThreadViewModel(actions);
         var path = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "multi-folder-edit"));
         viewModel.EditProjectCommand.Execute(path);
-        await WaitUntilAsync(() => edited is not null, "edit command dispatched");
+        await StateProbe.WaitForAsync(() => edited is not null, "edit command dispatched");
         Assert(PathsEqual(edited as string, path), "edit command targets the owning project");
     }
 
-    private static async Task GitSelectionRoutesActionsAsync()
+    [Fact(DisplayName = "multi-folder Git selection routes repository actions")]
+    public async Task GitSelectionRoutesActionsAsync()
     {
         using var temp = TempWorkspace.Create();
         var primary = temp.CreateDirectory("App");
@@ -226,11 +225,12 @@ internal static class MultiFolderProjectTests
         viewModel.SelectedRepository = viewModel.Repositories.Single(repository => PathsEqual(repository.RootPath, secondary));
         Assert(viewModel.SelectedFile?.Path == "docs.md", "selection projects the secondary changed files");
         viewModel.StageCommand.Execute(null);
-        await WaitUntilAsync(() => git.StageRoots.Count == 1, "stage action completed");
+        await StateProbe.WaitForAsync(() => git.StageRoots.Count == 1, "stage action completed");
         Assert(PathsEqual(git.StageRoots[0], secondary), "Git mutation targets the selected repository");
     }
 
-    private static Task ProjectEditorRendersAccessibleControlsAsync() => WpfTestHost.RunAsync(() =>
+    [Fact(DisplayName = "multi-folder editor renders accessible folder controls")]
+    public Task ProjectEditorRendersAccessibleControlsAsync() => WpfTestHost.RunAsync(() =>
     {
         var resources = Application.Current.Resources;
         resources["CompactButton"] = new Style(typeof(Button));
@@ -286,15 +286,6 @@ internal static class MultiFolderProjectTests
         !string.IsNullOrWhiteSpace(right) &&
         string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
 
-    private static async Task WaitUntilAsync(Func<bool> condition, string label)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-        while (!condition())
-        {
-            await Task.Delay(10, timeout.Token);
-        }
-        Assert(condition(), label);
-    }
 
     private static void AssertThrows<TException>(Action action, string message) where TException : Exception
     {

@@ -7,6 +7,7 @@ public sealed class ArchitectureBoundaryTests
         new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
             ["SynthiaCode.Core"] = [],
+            ["SynthiaCode.Presentation"] = [],
             ["SynthiaCode.Application"] = ["SynthiaCode.Core"],
             ["SynthiaCode.Infrastructure"] = ["SynthiaCode.Core"],
             ["SynthiaCode.Harnesses.Codex"] = ["SynthiaCode.Application", "SynthiaCode.Core"],
@@ -17,6 +18,7 @@ public sealed class ArchitectureBoundaryTests
                 "SynthiaCode.Core",
                 "SynthiaCode.Harnesses.Codex",
                 "SynthiaCode.Infrastructure",
+                "SynthiaCode.Presentation",
             ],
         };
 
@@ -24,6 +26,7 @@ public sealed class ArchitectureBoundaryTests
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["SynthiaCode.Core"] = "SynthiaCode.Core",
+            ["SynthiaCode.Presentation"] = "SynthiaCode.Presentation",
             ["SynthiaCode.Application"] = "SynthiaCode.Application",
             ["SynthiaCode.Infrastructure"] = "SynthiaCode.Infrastructure",
             ["SynthiaCode.Harnesses.Codex"] = "SynthiaCode.Harnesses.Codex",
@@ -38,6 +41,14 @@ public sealed class ArchitectureBoundaryTests
             [
                 "SynthiaCode.App",
                 "SynthiaCode.Application",
+                "SynthiaCode.Harnesses",
+                "SynthiaCode.Infrastructure",
+            ],
+            ["SynthiaCode.Presentation"] =
+            [
+                "SynthiaCode.App",
+                "SynthiaCode.Application",
+                "SynthiaCode.Core",
                 "SynthiaCode.Harnesses",
                 "SynthiaCode.Infrastructure",
             ],
@@ -68,7 +79,7 @@ public sealed class ArchitectureBoundaryTests
         };
 
     [Fact]
-    public void Production_project_references_match_the_phase_0_dependency_graph()
+    public void Production_project_references_match_the_current_dependency_graph()
     {
         var projectFiles = FindProductionProjectFiles();
         Assert.Equal(

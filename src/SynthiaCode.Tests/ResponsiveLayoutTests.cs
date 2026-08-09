@@ -49,10 +49,10 @@ internal static class ResponsiveLayoutTests
 
         PumpLayout(view);
 
-        var developerEditor = view.FindName("DeveloperInstructionsEditor") as TextBox;
-        var baseEditor = view.FindName("BaseInstructionsEditor") as TextBox;
-        var saveButton = view.FindName("SaveInstructionSettingsButton") as Button;
-        var resetButton = view.FindName("ResetInstructionSettingsButton") as Button;
+        var developerEditor = WpfTestHost.FindNamedDescendant<TextBox>(view, "DeveloperInstructionsEditor");
+        var baseEditor = WpfTestHost.FindNamedDescendant<TextBox>(view, "BaseInstructionsEditor");
+        var saveButton = WpfTestHost.FindNamedDescendant<Button>(view, "SaveInstructionSettingsButton");
+        var resetButton = WpfTestHost.FindNamedDescendant<Button>(view, "ResetInstructionSettingsButton");
         Assert(developerEditor is { AcceptsReturn: true, TextWrapping: TextWrapping.Wrap },
             "settings expose a multiline developer instructions editor");
         Assert(baseEditor is { AcceptsReturn: true, TextWrapping: TextWrapping.Wrap },
@@ -235,7 +235,7 @@ internal static class ResponsiveLayoutTests
         };
 
         PumpLayout(view);
-        var searchBox = view.FindName("ChatSearchBox") as TextBox
+        var searchBox = WpfTestHost.FindNamedDescendant<TextBox>(view, "ChatSearchBox")
             ?? throw new InvalidOperationException("cross-chat search box was not created");
         Assert(
             AutomationProperties.GetName(searchBox) == "Search chats and projects",
@@ -360,17 +360,19 @@ internal static class ResponsiveLayoutTests
             DateTimeOffset.UtcNow));
         var turns = new ObservableCollection<CodexConversationTurn> { turn };
         var view = new TaskView { Width = 620, Height = 520 };
-        var conversationList = (ListBox?)view.FindName("ConversationList")
+        var conversationList = WpfTestHost.FindNamedDescendant<ListBox>(view, "ConversationList")
             ?? throw new InvalidOperationException("conversation list was not found");
-        var findBox = view.FindName("FindInChatBox") as TextBox
+        var findBox = WpfTestHost.FindNamedDescendant<TextBox>(view, "FindInChatBox")
             ?? throw new InvalidOperationException("find-in-chat box was not created");
         Assert(
             AutomationProperties.GetName(findBox) == "Find text in current chat",
             "find-in-chat is exposed to automation");
         conversationList.ItemsSource = turns;
-        typeof(TaskView)
+        var conversationFeature = WpfTestHost.FindNamedDescendant<TaskConversationView>(view, "ConversationFeature")
+            ?? throw new InvalidOperationException("conversation feature was not found");
+        typeof(TaskConversationView)
             .GetField("observedTurns", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .SetValue(view, turns);
+            .SetValue(conversationFeature, turns);
 
         PumpLayout(view);
         var scroller = FindVisualDescendant<ScrollViewer>(conversationList)
@@ -476,11 +478,11 @@ internal static class ResponsiveLayoutTests
         Assert(
             !FindVisualDescendants<Expander>(view).Any(expander => Equals(expander.Header, "Run settings")),
             "Run settings expander is removed");
-        var modelOptionsButton = (Button?)view.FindName("ModelOptionsButton")
+        var modelOptionsButton = WpfTestHost.FindNamedDescendant<Button>(view, "ModelOptionsButton")
             ?? throw new InvalidOperationException("compact model options button was not found");
-        var executionPolicySelector = (ComboBox?)view.FindName("ExecutionPolicySelector")
+        var executionPolicySelector = WpfTestHost.FindNamedDescendant<ComboBox>(view, "ExecutionPolicySelector")
             ?? throw new InvalidOperationException("composer execution-policy selector was not found");
-        var modelOptionsPopup = (Popup?)view.FindName("ModelOptionsPopup")
+        var modelOptionsPopup = WpfTestHost.FindNamedDescendant<Popup>(view, "ModelOptionsPopup")
             ?? throw new InvalidOperationException("model options popup was not found");
         Assert(modelOptionsButton.MinHeight >= 32, "compact model selector has an accessible target size");
         Assert(executionPolicySelector.MinHeight >= 32, "execution-policy selector has an accessible target size");
@@ -504,7 +506,7 @@ internal static class ResponsiveLayoutTests
         PumpLayout(view);
         AssertNear(0, scroller.VerticalOffset, "streaming growth does not pull a reader away from an earlier message");
 
-        var jumpLatestButton = (Button?)view.FindName("JumpLatestButton")
+        var jumpLatestButton = WpfTestHost.FindNamedDescendant<Button>(view, "JumpLatestButton")
             ?? throw new InvalidOperationException("jump-to-latest button was not found");
         Assert(jumpLatestButton.Visibility == Visibility.Visible, "scrolling away exposes the jump-to-latest action");
         jumpLatestButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -546,12 +548,14 @@ internal static class ResponsiveLayoutTests
             turn.GeneratedImagePaths.Add(imagePath);
             var turns = new ObservableCollection<CodexConversationTurn> { turn };
             var view = new TaskView { Width = 620, Height = 520 };
-            var conversationList = (ListBox?)view.FindName("ConversationList")
+            var conversationList = WpfTestHost.FindNamedDescendant<ListBox>(view, "ConversationList")
                 ?? throw new InvalidOperationException("conversation list was not found");
             conversationList.ItemsSource = turns;
-            typeof(TaskView)
+            var conversationFeature = WpfTestHost.FindNamedDescendant<TaskConversationView>(view, "ConversationFeature")
+                ?? throw new InvalidOperationException("conversation feature was not found");
+            typeof(TaskConversationView)
                 .GetField("observedTurns", BindingFlags.Instance | BindingFlags.NonPublic)!
-                .SetValue(view, turns);
+                .SetValue(conversationFeature, turns);
 
             PumpLayout(view);
             var response = FindVisualDescendants<MarkdownTextBlock>(conversationList)
@@ -594,11 +598,11 @@ internal static class ResponsiveLayoutTests
     private static void VerifyQueuedFollowUpControls()
     {
         var taskView = new TaskView();
-        var queuePanel = taskView.FindName("QueuedFollowUpPanel") as FrameworkElement
+        var queuePanel = WpfTestHost.FindNamedDescendant<FrameworkElement>(taskView, "QueuedFollowUpPanel")
             ?? throw new InvalidOperationException("queued follow-up panel was not found");
-        var queueList = taskView.FindName("QueuedFollowUpList") as ItemsControl
+        var queueList = WpfTestHost.FindNamedDescendant<ItemsControl>(taskView, "QueuedFollowUpList")
             ?? throw new InvalidOperationException("queued follow-up list was not found");
-        var alternateButton = taskView.FindName("AlternateFollowUpButton") as Button
+        var alternateButton = WpfTestHost.FindNamedDescendant<Button>(taskView, "AlternateFollowUpButton")
             ?? throw new InvalidOperationException("alternate follow-up action was not found");
         Assert(AutomationProperties.GetName(queuePanel) == "Queued follow-ups", "queue panel has an accessible name");
         Assert(AutomationProperties.GetName(queueList) == "Queued follow-up messages", "queue list has an accessible name");

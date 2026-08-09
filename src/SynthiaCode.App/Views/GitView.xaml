@@ -109,26 +109,26 @@
                              AutomationProperties.Name="Edit inline review comment" />
                     <WrapPanel Margin="0,7,0,0">
                         <Button Content="Edit"
-                                Command="{Binding DataContext.Git.BeginEditCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                Command="{Binding DataContext.Git.Actions.BeginEditCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                 CommandParameter="{Binding}"
                                 Style="{StaticResource CompactButton}"
                                 Visibility="{Binding IsEditing, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
                                 AutomationProperties.Name="Edit inline review comment" />
                         <Button Content="Save"
-                                Command="{Binding DataContext.Git.SaveEditedCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                Command="{Binding DataContext.Git.Actions.SaveEditedCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                 CommandParameter="{Binding}"
                                 Style="{StaticResource CompactButton}"
                                 Visibility="{Binding IsEditing, Converter={StaticResource BooleanToVisibilityConverter}}"
                                 AutomationProperties.Name="Save inline review comment" />
                         <Button Content="Cancel"
-                                Command="{Binding DataContext.Git.CancelEditCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                Command="{Binding DataContext.Git.Actions.CancelEditCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                 CommandParameter="{Binding}"
                                 Style="{StaticResource CompactButton}"
                                 Margin="5,0,0,0"
                                 Visibility="{Binding IsEditing, Converter={StaticResource BooleanToVisibilityConverter}}"
                                 AutomationProperties.Name="Cancel inline review comment edit" />
                         <Button Content="Remove"
-                                Command="{Binding DataContext.Git.RemoveCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                Command="{Binding DataContext.Git.Actions.RemoveCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                 CommandParameter="{Binding}"
                                 Style="{StaticResource CompactButton}"
                                 Margin="5,0,0,0"
@@ -149,16 +149,16 @@
         </Grid.RowDefinitions>
 
         <StackPanel>
-            <TextBlock Text="{Binding Git.Branch, TargetNullValue=Changes}"
+            <TextBlock Text="{Binding Git.RepositorySelection.Branch, TargetNullValue=Changes}"
                        FontSize="16"
                        FontWeight="SemiBold"
                        TextTrimming="CharacterEllipsis"
-                       Visibility="{Binding Git.ShowsRepositorySelector, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                       Visibility="{Binding Git.RepositorySelection.ShowsRepositorySelector, Converter={StaticResource BooleanToVisibilityConverter}}" />
             <TextBlock Text="All repos"
                        FontSize="16"
                        FontWeight="SemiBold"
-                       Visibility="{Binding Git.ShowsRepositorySelector, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
-            <TextBlock Text="{Binding Git.StatusMessage}"
+                       Visibility="{Binding Git.RepositorySelection.ShowsRepositorySelector, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
+            <TextBlock Text="{Binding Git.RepositorySelection.StatusMessage}"
                        Foreground="{DynamicResource TextSecondaryBrush}"
                        FontSize="11"
                        Margin="0,3,0,0"
@@ -167,49 +167,49 @@
                        Style="{StaticResource SectionLabel}"
                        Margin="0,10,0,4" />
             <ComboBox x:Name="DiffScopeSelector"
-                      ItemsSource="{Binding Git.DiffScopes}"
-                      SelectedItem="{Binding Git.SelectedDiffScope, Mode=TwoWay}"
+                      ItemsSource="{Binding Git.Changes.DiffScopes}"
+                      SelectedItem="{Binding Git.Changes.SelectedDiffScope, Mode=TwoWay}"
                       DisplayMemberPath="DisplayName"
                       MinHeight="32"
                       AutomationProperties.Name="Comparison scope"
                       ToolTip="Choose which changes to inspect" />
             <ComboBox x:Name="CommitComparisonSelector"
-                      ItemsSource="{Binding Git.ReviewCommits}"
-                      SelectedItem="{Binding Git.SelectedReviewCommit, Mode=TwoWay}"
+                      ItemsSource="{Binding Git.Changes.ReviewCommits}"
+                      SelectedItem="{Binding Git.Changes.SelectedReviewCommit, Mode=TwoWay}"
                       DisplayMemberPath="DisplayLabel"
                       MinHeight="32"
                       Margin="0,6,0,0"
-                      Visibility="{Binding Git.ShowsCommitSelector, Converter={StaticResource BooleanToVisibilityConverter}}"
+                      Visibility="{Binding Git.Changes.ShowsCommitSelector, Converter={StaticResource BooleanToVisibilityConverter}}"
                       AutomationProperties.Name="Commit to compare" />
             <ComboBox x:Name="BranchComparisonSelector"
-                      ItemsSource="{Binding Git.ReviewBranches}"
-                      SelectedItem="{Binding Git.SelectedReviewBranch, Mode=TwoWay}"
+                      ItemsSource="{Binding Git.Changes.ReviewBranches}"
+                      SelectedItem="{Binding Git.Changes.SelectedReviewBranch, Mode=TwoWay}"
                       MinHeight="32"
                       Margin="0,6,0,0"
-                      Visibility="{Binding Git.ShowsBranchSelector, Converter={StaticResource BooleanToVisibilityConverter}}"
+                      Visibility="{Binding Git.Changes.ShowsBranchSelector, Converter={StaticResource BooleanToVisibilityConverter}}"
                       AutomationProperties.Name="Base branch to compare" />
             <TextBlock Text="Repository"
                        Style="{StaticResource SectionLabel}"
                        Margin="0,10,0,4"
-                       Visibility="{Binding Git.ShowsRepositorySelector, Converter={StaticResource BooleanToVisibilityConverter}}" />
-            <ComboBox ItemsSource="{Binding Git.Repositories}"
-                      SelectedItem="{Binding Git.SelectedRepository, Mode=TwoWay}"
+                       Visibility="{Binding Git.RepositorySelection.ShowsRepositorySelector, Converter={StaticResource BooleanToVisibilityConverter}}" />
+            <ComboBox ItemsSource="{Binding Git.RepositorySelection.Repositories}"
+                      SelectedItem="{Binding Git.RepositorySelection.SelectedRepository, Mode=TwoWay}"
                       DisplayMemberPath="DisplayLabel"
                       MinHeight="32"
-                      Visibility="{Binding Git.ShowsRepositorySelector, Converter={StaticResource BooleanToVisibilityConverter}}"
+                      Visibility="{Binding Git.RepositorySelection.ShowsRepositorySelector, Converter={StaticResource BooleanToVisibilityConverter}}"
                       AutomationProperties.Name="Repository"
                       ToolTip="Choose the attached Git repository to inspect" />
             <WrapPanel Margin="0,10,0,0">
                 <Button Content="Editor"
-                        Command="{Binding Git.OpenEditorCommand}"
+                        Command="{Binding Git.Actions.OpenEditorCommand}"
                         Style="{StaticResource CompactButton}"
                         Margin="0,0,5,5" />
                 <Button Content="Explorer"
-                        Command="{Binding Git.RevealExplorerCommand}"
+                        Command="{Binding Git.Actions.RevealExplorerCommand}"
                         Style="{StaticResource CompactButton}"
                         Margin="0,0,5,5" />
                 <Button Content="Refresh"
-                        Command="{Binding Git.RefreshCommand}"
+                        Command="{Binding Git.Actions.RefreshCommand}"
                         Style="{StaticResource CompactButton}"
                         Margin="0,0,5,5" />
             </WrapPanel>
@@ -223,8 +223,8 @@
             </Grid.RowDefinitions>
             <TextBlock Text="Changed files" Style="{StaticResource SectionLabel}" />
             <ListBox Grid.Row="1"
-                     ItemsSource="{Binding Git.ChangedFiles}"
-                     SelectedItem="{Binding Git.SelectedFile}"
+                     ItemsSource="{Binding Git.Changes.ChangedFiles}"
+                     SelectedItem="{Binding Git.Changes.SelectedFile}"
                      BorderThickness="1"
                      ItemContainerStyle="{StaticResource NavigationRow}"
                      VirtualizingStackPanel.IsVirtualizing="True"
@@ -253,21 +253,21 @@
             </ListBox>
             <WrapPanel Grid.Row="2" Margin="0,7,0,0">
                 <Button Content="Stage"
-                        Command="{Binding Git.StageCommand}"
+                        Command="{Binding Git.Actions.StageCommand}"
                         Style="{StaticResource CompactButton}"
                         Margin="0,0,5,0" />
                 <Button Content="Unstage"
-                        Command="{Binding Git.UnstageCommand}"
+                        Command="{Binding Git.Actions.UnstageCommand}"
                         Style="{StaticResource CompactButton}"
                         Margin="0,0,5,0" />
                 <Button Content="Discard"
-                        Command="{Binding Git.DiscardCommand}"
+                        Command="{Binding Git.Actions.DiscardCommand}"
                         Style="{StaticResource DangerButton}" />
             </WrapPanel>
         </Grid>
 
         <Grid Grid.Row="2" Margin="0,12,0,6">
-            <TextBlock Text="{Binding Git.DiffViewLabel}"
+            <TextBlock Text="{Binding Git.Changes.DiffViewLabel}"
                        Style="{StaticResource SectionLabel}"
                        VerticalAlignment="Center" />
         </Grid>
@@ -279,7 +279,7 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <ListBox ItemsSource="{Binding Git.SelectedDiffLines}"
+            <ListBox ItemsSource="{Binding Git.Changes.SelectedDiffLines}"
                      Background="{DynamicResource SurfaceSunkenBrush}"
                      BorderBrush="{DynamicResource BorderSubtleBrush}"
                      BorderThickness="1"
@@ -354,7 +354,7 @@
                                                 Orientation="Horizontal"
                                                 Margin="4,0,6,0">
                                         <Button Content="Stage hunk"
-                                                Command="{Binding DataContext.Git.StageHunkCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                Command="{Binding DataContext.Git.Actions.StageHunkCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                                 CommandParameter="{Binding}"
                                                 Style="{StaticResource CompactButton}"
                                                 MinHeight="24"
@@ -362,7 +362,7 @@
                                                 Visibility="{Binding CanStageHunk, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                 AutomationProperties.Name="Stage hunk" />
                                         <Button Content="Unstage hunk"
-                                                Command="{Binding DataContext.Git.UnstageHunkCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                Command="{Binding DataContext.Git.Actions.UnstageHunkCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                                 CommandParameter="{Binding}"
                                                 Style="{StaticResource CompactButton}"
                                                 MinHeight="24"
@@ -370,7 +370,7 @@
                                                 Visibility="{Binding CanUnstageHunk, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                 AutomationProperties.Name="Unstage hunk" />
                                         <Button Content="Discard hunk"
-                                                Command="{Binding DataContext.Git.DiscardHunkCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                Command="{Binding DataContext.Git.Actions.DiscardHunkCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                                 CommandParameter="{Binding}"
                                                 Style="{StaticResource DangerButton}"
                                                 MinHeight="24"
@@ -379,7 +379,7 @@
                                                 Visibility="{Binding CanDiscardHunk, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                 AutomationProperties.Name="Discard hunk" />
                                         <Button Content="Comment"
-                                                Command="{Binding DataContext.Git.BeginAddCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                Command="{Binding DataContext.Git.Actions.BeginAddCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                                 CommandParameter="{Binding}"
                                                 Style="{StaticResource CompactButton}"
                                                 MinHeight="24"
@@ -411,12 +411,12 @@
                                              AutomationProperties.Name="Inline review comment text" />
                                     <WrapPanel Margin="0,7,0,0">
                                         <Button Content="Save comment"
-                                                Command="{Binding DataContext.Git.SaveCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                Command="{Binding DataContext.Git.Actions.SaveCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                                 CommandParameter="{Binding}"
                                                 Style="{StaticResource PrimaryButton}"
                                                 AutomationProperties.Name="Save inline review comment" />
                                         <Button Content="Cancel"
-                                                Command="{Binding DataContext.Git.CancelAddCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                Command="{Binding DataContext.Git.Actions.CancelAddCommentCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                                 CommandParameter="{Binding}"
                                                 Style="{StaticResource CompactButton}"
                                                 Margin="5,0,0,0"
@@ -441,7 +441,7 @@
                     BorderBrush="{DynamicResource BorderSubtleBrush}"
                     BorderThickness="1"
                     CornerRadius="6"
-                    Visibility="{Binding Git.HasUnmatchedReviewFindings, Converter={StaticResource BooleanToVisibilityConverter}}"
+                    Visibility="{Binding Git.Changes.HasUnmatchedReviewFindings, Converter={StaticResource BooleanToVisibilityConverter}}"
                     AutomationProperties.Name="Review findings outside the visible diff">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Top"
@@ -449,7 +449,7 @@
                                FontWeight="SemiBold"
                                Margin="4,0,4,4" />
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <ItemsControl ItemsSource="{Binding Git.UnmatchedReviewFindings}"
+                        <ItemsControl ItemsSource="{Binding Git.Changes.UnmatchedReviewFindings}"
                                       ItemTemplate="{StaticResource ReviewFindingCardTemplate}" />
                     </ScrollViewer>
                 </DockPanel>
@@ -463,18 +463,18 @@
                     BorderBrush="{DynamicResource AccentBrush}"
                     BorderThickness="1"
                     CornerRadius="6"
-                    Visibility="{Binding Git.HasReviewComments, Converter={StaticResource BooleanToVisibilityConverter}}"
+                    Visibility="{Binding Git.Changes.HasReviewComments, Converter={StaticResource BooleanToVisibilityConverter}}"
                     AutomationProperties.Name="Pending inline review comments">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Top"
-                               Text="{Binding Git.PendingReviewCommentsLabel}"
+                               Text="{Binding Git.Changes.PendingReviewCommentsLabel}"
                                FontWeight="SemiBold"
                                TextWrapping="Wrap"
                                Margin="4,0,4,4"
                                AutomationProperties.LiveSetting="Polite" />
                     <ScrollViewer VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
-                        <ItemsControl ItemsSource="{Binding Git.ReviewComments}"
+                        <ItemsControl ItemsSource="{Binding Git.Changes.ReviewComments}"
                                       ItemTemplate="{StaticResource InlineReviewCommentCardTemplate}" />
                     </ScrollViewer>
                 </DockPanel>
@@ -493,7 +493,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBox Text="{Binding Git.CommitMessage, UpdateSourceTrigger=PropertyChanged}"
+                <TextBox Text="{Binding Git.Actions.CommitMessage, UpdateSourceTrigger=PropertyChanged}"
                          MinHeight="42"
                          MaxHeight="76"
                          AcceptsReturn="True"
@@ -501,14 +501,14 @@
                          AutomationProperties.Name="Commit message" />
                 <Button Grid.Column="1"
                         Content="Commit"
-                        Command="{Binding Git.CommitCommand}"
+                        Command="{Binding Git.Actions.CommitCommand}"
                         Style="{StaticResource PrimaryButton}"
                         MinWidth="84"
                         Margin="8,0,0,0"
                         VerticalAlignment="Top" />
                 <Button Grid.Column="2"
                         Content="Push"
-                        Command="{Binding Git.PushCommand}"
+                        Command="{Binding Git.Actions.PushCommand}"
                         Style="{StaticResource CompactButton}"
                         MinWidth="72"
                         Margin="5,0,0,0"
@@ -520,7 +520,7 @@
         <Border Grid.RowSpan="5"
                 Panel.ZIndex="10"
                 Style="{StaticResource EmptyStatePresenter}"
-                Visibility="{Binding Git.IsRepository, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                Visibility="{Binding Git.RepositorySelection.IsRepository, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
             <StackPanel HorizontalAlignment="Center" MaxWidth="280">
                 <TextBlock Text="No Git project attached"
                            FontSize="18"

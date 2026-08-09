@@ -413,7 +413,7 @@ internal static class AttachmentInputTests
         resources["ConversationActivityTitleText"] = new Style(typeof(TextBlock));
         resources["ConversationActivityDetailText"] = new Style(typeof(TextBlock));
         var view = new TaskView();
-        var attachButton = view.FindName("AttachButton") as Button;
+        var attachButton = WpfTestHost.FindNamedDescendant<Button>(view, "AttachButton");
         Assert(attachButton is not null, "combined attach button exists");
         Assert(attachButton!.ContextMenu?.Items.Count == 3, "combined attach menu offers three attachment kinds");
         var attachOptions = attachButton.ContextMenu!.Items
@@ -424,15 +424,15 @@ internal static class AttachmentInputTests
         attachButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Assert(attachButton.ContextMenu.IsOpen, "combined attach button opens its menu");
         attachButton.ContextMenu.IsOpen = false;
-        Assert(view.FindName("AttachImagesButton") is null, "separate image button is removed");
-        Assert(view.FindName("AttachFilesButton") is null, "separate file button is removed");
-        Assert(view.FindName("AttachFolderButton") is null, "separate folder button is removed");
-        var attachmentPanel = view.FindName("AttachmentPreviewPanel") as FrameworkElement;
-        var promptPanel = view.FindName("PromptInputPanel") as FrameworkElement;
+        Assert(WpfTestHost.FindNamedDescendant<FrameworkElement>(view, "AttachImagesButton") is null, "separate image button is removed");
+        Assert(WpfTestHost.FindNamedDescendant<FrameworkElement>(view, "AttachFilesButton") is null, "separate file button is removed");
+        Assert(WpfTestHost.FindNamedDescendant<FrameworkElement>(view, "AttachFolderButton") is null, "separate folder button is removed");
+        var attachmentPanel = WpfTestHost.FindNamedDescendant<FrameworkElement>(view, "AttachmentPreviewPanel");
+        var promptPanel = WpfTestHost.FindNamedDescendant<FrameworkElement>(view, "PromptInputPanel");
         Assert(attachmentPanel is not null && promptPanel is not null, "composer layout elements exist");
         Assert(Grid.GetRow(attachmentPanel!) < Grid.GetRow(promptPanel!), "attachment previews appear above the prompt field");
-        Assert(view.FindName("AttachmentPreviewList") is FrameworkElement, "attachment preview list exists");
-        Assert(view.FindName("ComposerDropTarget") is FrameworkElement { AllowDrop: true }, "composer accepts drops");
+        Assert(WpfTestHost.FindNamedDescendant<FrameworkElement>(view, "AttachmentPreviewList") is not null, "attachment preview list exists");
+        Assert(WpfTestHost.FindNamedDescendant<FrameworkElement>(view, "ComposerDropTarget") is { AllowDrop: true }, "composer accepts drops");
     });
 
     private static async Task InitializeAsync(CodexAppServerClient client, FakeAppServerTransport transport)

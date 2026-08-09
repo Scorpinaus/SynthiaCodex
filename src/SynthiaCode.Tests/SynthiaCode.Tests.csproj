@@ -7,6 +7,7 @@
     <ProjectReference Include="..\SynthiaCode.Harnesses.Codex\SynthiaCode.Harnesses.Codex.csproj" />
     <ProjectReference Include="..\SynthiaCode.Harnesses.InMemory\SynthiaCode.Harnesses.InMemory.csproj" />
     <ProjectReference Include="..\SynthiaCode.Infrastructure\SynthiaCode.Infrastructure.csproj" />
+    <ProjectReference Include="..\SynthiaCode.Presentation\SynthiaCode.Presentation.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

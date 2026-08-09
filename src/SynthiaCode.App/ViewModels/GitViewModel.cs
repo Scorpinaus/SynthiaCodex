@@ -250,7 +250,19 @@ public sealed class GitViewModel : ObservableObject
         CancelEditCommentCommand = cancelEditCommentCommand = new RelayCommand(CancelEditComment, CanCancelEditComment);
         SaveEditedCommentCommand = saveEditedCommentCommand = new RelayCommand(SaveEditedComment, CanSaveEditedComment);
         RemoveCommentCommand = removeCommentCommand = new RelayCommand(RemoveComment, CanRemoveComment);
+        RepositorySelection = new GitRepositorySelectionViewModel(this);
+        Changes = new GitChangesViewModel(this);
+        Actions = new GitActionsViewModel(this);
+        PushPlanning = new GitPushPlanningViewModel();
     }
+
+    public GitRepositorySelectionViewModel RepositorySelection { get; }
+
+    public GitChangesViewModel Changes { get; }
+
+    public GitActionsViewModel Actions { get; }
+
+    public GitPushPlanningViewModel PushPlanning { get; }
 
     public ObservableCollection<GitChangedFile> ChangedFiles { get; } = [];
 
@@ -302,6 +314,8 @@ public sealed class GitViewModel : ObservableObject
     }
 
     public bool IsRepository => !string.IsNullOrWhiteSpace(repositoryRoot);
+
+    public string? RepositoryRoot => repositoryRoot;
 
     public bool HasMultipleRepositories => Repositories.Count > 1;
 
@@ -1405,12 +1419,13 @@ public sealed class GitViewModel : ObservableObject
         SelectedDiffScope.Scope is GitDiffScope.Unstaged or GitDiffScope.Staged;
     private bool CanCommit() => !isShuttingDown() && !IsBusy && IsRepository && !string.IsNullOrWhiteSpace(CommitMessage) &&
         SelectedRepository?.State.ChangedFiles.Any(file => file.IsStaged) == true;
-    private bool CanPush() => !isShuttingDown() && !IsBusy && IsRepository &&
-        SelectedRepository?.State.HasNamedBranch == true;
+    private bool CanPush() => PushPlanning.CanPush(
+        isShuttingDown(),
+        IsBusy,
+        repositoryRoot,
+        SelectedRepository);
     private bool PushTargetMatchesDisplay(string root, string branchName) =>
-        SelectedRepository is { State.HasNamedBranch: true } selected &&
-        PathsEqual(selected.RootPath, root) &&
-        string.Equals(selected.State.Branch, branchName, StringComparison.Ordinal);
+        PushPlanning.TargetMatchesDisplay(SelectedRepository, root, branchName);
     private bool CanOpenProjectTarget() => !isShuttingDown() && !string.IsNullOrWhiteSpace(contextProvider().ProjectPath);
     private bool CanBeginAddComment(object? parameter) =>
         !isShuttingDown() && !IsBusy && IsRepository && SelectedFile is not null && SelectedDiffScope.Scope != GitDiffScope.LastTurn &&

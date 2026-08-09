@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Phase 4: Decompose Presentation by Feature</title>
+  <style>
+    :root {
+      --page: #f3f6fb;
+      --surface: #ffffff;
+      --strong: #eaf0f8;
+      --ink: #172033;
+      --muted: #59657a;
+      --line: #ccd6e5;
+      --accent: #4758c9;
+      --accent-soft: #e8eafe;
+      --success: #14794b;
+      --success-soft: #e4f5ec;
+      --warning: #9a5b00;
+      --warning-soft: #fff1d6;
+      --shadow: 0 18px 45px rgba(28, 42, 73, .09);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111521;
+        --surface: #191f2d;
+        --strong: #222b3d;
+        --ink: #eef2fa;
+        --muted: #aeb8ca;
+        --line: #35415a;
+        --accent: #aab4ff;
+        --accent-soft: #2c3158;
+        --success: #72d4a5;
+        --success-soft: #173d30;
+        --warning: #f2bd69;
+        --warning-soft: #493719;
+        --shadow: none;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font: 16px/1.58 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    a { color: var(--accent); }
+    code, pre { font-family: "Cascadia Code", Consolas, monospace; }
+    code { padding: .08rem .3rem; border-radius: .3rem; background: var(--strong); }
+    h1, h2, h3 { margin-top: 0; line-height: 1.16; }
+    h1 { max-width: 920px; margin-bottom: 1rem; font-size: clamp(2.2rem, 6vw, 4.7rem); letter-spacing: -.055em; }
+    h2 { margin-bottom: .7rem; font-size: clamp(1.7rem, 3.5vw, 2.6rem); letter-spacing: -.035em; }
+    h3 { margin-bottom: .25rem; font-size: 1.02rem; }
+    .shell { width: min(1180px, calc(100% - 2rem)); margin-inline: auto; }
+    .hero { padding: 4.8rem 0 2.7rem; }
+    .eyebrow { margin: 0 0 .8rem; color: var(--accent); font-size: .76rem; font-weight: 850; letter-spacing: .11em; text-transform: uppercase; }
+    .lede { max-width: 850px; color: var(--muted); font-size: 1.12rem; }
+    .meta, .phase-links { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: 1.2rem; }
+    .pill { display: inline-flex; align-items: center; padding: .38rem .7rem; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: .82rem; text-decoration: none; }
+    .pill.success { border-color: color-mix(in srgb, var(--success) 45%, var(--line)); background: var(--success-soft); color: var(--success); font-weight: 800; }
+    .scoreboard { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .85rem; margin-bottom: 3.8rem; }
+    .score, .card, .check, .node { border: 1px solid var(--line); border-radius: .95rem; background: var(--surface); box-shadow: var(--shadow); }
+    .score { padding: 1.15rem; }
+    .score strong { display: block; font-size: clamp(1.45rem, 3.5vw, 2.3rem); line-height: 1; letter-spacing: -.04em; }
+    .score span { display: block; margin-top: .55rem; color: var(--muted); font-size: .86rem; }
+    .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: clamp(2rem, 6vw, 5rem); }
+    nav { position: sticky; top: 1rem; align-self: start; padding: 1rem; border-left: 2px solid var(--line); }
+    nav strong { display: block; margin-bottom: .55rem; font-size: .75rem; letter-spacing: .09em; text-transform: uppercase; }
+    nav a { display: block; padding: .28rem 0; color: var(--muted); text-decoration: none; }
+    nav a:hover, nav a:focus-visible { color: var(--accent); }
+    main section { margin-bottom: 4.5rem; scroll-margin-top: 1rem; }
+    .intro { max-width: 820px; color: var(--muted); }
+    .checklist, .cards, .timeline { display: grid; gap: .85rem; margin-top: 1.2rem; }
+    .check { display: grid; grid-template-columns: 1.5rem 1fr; gap: .8rem; padding: 1rem 1.1rem; box-shadow: none; }
+    .check-mark { color: var(--success); font-weight: 900; }
+    .check p, .card p, .timeline p, .node p { margin: .25rem 0 0; color: var(--muted); }
+    .flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1.4rem; margin-top: 1.3rem; }
+    .flow.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .node { position: relative; min-height: 9rem; padding: 1rem; box-shadow: none; }
+    .node:not(:last-child)::after { content: "\2192"; position: absolute; top: 50%; right: -1.15rem; color: var(--accent); font-size: 1.3rem; font-weight: 900; transform: translateY(-50%); }
+    .node small, .tag { display: block; margin-bottom: .45rem; color: var(--accent); font-size: .71rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+    .card { padding: 1.15rem; box-shadow: none; }
+    .card.change { border-left: 4px solid var(--accent); }
+    .card.guard { border-left: 4px solid var(--success); }
+    .card.lesson { border-left: 4px solid var(--warning); }
+    .table-wrap { margin-top: 1.1rem; overflow-x: auto; border: 1px solid var(--line); border-radius: .9rem; }
+    table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: .91rem; }
+    th, td { padding: .85rem .95rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--strong); color: var(--muted); font-size: .72rem; letter-spacing: .07em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .timeline { counter-reset: item; }
+    .timeline article { position: relative; padding: 0 0 1.3rem 2.6rem; border-left: 2px solid var(--line); }
+    .timeline article::before { counter-increment: item; content: counter(item); position: absolute; top: 0; left: -.95rem; display: grid; width: 1.8rem; height: 1.8rem; place-items: center; border-radius: 50%; background: var(--warning-soft); color: var(--warning); font-weight: 900; }
+    .correction { padding: .65rem .8rem; border-radius: .6rem; background: var(--warning-soft); color: var(--ink) !important; }
+    details { margin-top: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--surface); }
+    summary { cursor: pointer; font-weight: 800; }
+    footer { margin-top: 3rem; padding: 2rem 0 3rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .86rem; }
+    @media (max-width: 980px) { .flow, .flow.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } .node::after { display: none; } }
+    @media (max-width: 760px) { .scoreboard, .layout, .flow, .flow.four { grid-template-columns: 1fr; } nav { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-left: 0; border-top: 2px solid var(--line); } nav strong { grid-column: 1 / -1; } }
+    @media print { body { background: #fff; color: #000; } nav { display: none; } .layout { display: block; } .score, .card, .check, .node, table, details { box-shadow: none; break-inside: avoid; } }
+  </style>
+</head>
+<body>
+  <header class="hero shell">
+    <p class="eyebrow">SynthiaCode architecture migration</p>
+    <h1>Phase 4: Decompose Presentation by Feature</h1>
+    <p class="lede">The task screen now has five focused controls and five feature models. Markdown syntax is in a pure project. Git presentation now has clear repository, changes, action, and push-planning parts.</p>
+    <div class="meta">
+      <span class="pill success">&#10003; Complete</span>
+      <span class="pill"><time datetime="2026-08-09">9 August 2026</time></span>
+      <span class="pill">Release baseline 0.1.0</span>
+      <span class="pill">Presentation behavior preserved</span>
+    </div>
+    <div class="phase-links" aria-label="Migration phases">
+      <a class="pill" href="phase-3-harden-codex-protocol-boundary.html">&#8592; Phase 3 protocol boundary</a>
+      <a class="pill" href="../../../../docs/current-architecture.md">Current architecture</a>
+    </div>
+  </header>
+
+  <div class="shell scoreboard" aria-label="Phase 4 results">
+    <div class="score"><strong>5</strong><span>Task feature controls and models</span></div>
+    <div class="score"><strong>4</strong><span>Git presentation components</span></div>
+    <div class="score"><strong>1</strong><span>New WPF-free Presentation project</span></div>
+    <div class="score"><strong>390/390</strong><span>Release tests passed</span></div>
+  </div>
+
+  <div class="shell layout">
+    <nav aria-label="On this page">
+      <strong>Phase 4 record</strong>
+      <a href="#objectives">Objectives</a>
+      <a href="#task">Task split</a>
+      <a href="#markdown">Markdown boundary</a>
+      <a href="#git">Git split</a>
+      <a href="#changes">Changes</a>
+      <a href="#mistakes">Mistakes</a>
+      <a href="#lessons">Lessons</a>
+      <a href="#verification">Verification</a>
+      <a href="#files">Files</a>
+      <a href="#handoff">Handoff</a>
+    </nav>
+
+    <main>
+      <section id="objectives">
+        <p class="eyebrow">Approved scope</p>
+        <h2>Objectives completed</h2>
+        <div class="checklist">
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Split the task view</h3><p><code>TaskView</code> is now a 15-line shell that composes conversation and composer controls. Agents, goals, and options are nested focused controls.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Split task presentation state</h3><p>The task facade exposes conversation, composer, agents, goals, and options feature models. Existing callers can still use the old root properties.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Extract pure Markdown syntax</h3><p>The document model and parser are in <code>SynthiaCode.Presentation</code>. This project targets <code>net10.0</code>, has no project references, and has no WPF dependency.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Keep policy and rendering separate</h3><p>The App project still owns external URI policy, local image policy, and WPF rendering. The pure parser only describes syntax.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Divide Git presentation</h3><p>Repository selection, changes and diff, Git actions, and push planning now have separate components. <code>GitView</code> binds through them.</p></div></div>
+        </div>
+      </section>
+
+      <section id="task">
+        <p class="eyebrow">Task presentation</p>
+        <h2>A small shell and five feature boundaries</h2>
+        <p class="intro">Named controls, keyboard handlers, drag-and-drop handlers, and scroll state moved with the feature that uses them. This prevents the shell from knowing the internal names of the conversation and composer controls.</p>
+        <div class="flow" role="img" aria-label="TaskView composes conversation, composer, agents, goals, and options feature controls.">
+          <div class="node"><small>Shell</small><strong>TaskView</strong><p>Delegates focus and composes the page.</p></div>
+          <div class="node"><small>Transcript</small><strong>Conversation</strong><p>Turns, find, copy, edit, fork, and scroll.</p></div>
+          <div class="node"><small>Input</small><strong>Composer</strong><p>Prompt, queue, attachments, skills, and dictation.</p></div>
+          <div class="node"><small>Side state</small><strong>Agents and goals</strong><p>Own their collections, commands, and edit state.</p></div>
+          <div class="node"><small>Run setup</small><strong>Options</strong><p>Owns model, reasoning, Fast mode, and flyout state.</p></div>
+        </div>
+        <details>
+          <summary>Compatibility rule</summary>
+          <p><code>TaskViewModel</code> remains the application-facing facade. It forwards established properties and commands to the feature models. New task XAML binds to <code>TaskWorkspace.Conversation</code>, <code>Composer</code>, <code>Agents</code>, <code>Goals</code>, or <code>Options</code>. This lets application code migrate without one large breaking change.</p>
+        </details>
+      </section>
+
+      <section id="markdown">
+        <p class="eyebrow">Pure text boundary</p>
+        <h2>Parse first, apply policy next, render last</h2>
+        <div class="flow four" role="img" aria-label="Markdown text goes through a pure parser and document model. The App applies destination policy and renders WPF controls.">
+          <div class="node"><small>Input</small><strong>Markdown text</strong><p>No UI or file access.</p></div>
+          <div class="node"><small>Pure code</small><strong>Parser and model</strong><p>Blocks, inlines, tables, links, images, and HTML shapes.</p></div>
+          <div class="node"><small>App policy</small><strong>URI and image policy</strong><p>Accepts or rejects destinations.</p></div>
+          <div class="node"><small>WPF</small><strong>MarkdownTextBlock</strong><p>Creates inlines, grids, images, and actions.</p></div>
+        </div>
+        <p class="intro"><code>MarkdownTextBlock.cs</code> fell from 2,089 lines to 894 lines. Syntax changes can now be tested without a WPF dispatcher. Link and image safety did not move into the parser.</p>
+      </section>
+
+      <section id="git">
+        <p class="eyebrow">Git presentation</p>
+        <h2>One coordinator with four focused parts</h2>
+        <div class="flow four" role="img" aria-label="GitViewModel composes repository selection, changes, actions, and push planning.">
+          <div class="node"><small>Repository</small><strong>RepositorySelection</strong><p>Roots, selected repository, branch, and status.</p></div>
+          <div class="node"><small>Read model</small><strong>Changes</strong><p>Scopes, files, diff rows, findings, and comments.</p></div>
+          <div class="node"><small>Commands</small><strong>Actions</strong><p>Refresh, stage, discard, commit, push, and comment actions.</p></div>
+          <div class="node"><small>Safety</small><strong>PushPlanning</strong><p>Checks the named branch and displayed root before push.</p></div>
+        </div>
+        <p class="intro"><code>GitViewModel</code> keeps service calls, refresh order, and compatibility properties. The view no longer binds to one flat list of unrelated members.</p>
+      </section>
+
+      <section id="changes">
+        <p class="eyebrow">Implementation record</p>
+        <h2>What changed</h2>
+        <div class="cards">
+          <article class="card change"><span class="tag">Solution</span><h3>Added a pure presentation library</h3><p><code>SynthiaCode.Presentation</code> was added to the solution and referenced by App and Tests. The architecture graph now enforces its zero-dependency rule.</p></article>
+          <article class="card change"><span class="tag">Task XAML</span><h3>Moved XAML and handlers together</h3><p>Conversation scroll and find code moved to the conversation control. Attachment, composer, skill, and input code moved to the composer control. Options keyboard code moved to the options control.</p></article>
+          <article class="card change"><span class="tag">Task state</span><h3>Created five feature models</h3><p>Agents, goals, and options own their state and commands. Conversation and composer provide focused binding surfaces over the task facade while the compatibility migration continues.</p></article>
+          <article class="card change"><span class="tag">Markdown</span><h3>Removed the parser from the WPF control</h3><p>The WPF control consumes a parsed document. It still owns safe destination decisions and WPF object creation.</p></article>
+          <article class="card change"><span class="tag">Git</span><h3>Changed the view to use component paths</h3><p><code>GitView.xaml</code> now binds through repository selection, changes, and actions. Push guards call the push-planning component.</p></article>
+          <article class="card guard"><span class="tag">Tests</span><h3>Updated namescope-aware tests</h3><p>WPF tests now find named elements inside feature controls. Source checks read the correct feature XAML file instead of the old monolithic shell.</p></article>
+        </div>
+      </section>
+
+      <section id="mistakes">
+        <p class="eyebrow">Honest migration log</p>
+        <h2>Mistakes and corrections</h2>
+        <div class="timeline">
+          <article><h3>The first table parser split a pipe inside a code span</h3><p>A cell such as <code>`left|right`</code> became two cells.</p><p class="correction"><strong>Correction:</strong> the table tokenizer now protects code spans and escaped pipes. A focused Phase 4 test keeps this rule.</p></article>
+          <article><h3>The first inline merge removed the wrong equal text node</h3><p>Value-based list removal could remove an earlier space node that had the same value. This changed output order.</p><p class="correction"><strong>Correction:</strong> the parser now replaces the item at its exact index. The complete 307-case behavior set then passed.</p></article>
+          <article><h3>The first conversation XAML extraction omitted its outer Grid</h3><p>The extracted row definitions became direct children of a <code>UserControl</code>. The XAML compiler rejected the file.</p><p class="correction"><strong>Correction:</strong> added the feature Grid and rebuilt App with zero warnings and zero errors.</p></article>
+          <article><h3>The first behavior run still searched the old root namescope</h3><p>Fourteen presentation checks could not find controls that had correctly moved into child namescopes.</p><p class="correction"><strong>Correction:</strong> changed source checks to read feature XAML and added a shared namescope-aware WPF test lookup.</p></article>
+          <article><h3>The first lookup helper called the visual API for a row definition</h3><p><code>RowDefinition</code> is a dependency object but is not a visual. The helper threw during six tests.</p><p class="correction"><strong>Correction:</strong> removed the unnecessary visual scan. Logical-tree and namescope lookup are sufficient and faster.</p></article>
+          <article><h3>One persistence test timed out during the first broad run</h3><p>The failure happened before the presentation baseline corrections. It did not recur in the next behavior runs or the final full suite.</p><p class="correction"><strong>Correction:</strong> treated it as an observation, reran the complete behavior set, and required a clean full Release suite before completion.</p></article>
+        </div>
+      </section>
+
+      <section id="lessons">
+        <p class="eyebrow">What this phase taught us</p>
+        <h2>Lessons</h2>
+        <div class="cards">
+          <article class="card lesson"><span class="tag">Namescopes</span><h3>A WPF split changes test lookup rules</h3><p>A named child belongs to its feature control. Tests must follow namescopes instead of assuming that all names belong to the page shell.</p></article>
+          <article class="card lesson"><span class="tag">Ownership</span><h3>Move behavior with the named controls</h3><p>Scroll, keyboard, focus, and drag handlers are easier to maintain when they live beside the XAML elements that they control.</p></article>
+          <article class="card lesson"><span class="tag">Parsing</span><h3>Pure extraction can reveal old implicit rules</h3><p>Table code spans and equal text nodes were easy to miss during a mechanical move. Characterization tests must run before cleanup continues.</p></article>
+          <article class="card lesson"><span class="tag">Safety</span><h3>Syntax is not destination policy</h3><p>The parser can describe a link or image without deciding whether the application can open it. This keeps security decisions at the host boundary.</p></article>
+          <article class="card lesson"><span class="tag">Migration</span><h3>A compatibility facade reduces refactor risk</h3><p>Views can use focused components now while application callers move later. The facade must stay explicit so it does not become a hidden permanent dependency.</p></article>
+        </div>
+      </section>
+
+      <section id="verification">
+        <p class="eyebrow">Release checks</p>
+        <h2>Verification passed</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Check</th><th>Result</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td>App Release build</td><td>Passed, 0 warnings, 0 errors</td><td>Proved all new controls and bindings compile.</td></tr>
+              <tr><td>Phase 4 and architecture tests</td><td>9 of 9 passed</td><td>Checked project rules, pure Markdown, task composition, and Git components.</td></tr>
+              <tr><td>Behavior characterization set</td><td>307 of 307 passed</td><td>Checked the established user behavior after the XAML and parser split.</td></tr>
+              <tr><td>Full solution Release suite</td><td>390 of 390 passed</td><td>Checked all architecture, migration, protocol, integration, and WPF tests.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <pre><code>dotnet test SynthiaCode.sln --configuration Release --no-restore
+Passed: 390  Failed: 0  Skipped: 0</code></pre>
+      </section>
+
+      <section id="files">
+        <p class="eyebrow">Primary files</p>
+        <h2>Files added or changed</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Area</th><th>Files</th><th>Role</th></tr></thead>
+            <tbody>
+              <tr><td>Pure Markdown</td><td><code>src/SynthiaCode.Presentation/Markdown/*</code></td><td>Document model and parser.</td></tr>
+              <tr><td>WPF Markdown</td><td><code>Controls/MarkdownTextBlock.cs</code></td><td>Policy-aware WPF renderer.</td></tr>
+              <tr><td>Task views</td><td><code>Views/Task*View.xaml</code> and code-behind</td><td>Five feature controls and the small shell.</td></tr>
+              <tr><td>Task models</td><td><code>ViewModels/Task*ViewModel.cs</code></td><td>Five focused presentation surfaces and the compatibility facade.</td></tr>
+              <tr><td>Git models</td><td><code>ViewModels/Git*ViewModel.cs</code></td><td>Repository, changes, actions, and push planning.</td></tr>
+              <tr><td>Tests</td><td><code>ArchitectureBoundaryTests.cs</code>, <code>Phase4PresentationBoundaryTests.cs</code>, and WPF behavior checks</td><td>Boundary rules and namescope-aware behavior checks.</td></tr>
+              <tr><td>Documentation</td><td><code>docs/current-architecture.md</code> and this record</td><td>Current ownership, verification, mistakes, and lessons.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="handoff">
+        <p class="eyebrow">Stage result</p>
+        <h2>Phase 4 is complete</h2>
+        <p class="intro">The approved Phase 4 presentation slice is implemented and verified. The migration record remains active at the human gate. Do not start the next numbered phase until a person approves it.</p>
+        <div class="phase-links">
+          <a class="pill" href="phase-3-harden-codex-protocol-boundary.html">Review Phase 3</a>
+          <a class="pill" href="../../../../docs/current-architecture.md">Read current architecture</a>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="shell">
+    SynthiaCode migration record · Phase 4 · Generated from the verified working tree on 9 August 2026.
+  </footer>
+</body>
+</html>

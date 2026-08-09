@@ -176,6 +176,11 @@ internal static partial class PresentationRedesignTests
             "MainWindow.xaml",
             Path.Combine("Views", "ProjectThreadView.xaml"),
             Path.Combine("Views", "TaskView.xaml"),
+            Path.Combine("Views", "TaskConversationView.xaml"),
+            Path.Combine("Views", "TaskComposerView.xaml"),
+            Path.Combine("Views", "TaskAgentsView.xaml"),
+            Path.Combine("Views", "TaskGoalsView.xaml"),
+            Path.Combine("Views", "TaskOptionsView.xaml"),
             Path.Combine("Views", "ApprovalPromptView.xaml"),
             Path.Combine("Views", "TerminalView.xaml"),
             Path.Combine("Views", "GitView.xaml"),
@@ -193,7 +198,7 @@ internal static partial class PresentationRedesignTests
         Assert(navigation.Contains("AutomationProperties.Name=\"Search chats and projects\"", StringComparison.Ordinal), "navigation search is accessible");
         Assert(navigation.Contains("VirtualizingStackPanel.VirtualizationMode=\"Recycling\"", StringComparison.Ordinal), "navigation retains recycling virtualization");
 
-        var task = ReadAppFile("Views", "TaskView.xaml");
+        var task = ReadTaskPresentation();
         Assert(task.Contains("AutomationProperties.Name=\"Conversation transcript\"", StringComparison.Ordinal), "transcript has an automation name");
         Assert(task.Contains("AutomationProperties.Name=\"Message composer\"", StringComparison.Ordinal), "composer has an automation name");
         Assert(task.Contains("VirtualizingStackPanel.IsVirtualizing=\"True\"", StringComparison.Ordinal), "conversation virtualization remains enabled");
@@ -212,7 +217,7 @@ internal static partial class PresentationRedesignTests
 
     private static Task TurnActivityUsesCommentaryHandoffAsync()
     {
-        var task = ReadAppFile("Views", "TaskView.xaml");
+        var task = ReadTaskPresentation();
 
         Assert(task.Contains("AutomationProperties.Name=\"Assistant commentary\"", StringComparison.Ordinal), "commentary channel is accessible");
         Assert(task.Contains("Visibility=\"{Binding ShowsCommentaryChannel", StringComparison.Ordinal), "commentary visibility follows turn presentation state");
@@ -241,7 +246,7 @@ internal static partial class PresentationRedesignTests
 
     private static Task PerformanceGuardrailsAsync()
     {
-        var task = ReadAppFile("Views", "TaskView.xaml");
+        var task = ReadTaskPresentation();
         var navigation = ReadAppFile("Views", "ProjectThreadView.xaml");
         var shell = ReadAppFile("MainWindow.xaml");
         var terminalViewModel = ReadAppFile("ViewModels", "TerminalViewModel.cs");
@@ -271,6 +276,14 @@ internal static partial class PresentationRedesignTests
 
     private static string ReadAppFile(params string[] relativeSegments) =>
         File.ReadAllText(Path.Combine([FindRepositoryRoot(), "src", "SynthiaCode.App", .. relativeSegments]));
+
+    private static string ReadTaskPresentation() => string.Concat(
+        ReadAppFile("Views", "TaskView.xaml"),
+        ReadAppFile("Views", "TaskConversationView.xaml"),
+        ReadAppFile("Views", "TaskComposerView.xaml"),
+        ReadAppFile("Views", "TaskAgentsView.xaml"),
+        ReadAppFile("Views", "TaskGoalsView.xaml"),
+        ReadAppFile("Views", "TaskOptionsView.xaml"));
 
     private static string FindRepositoryRoot()
     {

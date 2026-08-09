@@ -208,12 +208,12 @@ internal static class StructuredReviewFindingsTests
         var xaml = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "GitView.xaml"));
         var mainViewModel = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "ViewModels", "MainViewModel.cs"));
 
-        Assert(xaml.Contains("ItemsSource=\"{Binding Git.SelectedDiffLines}\"", StringComparison.Ordinal), "Git diff binds structured rows");
+        Assert(xaml.Contains("ItemsSource=\"{Binding Git.Changes.SelectedDiffLines}\"", StringComparison.Ordinal), "Git diff binds structured rows");
         Assert(xaml.Contains("VirtualizingStackPanel.VirtualizationMode=\"Recycling\"", StringComparison.Ordinal), "structured diff recycles rows");
         Assert(xaml.Contains("ItemsSource=\"{Binding ReviewFindings}\"", StringComparison.Ordinal), "findings render beneath their anchor row");
         Assert(xaml.Contains("Text=\"{Binding PriorityLabel}\"", StringComparison.Ordinal), "priority has a textual label");
         Assert(xaml.Contains("AutomationProperties.Name=\"{Binding AutomationName}\"", StringComparison.Ordinal), "finding cards expose automation names");
-        Assert(xaml.Contains("Git.UnmatchedReviewFindings", StringComparison.Ordinal), "unmatched findings have an explicit region");
+        Assert(xaml.Contains("Git.Changes.UnmatchedReviewFindings", StringComparison.Ordinal), "unmatched findings have an explicit region");
         Assert(!xaml.Contains("Text=\"{Binding Git.SelectedDiff, Mode=OneWay}\"", StringComparison.Ordinal), "plain diff textbox is replaced");
         Assert(mainViewModel.Contains("Git.SetReviewFindings(CodexReviewFindingProjection.GetLatest", StringComparison.Ordinal), "active chat drives Git review projection");
         return Task.CompletedTask;

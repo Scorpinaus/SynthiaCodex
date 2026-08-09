@@ -1,0 +1,341 @@
+<UserControl x:Class="SynthiaCode.App.Views.TaskConversationView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:SynthiaCode.App.Controls"
+             xmlns:views="clr-namespace:SynthiaCode.App.Views"
+             UseLayoutRounding="True"
+             SnapsToDevicePixels="True">
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <Border Style="{StaticResource PaneSurface}"
+                Padding="8"
+                AutomationProperties.Name="Conversation transcript">
+            <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <Grid Margin="2,0,2,8">
+                <Button Content="Find"
+                        Command="{Binding TaskWorkspace.Conversation.OpenFindInChatCommand}"
+                        Style="{StaticResource CompactButton}"
+                        HorizontalAlignment="Right"
+                        ToolTip="Find in chat (Ctrl+F)"
+                        Visibility="{Binding TaskWorkspace.Conversation.IsFindInChatOpen, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                        AutomationProperties.Name="Find in chat"/>
+                <Border Background="{DynamicResource FieldBrush}"
+                        BorderBrush="{DynamicResource LineBrush}"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Padding="6"
+                        Visibility="{Binding TaskWorkspace.Conversation.IsFindInChatOpen, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="FindInChatBox"
+                                 Text="{Binding TaskWorkspace.Conversation.FindInChatText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 MinWidth="180"
+                                 Padding="6,4"
+                                 PreviewKeyDown="OnFindInChatPreviewKeyDown"
+                                 AutomationProperties.Name="Find text in current chat"/>
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding TaskWorkspace.Conversation.FindInChatSummary}"
+                                   Foreground="{DynamicResource MutedInkBrush}"
+                                   VerticalAlignment="Center"
+                                   Margin="8,0"/>
+                        <Button Grid.Column="2"
+                                Content="Previous"
+                                Command="{Binding TaskWorkspace.Conversation.FindPreviousCommand}"
+                                Style="{StaticResource CompactButton}"
+                                Margin="0,0,4,0"
+                                AutomationProperties.Name="Previous chat match"/>
+                        <Button Grid.Column="3"
+                                Content="Next"
+                                Command="{Binding TaskWorkspace.Conversation.FindNextCommand}"
+                                Style="{StaticResource CompactButton}"
+                                Margin="0,0,4,0"
+                                AutomationProperties.Name="Next chat match"/>
+                        <Button Grid.Column="4"
+                                Content="Close"
+                                Command="{Binding TaskWorkspace.Conversation.CloseFindInChatCommand}"
+                                Style="{StaticResource CompactButton}"
+                                AutomationProperties.Name="Close find in chat"/>
+                    </Grid>
+                </Border>
+            </Grid>
+            <views:TaskAgentsView Grid.Row="1"/>
+            <Border Grid.Row="2"
+                    Style="{StaticResource EmptyStatePresenter}"
+                    MaxWidth="520"
+                    Visibility="{Binding TaskWorkspace.Conversation.HasConversation, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                <StackPanel>
+                    <TextBlock Text="What would you like to build?"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="Describe a task below. SynthiaCode will keep the conversation, activity, approvals, and workspace context together."
+                               Foreground="{DynamicResource TextSecondaryBrush}"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"
+                               Margin="0,7,0,0"/>
+                </StackPanel>
+            </Border>
+            <ListBox x:Name="ConversationList"
+                     Grid.Row="2"
+                     ItemsSource="{Binding TaskWorkspace.Conversation.ConversationTurns}"
+                     BorderThickness="0"
+                     Background="Transparent"
+                     Padding="2"
+                     VirtualizingStackPanel.IsVirtualizing="True"
+                     VirtualizingStackPanel.VirtualizationMode="Recycling"
+                     VirtualizingPanel.ScrollUnit="Pixel"
+                     ScrollViewer.CanContentScroll="True"
+                     ScrollViewer.IsDeferredScrollingEnabled="False"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     ScrollViewer.PanningMode="VerticalOnly"
+                     ScrollViewer.ScrollChanged="OnConversationScrollChanged"
+                     PreviewMouseWheel="OnConversationPreviewMouseWheel"
+                     AutomationProperties.Name="Multi-turn conversation">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        <Setter Property="Padding" Value="0"/>
+                        <Setter Property="Margin" Value="0"/>
+                        <Setter Property="Background" Value="Transparent"/>
+                        <Setter Property="Focusable" Value="False"/>
+                        <Setter Property="IsTabStop" Value="False"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <ContentPresenter HorizontalAlignment="Stretch"/>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Border Margin="2,2,2,18" AutomationProperties.Name="Conversation turn">
+                            <Border.Style>
+                                <Style TargetType="Border" BasedOn="{StaticResource ConversationTurnCard}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsFindMatch}" Value="True">
+                                            <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}"/>
+                                            <Setter Property="BorderThickness" Value="1"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsCurrentFindMatch}" Value="True">
+                                            <Setter Property="BorderBrush" Value="{DynamicResource SignalBrush}"/>
+                                            <Setter Property="BorderThickness" Value="2"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <StackPanel>
+                                <StackPanel Margin="48,0,0,12">
+                                    <Border Style="{StaticResource ConversationUserSurface}"
+                                            AutomationProperties.Name="User message"
+                                            Cursor="Hand"
+                                            MouseLeftButtonUp="OnUserMessageMouseLeftButtonUp"
+                                            ToolTip="Click to copy user message">
+                                        <StackPanel>
+                                            <Border Style="{StaticResource StatePill}"
+                                                    HorizontalAlignment="Right"
+                                                    Margin="0,0,0,6"
+                                                    Visibility="{Binding IsSuperseded, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <TextBlock Text="Previous version" FontSize="10"/>
+                                            </Border>
+                                            <StackPanel Margin="0,0,0,7"
+                                                        Visibility="{Binding IsCodeReview, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                        AutomationProperties.Name="Code review turn">
+                                                <Border Style="{StaticResource StatePill}"
+                                                        HorizontalAlignment="Right">
+                                                    <TextBlock Text="{Binding ReviewBadgeLabel}" FontSize="10" FontWeight="SemiBold"/>
+                                                </Border>
+                                                <TextBlock Text="{Binding ReviewScopeDisplay}"
+                                                           Style="{StaticResource ConversationMetadataText}"
+                                                           HorizontalAlignment="Right"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,4,0,0"
+                                                           Visibility="{Binding HasReviewScope, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding UserPrompt}"
+                                                       Style="{StaticResource ConversationBodyText}"
+                                                       Visibility="{Binding IsPromptEditing, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
+                                            <Border BorderBrush="{DynamicResource LineBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Padding="8"
+                                                    Visibility="{Binding IsPromptEditing, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <StackPanel>
+                                                    <TextBox Text="{Binding EditedPrompt, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                             AcceptsReturn="True"
+                                                             TextWrapping="Wrap"
+                                                             MinHeight="72"
+                                                             VerticalScrollBarVisibility="Auto"
+                                                             AutomationProperties.Name="Edit user prompt"/>
+                                                    <TextBlock Text="Resubmitting rewinds conversation context; workspace file changes are kept."
+                                                               Style="{StaticResource ConversationMetadataText}"
+                                                               TextWrapping="Wrap"
+                                                               Margin="0,6,0,0"/>
+                                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                                                        <Button Content="Cancel"
+                                                                Command="{Binding DataContext.TaskWorkspace.Conversation.CancelPromptEditCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                CommandParameter="{Binding}"
+                                                                Style="{StaticResource CompactButton}"
+                                                                Margin="0,0,6,0"
+                                                                AutomationProperties.Name="Cancel prompt edit"/>
+                                                        <Button Content="Resubmit"
+                                                                Command="{Binding DataContext.TaskWorkspace.Conversation.SubmitPromptEditCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                CommandParameter="{Binding}"
+                                                                IsEnabled="{Binding CanSubmitPromptEdit}"
+                                                                Style="{StaticResource CompactButton}"
+                                                                AutomationProperties.Name="Resubmit edited prompt"/>
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </Border>
+                                            <ItemsControl ItemsSource="{Binding UserAttachments}"
+                                                          Margin="0,8,0,0"
+                                                          Visibility="{Binding HasUserAttachments, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" CornerRadius="5" Margin="0,0,8,8" Padding="6">
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <Image Source="{Binding ManagedPath}" Width="108" Height="80" Stretch="Uniform" ToolTip="{Binding DisplayName}" Visibility="{Binding IsImage, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                                                <TextBlock Text="{Binding KindLabel}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,6,0" Visibility="{Binding IsImage, Converter={StaticResource InverseBooleanToVisibilityConverter}}"/>
+                                                                <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="200"/>
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                    <Grid Margin="0,6,0,0" AutomationProperties.Name="User message footer">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding StartedAtLocalTime, StringFormat={}{0:g}}"
+                                                   Style="{StaticResource ConversationMetadataText}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,8,0"
+                                                   AutomationProperties.Name="User message date and time"/>
+                                        <Button Grid.Column="2"
+                                                Content="Edit"
+                                                Command="{Binding DataContext.TaskWorkspace.Conversation.BeginPromptEditCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}"
+                                                Visibility="{Binding CanEditPrompt, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                Style="{StaticResource CompactButton}"
+                                                MinHeight="24"
+                                                Padding="7,2"
+                                                Margin="0,0,6,0"
+                                                ToolTip="Edit and resubmit this prompt"
+                                                AutomationProperties.Name="Edit user prompt"/>
+                                        <Button Grid.Column="3"
+                                                Content="Copy"
+                                                CommandParameter="{Binding UserPrompt}"
+                                                Style="{StaticResource CompactButton}"
+                                                MinHeight="24"
+                                                Padding="7,2"
+                                                Click="OnCopyMessageClick"
+                                                ToolTip="Copy user message"
+                                                AutomationProperties.Name="Copy user message"/>
+                                    </Grid>
+                                </StackPanel>
+
+                                <StackPanel Margin="0,0,48,0">
+                                    <Border Style="{StaticResource ConversationAssistantSurface}" AutomationProperties.Name="Assistant turn">
+                                        <StackPanel>
+                                            <StackPanel Visibility="{Binding ShowsCommentaryChannel, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                        AutomationProperties.Name="Assistant commentary">
+                                                <Expander Header="{Binding WorkSummary}"
+                                                          IsExpanded="{Binding IsActivityExpanded, Mode=TwoWay}"
+                                                          AutomationProperties.Name="Work details">
+                                                    <ItemsControl ItemsSource="{Binding Activity}" Margin="0,6,0,0">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Grid>
+                                                                    <controls:MarkdownTextBlock Markdown="{Binding Detail}"
+                                                                                                LinkCommand="{Binding DataContext.TaskWorkspace.Conversation.OpenExternalUriCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                                                Style="{StaticResource ConversationBodyText}"
+                                                                                                Margin="0,5,0,8"
+                                                                                                Visibility="{Binding IsAssistantCommentary, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                                                                AutomationProperties.LiveSetting="Polite"/>
+                                                                    <Border BorderBrush="{DynamicResource LineBrush}"
+                                                                            BorderThickness="0,0,0,1"
+                                                                            Padding="0,7"
+                                                                            Visibility="{Binding IsSupportingActivity, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                                        <Grid>
+                                                                            <Grid.ColumnDefinitions><ColumnDefinition Width="8"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                                            <Ellipse Width="7" Height="7" Fill="{DynamicResource SignalBrush}" VerticalAlignment="Top" Margin="0,5,0,0"/>
+                                                                            <StackPanel Grid.Column="2"><TextBlock Text="{Binding Title}" Style="{StaticResource ConversationActivityTitleText}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource ConversationActivityDetailText}" Margin="0,2,0,0"/></StackPanel>
+                                                                            <TextBlock Grid.Column="3" Text="{Binding CategoryLabel}" Style="{StaticResource ConversationMetadataText}" Margin="8,2,0,0"/>
+                                                                        </Grid>
+                                                                    </Border>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </Expander>
+                                            </StackPanel>
+                                            <StackPanel Visibility="{Binding ShowsAssistantChannel, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                        AutomationProperties.Name="Assistant message">
+                                                <controls:MarkdownTextBlock Markdown="{Binding AssistantResponseDisplay}"
+                                                                            LinkCommand="{Binding DataContext.TaskWorkspace.Conversation.OpenExternalUriCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                            EditImageCommand="{Binding DataContext.TaskWorkspace.Conversation.EditGeneratedImageCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                            Style="{StaticResource ConversationBodyText}"
+                                                                            AutomationProperties.LiveSetting="Polite"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                    <Grid Margin="0,6,0,0"
+                                          Visibility="{Binding ShowsAssistantChannel, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                          AutomationProperties.Name="Assistant message footer">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0"
+                                                   Text="{Binding CompletedAtLocalTime, StringFormat={}{0:g}}"
+                                                   Style="{StaticResource ConversationMetadataText}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,8,0"
+                                                   AutomationProperties.Name="Assistant message date and time"/>
+                                        <Button Grid.Column="1"
+                                                Content="Copy"
+                                                CommandParameter="{Binding AssistantResponse}"
+                                                IsEnabled="{Binding HasAssistantResponse}"
+                                                Style="{StaticResource CompactButton}"
+                                                MinHeight="24"
+                                                Padding="7,2"
+                                                Margin="0,0,6,0"
+                                                Click="OnCopyMessageClick"
+                                                ToolTip="Copy assistant message"
+                                                AutomationProperties.Name="Copy assistant message"/>
+                                        <Button Grid.Column="2"
+                                                Content="Fork"
+                                                Command="{Binding DataContext.TaskWorkspace.Conversation.ForkConversationCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource CompactButton}"
+                                                MinHeight="24"
+                                                Padding="7,2"
+                                                ToolTip="Continue from this response in a new chat"
+                                                AutomationProperties.Name="Fork conversation from assistant message"/>
+                                    </Grid>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <Button x:Name="JumpLatestButton" Grid.Row="1" Content="Jump to latest" Style="{StaticResource CompactButton}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,14,14" Visibility="Collapsed" Click="OnJumpLatestClick"/>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>
+

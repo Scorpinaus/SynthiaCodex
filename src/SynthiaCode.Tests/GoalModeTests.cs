@@ -299,15 +299,15 @@ internal static class GoalModeTests
         resources["ConversationActivityTitleText"] = new Style(typeof(TextBlock));
         resources["ConversationActivityDetailText"] = new Style(typeof(TextBlock));
         var view = new TaskView { Width = 620, Height = 520 };
-        var row = view.FindName("GoalProgressRow") as Border;
-        var prompt = view.FindName("PromptInputPanel") as Grid;
-        var editor = view.FindName("GoalObjectiveEditor") as TextBox;
-        var objective = view.FindName("GoalObjectiveText") as TextBlock;
-        var set = view.FindName("SetGoalButton") as Button;
-        var toggle = view.FindName("GoalToggleButton") as Button;
-        var edit = view.FindName("GoalEditButton") as Button;
-        var clear = view.FindName("GoalClearButton") as Button;
-        var save = view.FindName("SaveGoalButton") as Button;
+        var row = WpfTestHost.FindNamedDescendant<Border>(view, "GoalProgressRow");
+        var prompt = WpfTestHost.FindNamedDescendant<Grid>(view, "PromptInputPanel");
+        var editor = WpfTestHost.FindNamedDescendant<TextBox>(view, "GoalObjectiveEditor");
+        var objective = WpfTestHost.FindNamedDescendant<TextBlock>(view, "GoalObjectiveText");
+        var set = WpfTestHost.FindNamedDescendant<Button>(view, "SetGoalButton");
+        var toggle = WpfTestHost.FindNamedDescendant<Button>(view, "GoalToggleButton");
+        var edit = WpfTestHost.FindNamedDescendant<Button>(view, "GoalEditButton");
+        var clear = WpfTestHost.FindNamedDescendant<Button>(view, "GoalClearButton");
+        var save = WpfTestHost.FindNamedDescendant<Button>(view, "SaveGoalButton");
 
         Assert(row is not null && prompt is not null, "goal row and prompt are rendered");
         Assert(Grid.GetRow(row!) < Grid.GetRow(prompt!), "goal progress appears above the prompt");

@@ -130,7 +130,7 @@ internal static class ApprovalPresentationTests
     {
         var root = FindRepositoryRoot();
         var mainWindow = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "MainWindow.xaml"));
-        var taskView = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "TaskView.xaml"));
+        var taskView = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "TaskComposerView.xaml"));
         var details = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "DetailsView.xaml"));
         var approval = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "ApprovalPromptView.xaml"));
 

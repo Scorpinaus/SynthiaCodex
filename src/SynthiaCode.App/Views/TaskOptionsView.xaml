@@ -1,0 +1,196 @@
+<UserControl x:Class="SynthiaCode.App.Views.TaskOptionsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:SynthiaCode.App.Controls"
+             xmlns:views="clr-namespace:SynthiaCode.App.Views"
+             UseLayoutRounding="True"
+             SnapsToDevicePixels="True">
+    <Grid HorizontalAlignment="Left">
+                        <Button x:Name="ModelOptionsButton"
+                                Command="{Binding TaskWorkspace.Options.OpenOptionsCommand}"
+                                Style="{StaticResource CompactButton}"
+                                MinHeight="32"
+                                MaxWidth="340"
+                                Padding="10,4"
+                                HorizontalAlignment="Left"
+                                HorizontalContentAlignment="Left"
+                                IsEnabled="{Binding TaskWorkspace.Options.IsTurnRunning, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                                ToolTip="Choose the model, reasoning effort, and Fast mode for the next turn."
+                                AutomationProperties.Name="Model, reasoning, and Fast options">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding TaskWorkspace.Options.ModelSelectionSummary}"
+                                           TextTrimming="CharacterEllipsis"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1" Text="⌄" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Button>
+                        <Popup x:Name="ModelOptionsPopup"
+                               PlacementTarget="{Binding ElementName=ModelOptionsButton}"
+                               Placement="Top"
+                               VerticalOffset="-8"
+                               IsOpen="{Binding TaskWorkspace.Options.IsOptionsFlyoutOpen, Mode=TwoWay}"
+                               StaysOpen="False"
+                               AllowsTransparency="True"
+                               DataContext="{Binding DataContext, ElementName=ModelOptionsButton}">
+                            <Border Width="380"
+                                    MaxHeight="460"
+                                    Padding="12"
+                                    CornerRadius="8"
+                                    Background="{DynamicResource PanelBrush}"
+                                    BorderBrush="{DynamicResource ButtonBorderBrush}"
+                                    BorderThickness="1"
+                                    PreviewKeyDown="OnModelOptionsPreviewKeyDown">
+                                <Grid>
+                                    <StackPanel Visibility="{Binding TaskWorkspace.Options.IsOptionsMainPage, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <Grid Margin="4,2,4,10">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Text="Model options" FontSize="15" FontWeight="SemiBold"/>
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding TaskWorkspace.Options.AccountPlanLabel}"
+                                                       Foreground="{DynamicResource MutedInkBrush}"
+                                                       Visibility="{Binding TaskWorkspace.Options.HasAccountPlanLabel, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                       AutomationProperties.Name="Account plan context"/>
+                                        </Grid>
+    
+                                        <Button Command="{Binding TaskWorkspace.Options.ShowModelsCommand}"
+                                                Margin="0,2"
+                                                Padding="10,8"
+                                                HorizontalContentAlignment="Stretch"
+                                                AutomationProperties.Name="Choose model">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <TextBlock Text="Model" Foreground="{DynamicResource MutedInkBrush}"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding TaskWorkspace.Options.SelectedModel.DisplayName, TargetNullValue=Load models}" TextTrimming="CharacterEllipsis"/>
+                                                <Path Grid.Column="2"
+                                                      Data="{StaticResource IconChevronRight}"
+                                                      Width="6"
+                                                      Height="10"
+                                                      Margin="8,0,0,0"
+                                                      Stroke="{DynamicResource TextSecondaryBrush}"
+                                                      StrokeThickness="1.5"
+                                                      Stretch="Uniform"/>
+                                            </Grid>
+                                        </Button>
+    
+                                        <Button Command="{Binding TaskWorkspace.Options.ShowReasoningCommand}"
+                                                Margin="0,2"
+                                                Padding="10,8"
+                                                HorizontalContentAlignment="Stretch"
+                                                AutomationProperties.Name="Choose reasoning effort">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <TextBlock Text="Reasoning" Foreground="{DynamicResource MutedInkBrush}"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding TaskWorkspace.Options.SelectedReasoning.DisplayName, TargetNullValue=Default}"/>
+                                                <Path Grid.Column="2"
+                                                      Data="{StaticResource IconChevronRight}"
+                                                      Width="6"
+                                                      Height="10"
+                                                      Margin="8,0,0,0"
+                                                      Stroke="{DynamicResource TextSecondaryBrush}"
+                                                      StrokeThickness="1.5"
+                                                      Stretch="Uniform"/>
+                                            </Grid>
+                                        </Button>
+    
+                                        <Border Margin="0,8,0,4" Padding="10,8" Background="{DynamicResource FieldBrush}" CornerRadius="5">
+                                            <StackPanel>
+                                                <CheckBox Content="Fast mode"
+                                                          IsChecked="{Binding TaskWorkspace.Options.IsFastModeEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                          IsEnabled="{Binding TaskWorkspace.Options.IsFastModeAvailable}"
+                                                          AutomationProperties.Name="Fast mode"/>
+                                                <TextBlock Text="{Binding TaskWorkspace.Options.FastModeDescription}"
+                                                           Foreground="{DynamicResource MutedInkBrush}"
+                                                           FontSize="11"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,5,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+    
+                                        <TextBlock Text="Loading the model catalog..."
+                                                   Margin="4,8,4,2"
+                                                   Foreground="{DynamicResource MutedInkBrush}"
+                                                   Visibility="{Binding TaskWorkspace.Options.IsModelCatalogLoading, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                        <TextBlock Text="{Binding TaskWorkspace.Options.ModelCatalogError}"
+                                                   Margin="4,8,4,2"
+                                                   Foreground="{DynamicResource DangerBrush}"
+                                                   TextWrapping="Wrap"
+                                                   Visibility="{Binding TaskWorkspace.Options.HasModelCatalogError, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                   AutomationProperties.LiveSetting="Polite"/>
+                                        <Button Content="Refresh models"
+                                                Command="{Binding TaskWorkspace.Options.LoadModelsCommand}"
+                                                Style="{StaticResource CompactButton}"
+                                                HorizontalAlignment="Left"
+                                                Margin="0,8,0,0"/>
+                                    </StackPanel>
+    
+                                    <StackPanel Visibility="{Binding TaskWorkspace.Options.IsOptionsModelPage, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <Button Content="Back to model options"
+                                                Command="{Binding TaskWorkspace.Options.ShowOptionsMainCommand}"
+                                                Style="{StaticResource CompactButton}"
+                                                HorizontalAlignment="Left"
+                                                Margin="0,0,0,8"/>
+                                        <ListBox ItemsSource="{Binding TaskWorkspace.Options.ModelCatalog}"
+                                                 SelectedItem="{Binding TaskWorkspace.Options.SelectedModel, Mode=TwoWay}"
+                                                 MaxHeight="360"
+                                                 BorderThickness="0"
+                                                 Background="Transparent"
+                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                                 AutomationProperties.Name="Available models">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Margin="8,4"
+                                                                MaxHeight="44"
+                                                                ToolTip="{Binding AvailabilityMessage}">
+                                                        <TextBlock Text="{Binding DisplayName}"
+                                                                   FontWeight="SemiBold"
+                                                                   TextWrapping="NoWrap"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding Description}"
+                                                                   Foreground="{DynamicResource MutedInkBrush}"
+                                                                   FontSize="11"
+                                                                   TextWrapping="NoWrap"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   ToolTip="{Binding Description}"
+                                                                   Margin="0,2,0,0"/>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </StackPanel>
+    
+                                    <StackPanel Visibility="{Binding TaskWorkspace.Options.IsOptionsReasoningPage, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <Button Content="Back to model options"
+                                                Command="{Binding TaskWorkspace.Options.ShowOptionsMainCommand}"
+                                                Style="{StaticResource CompactButton}"
+                                                HorizontalAlignment="Left"
+                                                Margin="0,0,0,8"/>
+                                        <TextBlock Text="{Binding TaskWorkspace.Options.SelectedModel.DisplayName}"
+                                                   Foreground="{DynamicResource MutedInkBrush}"
+                                                   Margin="8,0,8,6"/>
+                                        <ListBox ItemsSource="{Binding TaskWorkspace.Options.ReasoningOptions}"
+                                                 SelectedItem="{Binding TaskWorkspace.Options.SelectedReasoning, Mode=TwoWay}"
+                                                 MaxHeight="330"
+                                                 BorderThickness="0"
+                                                 Background="Transparent"
+                                                 AutomationProperties.Name="Supported reasoning efforts">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Margin="8,6">
+                                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
+                                                        <TextBlock Text="{Binding Description}" Foreground="{DynamicResource MutedInkBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </Popup>
+    </Grid>
+</UserControl>
+

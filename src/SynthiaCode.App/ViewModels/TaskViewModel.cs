@@ -13,7 +13,6 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand submitCommand;
     private readonly AsyncRelayCommand composerSendCommand;
     private readonly AsyncRelayCommand cancelCommand;
-    private readonly AsyncRelayCommand loadModelsCommand;
     private readonly AsyncRelayCommand steerCommand;
     private readonly AsyncRelayCommand alternateFollowUpCommand;
     private readonly AsyncRelayCommand toggleDictationCommand;
@@ -31,10 +30,6 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand sendQueuedFollowUpCommand;
     private readonly RelayCommand openExternalUriCommand;
     private readonly AsyncRelayCommand editGeneratedImageCommand;
-    private readonly RelayCommand openOptionsCommand;
-    private readonly RelayCommand showOptionsMainCommand;
-    private readonly RelayCommand showModelsCommand;
-    private readonly RelayCommand showReasoningCommand;
     private readonly RelayCommand removeAttachmentCommand;
     private readonly RelayCommand moveAttachmentLeftCommand;
     private readonly RelayCommand moveAttachmentRightCommand;
@@ -42,21 +37,9 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
     private readonly RelayCommand closeFindInChatCommand;
     private readonly RelayCommand findNextCommand;
     private readonly RelayCommand findPreviousCommand;
-    private readonly IAgentManagementActions agentActions;
     private readonly ISpeechRecognitionService speechRecognitionService;
-    private readonly AsyncRelayCommand openAgentCommand;
-    private readonly AsyncRelayCommand steerAgentCommand;
-    private readonly AsyncRelayCommand stopAgentCommand;
-    private readonly RelayCommand closeAgentTranscriptCommand;
-    private readonly IGoalManagementActions? goalActions;
     private readonly ICodeReviewActions? codeReviewActions;
-    private readonly RelayCommand beginGoalEditCommand;
-    private readonly RelayCommand cancelGoalEditCommand;
-    private readonly AsyncRelayCommand saveGoalCommand;
-    private readonly AsyncRelayCommand toggleGoalStatusCommand;
-    private readonly AsyncRelayCommand clearGoalCommand;
     private readonly List<CodexConversationTurn> findMatches = [];
-    private readonly Dictionary<string, AgentThreadViewModel> agentsByThread = new(StringComparer.Ordinal);
     private ConversationWorkspaceSnapshot conversation = ConversationWorkspaceSnapshot.Empty;
     private CodexFollowUpQueue followUpQueue = new();
     private readonly ObservableCollection<CodexTimelineItem> timelineItems = [];
@@ -64,38 +47,16 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
     private readonly ObservableCollection<string> rawEvents = [];
     private string prompt = string.Empty;
     private string submittedPrompt = string.Empty;
-    private string modelOverride = string.Empty;
-    private string reasoningEffortOverride = string.Empty;
     private string steeringText = string.Empty;
     private string appServerHealth = "Codex idle";
-    private string accountPlanLabel = string.Empty;
-    private string modelCatalogError = string.Empty;
-    private CodexModelOption? selectedModel;
-    private CodexReasoningOption? selectedReasoning;
-    private CodexServiceTierSelection serviceTierSelection;
     private FollowUpBehavior followUpBehavior = FollowUpBehavior.Queue;
-    private ComposerOptionsPage optionsPage;
     private bool isTurnRunning;
-    private bool isOptionsFlyoutOpen;
-    private bool isModelCatalogLoading;
-    private bool isModelCatalogStale = true;
     private bool isFindInChatOpen;
     private string findInChatText = string.Empty;
     private int currentFindMatchIndex = -1;
-    private AgentThreadViewModel? selectedAgent;
-    private bool isAgentTranscriptOpen;
-    private bool isRefreshingAgents;
     private bool isDictating;
     private bool isDisposed;
     private string dictationStatusText = string.Empty;
-    private CodexThreadGoal? goal;
-    private string goalDraft = string.Empty;
-    private string goalError = string.Empty;
-    private bool isGoalFeatureAvailable;
-    private bool isGoalSupported;
-    private bool isGoalLoading;
-    private bool isGoalEditing;
-    private bool isGoalBusy;
 
     public TaskViewModel(
         ITurnExecutionActions turnActions,
@@ -107,8 +68,6 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
         IGoalManagementActions? goalActions = null,
         ICodeReviewActions? codeReviewActions = null)
     {
-        this.agentActions = agentActions;
-        this.goalActions = goalActions;
         this.codeReviewActions = codeReviewActions;
         this.speechRecognitionService = speechRecognitionService ?? UnavailableSpeechRecognitionService.Instance;
         this.speechRecognitionService.SpeechRecognized += OnSpeechRecognized;
@@ -146,9 +105,6 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
                     ? codeReviewActions!.CanStartCodeReview()
                     : turnActions.CanSubmitTurn());
         CancelCommand = cancelCommand = new AsyncRelayCommand(turnActions.CancelAsync, turnActions.CanCancelTurn);
-        LoadModelsCommand = loadModelsCommand = new AsyncRelayCommand(
-            composerActions.LoadModelsAsync,
-            composerActions.CanLoadModels);
         SteerCommand = steerCommand = new AsyncRelayCommand(turnActions.SteerAsync, turnActions.CanSteerTurn);
         AlternateFollowUpCommand = alternateFollowUpCommand = new AsyncRelayCommand(
             followUpActions.SendAlternateFollowUpAsync,
@@ -294,25 +250,6 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
             parameter => parameter is string path &&
                 !IsTurnRunning &&
                 LocalImageResourcePolicy.TryCreateSupportedUri(path, out _, out _));
-        OpenOptionsCommand = openOptionsCommand = new RelayCommand(
-            () =>
-            {
-                OptionsPage = ComposerOptionsPage.Main;
-                IsOptionsFlyoutOpen = true;
-                if (IsModelCatalogStale && !IsModelCatalogLoading)
-                {
-                    loadModelsCommand.Execute(null);
-                }
-            },
-            () => !IsTurnRunning);
-        ShowOptionsMainCommand = showOptionsMainCommand = new RelayCommand(
-            () => OptionsPage = ComposerOptionsPage.Main);
-        ShowModelsCommand = showModelsCommand = new RelayCommand(
-            () => OptionsPage = ComposerOptionsPage.Models,
-            () => ModelCatalog.Count > 0);
-        ShowReasoningCommand = showReasoningCommand = new RelayCommand(
-            () => OptionsPage = ComposerOptionsPage.Reasoning,
-            () => ReasoningOptions.Count > 0);
         OpenFindInChatCommand = openFindInChatCommand = new RelayCommand(
             () => IsFindInChatOpen = true);
         CloseFindInChatCommand = closeFindInChatCommand = new RelayCommand(CloseFindInChat);
@@ -322,42 +259,65 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
         FindPreviousCommand = findPreviousCommand = new RelayCommand(
             () => MoveFindMatch(-1),
             () => findMatches.Count > 0);
-        OpenAgentCommand = openAgentCommand = new AsyncRelayCommand(OpenAgentAsync, CanOpenAgent);
-        SteerAgentCommand = steerAgentCommand = new AsyncRelayCommand(SteerAgentAsync, CanSteerAgent);
-        StopAgentCommand = stopAgentCommand = new AsyncRelayCommand(StopAgentAsync, CanStopAgent);
-        CloseAgentTranscriptCommand = closeAgentTranscriptCommand = new RelayCommand(CloseAgentTranscript);
-        BeginGoalEditCommand = beginGoalEditCommand = new RelayCommand(BeginGoalEdit, CanBeginGoalEdit);
-        CancelGoalEditCommand = cancelGoalEditCommand = new RelayCommand(CancelGoalEdit, () => IsGoalEditing && !IsGoalBusy);
-        SaveGoalCommand = saveGoalCommand = new AsyncRelayCommand(SaveGoalAsync, CanSaveGoal);
-        ToggleGoalStatusCommand = toggleGoalStatusCommand = new AsyncRelayCommand(ToggleGoalStatusAsync, CanToggleGoalStatus);
-        ClearGoalCommand = clearGoalCommand = new AsyncRelayCommand(ClearGoalAsync, CanClearGoal);
+        Agents = new TaskAgentsViewModel(agentActions);
+        Agents.PropertyChanged += (_, args) =>
+        {
+            if (!string.IsNullOrWhiteSpace(args.PropertyName))
+            {
+                OnPropertyChanged(args.PropertyName);
+            }
+        };
+        Goals = new TaskGoalsViewModel(goalActions, () => ConversationThreadId);
+        Goals.PropertyChanged += (_, args) =>
+        {
+            if (!string.IsNullOrWhiteSpace(args.PropertyName))
+            {
+                OnPropertyChanged(args.PropertyName);
+            }
+        };
+        Options = new TaskOptionsViewModel(
+            composerActions,
+            () => IsTurnRunning,
+            () =>
+            {
+                OnPropertyChanged(nameof(CanSubmitAttachments));
+                OnPropertyChanged(nameof(AttachmentValidationMessage));
+                RaiseCommandStates();
+            });
+        Options.PropertyChanged += (_, args) =>
+        {
+            if (!string.IsNullOrWhiteSpace(args.PropertyName))
+            {
+                OnPropertyChanged(args.PropertyName);
+            }
+        };
+        Conversation = new TaskConversationViewModel(this);
+        Composer = new TaskComposerViewModel(this);
     }
+
+    public TaskConversationViewModel Conversation { get; }
+
+    public TaskComposerViewModel Composer { get; }
 
     public ObservableCollection<CodexTimelineItem> TimelineItems => timelineItems;
 
     public ObservableCollection<CodexConversationTurn> ConversationTurns => conversationTurns;
 
-    public ObservableCollection<AgentThreadViewModel> ActiveAgents { get; } = [];
+    public TaskAgentsViewModel Agents { get; }
 
-    public ObservableCollection<AgentThreadViewModel> DoneAgents { get; } = [];
+    public ObservableCollection<AgentThreadViewModel> ActiveAgents => Agents.ActiveAgents;
 
-    public bool HasAgents => ActiveAgents.Count > 0 || DoneAgents.Count > 0;
+    public ObservableCollection<AgentThreadViewModel> DoneAgents => Agents.DoneAgents;
 
-    public bool HasActiveAgents => ActiveAgents.Count > 0;
+    public bool HasAgents => Agents.HasAgents;
 
-    public bool HasDoneAgents => DoneAgents.Count > 0;
+    public bool HasActiveAgents => Agents.HasActiveAgents;
 
-    public AgentThreadViewModel? SelectedAgent
-    {
-        get => selectedAgent;
-        private set => SetProperty(ref selectedAgent, value);
-    }
+    public bool HasDoneAgents => Agents.HasDoneAgents;
 
-    public bool IsAgentTranscriptOpen
-    {
-        get => isAgentTranscriptOpen;
-        private set => SetProperty(ref isAgentTranscriptOpen, value);
-    }
+    public AgentThreadViewModel? SelectedAgent => Agents.SelectedAgent;
+
+    public bool IsAgentTranscriptOpen => Agents.IsAgentTranscriptOpen;
 
     public string? ConversationThreadId => conversation.ThreadId;
 
@@ -367,13 +327,15 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
 
     public ObservableCollection<AttachmentReference> Attachments { get; } = [];
 
-    public ObservableCollection<string> ModelOptions { get; } = [];
+    public TaskOptionsViewModel Options { get; }
 
-    public ObservableCollection<CodexModelOption> ModelCatalog { get; } = [];
+    public ObservableCollection<string> ModelOptions => Options.ModelOptions;
 
-    public ObservableCollection<CodexReasoningOption> ReasoningOptions { get; } = [];
+    public ObservableCollection<CodexModelOption> ModelCatalog => Options.ModelCatalog;
 
-    public ObservableCollection<string> ReasoningEffortOptions { get; } = [];
+    public ObservableCollection<CodexReasoningOption> ReasoningOptions => Options.ReasoningOptions;
+
+    public ObservableCollection<string> ReasoningEffortOptions => Options.ReasoningEffortOptions;
 
     public ComposerSkillSelectorViewModel SkillSelector { get; }
 
@@ -383,7 +345,7 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
     public ICommand SubmitCommand { get; }
     public ICommand ComposerSendCommand { get; }
     public ICommand CancelCommand { get; }
-    public ICommand LoadModelsCommand { get; }
+    public ICommand LoadModelsCommand => Options.LoadModelsCommand;
     public ICommand SteerCommand { get; }
     public ICommand AlternateFollowUpCommand { get; }
     public ICommand ToggleDictationCommand { get; }
@@ -401,10 +363,10 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
     public ICommand SendQueuedFollowUpCommand => sendQueuedFollowUpCommand;
     public ICommand OpenExternalUriCommand { get; }
     public ICommand EditGeneratedImageCommand { get; }
-    public ICommand OpenOptionsCommand { get; }
-    public ICommand ShowOptionsMainCommand { get; }
-    public ICommand ShowModelsCommand { get; }
-    public ICommand ShowReasoningCommand { get; }
+    public ICommand OpenOptionsCommand => Options.OpenOptionsCommand;
+    public ICommand ShowOptionsMainCommand => Options.ShowOptionsMainCommand;
+    public ICommand ShowModelsCommand => Options.ShowModelsCommand;
+    public ICommand ShowReasoningCommand => Options.ShowReasoningCommand;
     public ICommand RemoveAttachmentCommand { get; }
     public ICommand MoveAttachmentLeftCommand { get; }
     public ICommand MoveAttachmentRightCommand { get; }
@@ -412,15 +374,17 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
     public ICommand CloseFindInChatCommand { get; }
     public ICommand FindNextCommand { get; }
     public ICommand FindPreviousCommand { get; }
-    public ICommand OpenAgentCommand { get; }
-    public ICommand SteerAgentCommand { get; }
-    public ICommand StopAgentCommand { get; }
-    public ICommand CloseAgentTranscriptCommand { get; }
-    public ICommand BeginGoalEditCommand { get; }
-    public ICommand CancelGoalEditCommand { get; }
-    public ICommand SaveGoalCommand { get; }
-    public ICommand ToggleGoalStatusCommand { get; }
-    public ICommand ClearGoalCommand { get; }
+    public ICommand OpenAgentCommand => Agents.OpenAgentCommand;
+    public ICommand SteerAgentCommand => Agents.SteerAgentCommand;
+    public ICommand StopAgentCommand => Agents.StopAgentCommand;
+    public ICommand CloseAgentTranscriptCommand => Agents.CloseAgentTranscriptCommand;
+    public TaskGoalsViewModel Goals { get; }
+
+    public ICommand BeginGoalEditCommand => Goals.BeginGoalEditCommand;
+    public ICommand CancelGoalEditCommand => Goals.CancelGoalEditCommand;
+    public ICommand SaveGoalCommand => Goals.SaveGoalCommand;
+    public ICommand ToggleGoalStatusCommand => Goals.ToggleGoalStatusCommand;
+    public ICommand ClearGoalCommand => Goals.ClearGoalCommand;
 
     public bool IsDictationAvailable => speechRecognitionService.Availability.IsAvailable;
 
@@ -459,394 +423,53 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
 
     public string DictationAutomationName => IsDictating ? "Stop dictation" : "Start dictation";
 
-    public CodexThreadGoal? Goal => goal;
+    public CodexThreadGoal? Goal => Goals.Goal;
 
-    public bool IsGoalFeatureAvailable
-    {
-        get => isGoalFeatureAvailable;
-        private set => SetProperty(ref isGoalFeatureAvailable, value);
-    }
+    public bool IsGoalFeatureAvailable => Goals.IsGoalFeatureAvailable;
 
-    public bool IsGoalSupported
-    {
-        get => isGoalSupported;
-        private set
-        {
-            if (SetProperty(ref isGoalSupported, value))
-            {
-                RaiseGoalCommandStates();
-            }
-        }
-    }
+    public bool IsGoalSupported => Goals.IsGoalSupported;
 
-    public bool IsGoalLoading
-    {
-        get => isGoalLoading;
-        private set
-        {
-            if (SetProperty(ref isGoalLoading, value))
-            {
-                RaiseGoalCommandStates();
-            }
-        }
-    }
+    public bool IsGoalLoading => Goals.IsGoalLoading;
 
-    public bool IsGoalEditing
-    {
-        get => isGoalEditing;
-        private set
-        {
-            if (SetProperty(ref isGoalEditing, value))
-            {
-                OnPropertyChanged(nameof(GoalEditorValidationMessage));
-                RaiseGoalCommandStates();
-            }
-        }
-    }
+    public bool IsGoalEditing => Goals.IsGoalEditing;
 
-    public bool IsGoalBusy
-    {
-        get => isGoalBusy;
-        private set
-        {
-            if (SetProperty(ref isGoalBusy, value))
-            {
-                RaiseGoalCommandStates();
-            }
-        }
-    }
+    public bool IsGoalBusy => Goals.IsGoalBusy;
 
     public string GoalDraft
     {
-        get => goalDraft;
-        set
-        {
-            if (SetProperty(ref goalDraft, value ?? string.Empty))
-            {
-                OnPropertyChanged(nameof(GoalEditorValidationMessage));
-                OnPropertyChanged(nameof(GoalCharacterCount));
-                saveGoalCommand.RaiseCanExecuteChanged();
-            }
-        }
+        get => Goals.GoalDraft;
+        set => Goals.GoalDraft = value;
     }
 
-    public string GoalError
-    {
-        get => goalError;
-        private set
-        {
-            if (SetProperty(ref goalError, value ?? string.Empty))
-            {
-                OnPropertyChanged(nameof(HasGoalError));
-            }
-        }
-    }
+    public string GoalError => Goals.GoalError;
 
-    public bool HasGoal => Goal is not null;
+    public bool HasGoal => Goals.HasGoal;
 
-    public bool HasGoalError => !string.IsNullOrWhiteSpace(GoalError);
+    public bool HasGoalError => Goals.HasGoalError;
 
-    public string GoalObjective => Goal?.Objective ?? string.Empty;
+    public string GoalObjective => Goals.GoalObjective;
 
-    public string GoalStatusLabel => Goal?.Status.ToDisplayName() ?? string.Empty;
+    public string GoalStatusLabel => Goals.GoalStatusLabel;
 
-    public string GoalStatusAutomationName => HasGoal ? $"Goal status: {GoalStatusLabel}" : "No goal set";
+    public string GoalStatusAutomationName => Goals.GoalStatusAutomationName;
 
-    public string GoalToggleActionLabel => Goal?.Status == CodexThreadGoalStatus.Active ? "Pause" : "Resume";
+    public string GoalToggleActionLabel => Goals.GoalToggleActionLabel;
 
-    public string GoalUsageSummary
-    {
-        get
-        {
-            if (Goal is null)
-            {
-                return string.Empty;
-            }
+    public string GoalUsageSummary => Goals.GoalUsageSummary;
 
-            var tokens = Goal.TokenBudget is > 0
-                ? $"{FormatCompactTokenCount(Goal.TokensUsed)}/{FormatCompactTokenCount(Goal.TokenBudget.Value)} tokens"
-                : $"{FormatCompactTokenCount(Goal.TokensUsed)} tokens";
-            return $"{tokens} | {FormatGoalDuration(Goal.TimeUsedSeconds)}";
-        }
-    }
+    public string GoalCharacterCount => Goals.GoalCharacterCount;
 
-    public string GoalCharacterCount => $"{GoalDraft.Length:N0}/4,000";
+    public string GoalEditorValidationMessage => Goals.GoalEditorValidationMessage;
 
-    public string GoalEditorValidationMessage => !IsGoalEditing
-        ? string.Empty
-        : string.IsNullOrWhiteSpace(GoalDraft)
-            ? "Enter a goal objective."
-            : GoalDraft.Length > 4_000
-                ? "Goal objectives must be 4,000 characters or fewer."
-                : string.Empty;
+    public void ResetGoalContext(bool isCodexThread) => Goals.ResetContext(isCodexThread);
 
-    public void ResetGoalContext(bool isCodexThread)
-    {
-        goal = null;
-        goalDraft = string.Empty;
-        goalError = string.Empty;
-        isGoalLoading = false;
-        isGoalEditing = false;
-        isGoalBusy = false;
-        isGoalFeatureAvailable = isCodexThread;
-        isGoalSupported = isCodexThread;
-        RaiseGoalPropertiesChanged();
-    }
+    public void SetGoalLoading() => Goals.SetLoading();
 
-    public void SetGoalLoading()
-    {
-        if (!IsGoalFeatureAvailable)
-        {
-            return;
-        }
+    public void ApplyGoal(CodexThreadGoal? value) => Goals.Apply(value);
 
-        GoalError = string.Empty;
-        IsGoalLoading = true;
-    }
+    public void SetGoalLoadError(string message) => Goals.SetLoadError(message);
 
-    public void ApplyGoal(CodexThreadGoal? value)
-    {
-        goal = value;
-        isGoalSupported = true;
-        if (!IsGoalEditing)
-        {
-            goalDraft = value?.Objective ?? string.Empty;
-        }
-        GoalError = string.Empty;
-        IsGoalLoading = false;
-        RaiseGoalPropertiesChanged();
-    }
-
-    public void SetGoalLoadError(string message)
-    {
-        IsGoalLoading = false;
-        GoalError = message;
-        RaiseGoalCommandStates();
-    }
-
-    public void SetGoalUnsupported(string message)
-    {
-        IsGoalLoading = false;
-        IsGoalSupported = false;
-        GoalError = message;
-    }
-
-    private void BeginGoalEdit()
-    {
-        GoalDraft = Goal?.Objective ?? string.Empty;
-        GoalError = string.Empty;
-        IsGoalEditing = true;
-    }
-
-    private bool CanBeginGoalEdit() =>
-        IsGoalFeatureAvailable &&
-        IsGoalSupported &&
-        goalActions?.CanManageGoal() == true &&
-        !IsGoalLoading &&
-        !IsGoalBusy &&
-        !IsGoalEditing;
-
-    private void CancelGoalEdit()
-    {
-        GoalDraft = Goal?.Objective ?? string.Empty;
-        GoalError = string.Empty;
-        IsGoalEditing = false;
-    }
-
-    private bool CanSaveGoal() =>
-        IsGoalEditing &&
-        IsGoalSupported &&
-        goalActions?.CanManageGoal() == true &&
-        !IsGoalLoading &&
-        !IsGoalBusy &&
-        string.IsNullOrEmpty(GoalEditorValidationMessage) &&
-        !string.Equals(GoalDraft.Trim(), Goal?.Objective, StringComparison.Ordinal);
-
-    private async Task SaveGoalAsync()
-    {
-        if (!CanSaveGoal() || goalActions is null)
-        {
-            return;
-        }
-
-        var objective = GoalDraft.Trim();
-        var isNewGoal = Goal is null;
-        var contextThreadId = ConversationThreadId;
-        IsGoalBusy = true;
-        GoalError = string.Empty;
-        try
-        {
-            var saved = await goalActions.SetGoalAsync(objective).ConfigureAwait(true);
-            if (!string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
-            {
-                return;
-            }
-            ApplyGoal(saved);
-            IsGoalEditing = false;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            if (string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
-            {
-                GoalError = $"Could not save the goal: {exception.Message}";
-            }
-            return;
-        }
-        finally
-        {
-            if (string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
-            {
-                IsGoalBusy = false;
-            }
-        }
-
-        if (!isNewGoal ||
-            string.IsNullOrWhiteSpace(contextThreadId) ||
-            !string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        try
-        {
-            await goalActions.StartGoalWorkAsync(contextThreadId, objective).ConfigureAwait(true);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            GoalError = $"The goal was saved, but work could not start: {exception.Message}";
-        }
-    }
-
-    private bool CanToggleGoalStatus() =>
-        goalActions?.CanManageGoal() == true &&
-        IsGoalSupported &&
-        !IsGoalLoading &&
-        !IsGoalBusy &&
-        Goal?.Status is CodexThreadGoalStatus.Active or CodexThreadGoalStatus.Paused;
-
-    private async Task ToggleGoalStatusAsync()
-    {
-        if (!CanToggleGoalStatus() || goalActions is null || Goal is null)
-        {
-            return;
-        }
-
-        var status = Goal.Status == CodexThreadGoalStatus.Active
-            ? CodexThreadGoalStatus.Paused
-            : CodexThreadGoalStatus.Active;
-        var contextThreadId = ConversationThreadId;
-        IsGoalBusy = true;
-        GoalError = string.Empty;
-        try
-        {
-            var updated = await goalActions.SetGoalStatusAsync(status).ConfigureAwait(true);
-            if (!string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
-            {
-                return;
-            }
-            ApplyGoal(updated);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            if (string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
-            {
-                GoalError = $"Could not {GoalToggleActionLabel.ToLowerInvariant()} the goal: {exception.Message}";
-            }
-        }
-        finally
-        {
-            if (string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
-            {
-                IsGoalBusy = false;
-            }
-        }
-    }
-
-    private bool CanClearGoal() =>
-        goalActions?.CanManageGoal() == true &&
-        IsGoalSupported &&
-        !IsGoalLoading &&
-        !IsGoalBusy &&
-        HasGoal;
-
-    private async Task ClearGoalAsync()
-    {
-        if (!CanClearGoal() || goalActions is null)
-        {
-            return;
-        }
-
-        var contextThreadId = ConversationThreadId;
-        IsGoalBusy = true;
-        GoalError = string.Empty;
-        try
-        {
-            await goalActions.ClearGoalAsync().ConfigureAwait(true);
-            if (!string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
-            {
-                return;
-            }
-            ApplyGoal(null);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            if (string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
-            {
-                GoalError = $"Could not clear the goal: {exception.Message}";
-            }
-        }
-        finally
-        {
-            if (string.Equals(contextThreadId, ConversationThreadId, StringComparison.Ordinal))
-            {
-                IsGoalBusy = false;
-            }
-        }
-    }
-
-    private void RaiseGoalPropertiesChanged()
-    {
-        OnPropertyChanged(nameof(Goal));
-        OnPropertyChanged(nameof(IsGoalFeatureAvailable));
-        OnPropertyChanged(nameof(IsGoalSupported));
-        OnPropertyChanged(nameof(IsGoalLoading));
-        OnPropertyChanged(nameof(IsGoalEditing));
-        OnPropertyChanged(nameof(IsGoalBusy));
-        OnPropertyChanged(nameof(GoalDraft));
-        OnPropertyChanged(nameof(GoalCharacterCount));
-        OnPropertyChanged(nameof(GoalEditorValidationMessage));
-        OnPropertyChanged(nameof(GoalError));
-        OnPropertyChanged(nameof(HasGoalError));
-        OnPropertyChanged(nameof(HasGoal));
-        OnPropertyChanged(nameof(GoalObjective));
-        OnPropertyChanged(nameof(GoalStatusLabel));
-        OnPropertyChanged(nameof(GoalStatusAutomationName));
-        OnPropertyChanged(nameof(GoalToggleActionLabel));
-        OnPropertyChanged(nameof(GoalUsageSummary));
-        RaiseGoalCommandStates();
-    }
-
-    private void RaiseGoalCommandStates()
-    {
-        beginGoalEditCommand.RaiseCanExecuteChanged();
-        cancelGoalEditCommand.RaiseCanExecuteChanged();
-        saveGoalCommand.RaiseCanExecuteChanged();
-        toggleGoalStatusCommand.RaiseCanExecuteChanged();
-        clearGoalCommand.RaiseCanExecuteChanged();
-    }
-
-    private static string FormatGoalDuration(long totalSeconds)
-    {
-        var duration = TimeSpan.FromSeconds(Math.Max(0, totalSeconds));
-        if (duration.TotalHours >= 1)
-        {
-            return $"{(long)duration.TotalHours}h {duration.Minutes}m";
-        }
-
-        return duration.TotalMinutes >= 1
-            ? $"{(long)duration.TotalMinutes}m"
-            : $"{duration.Seconds}s";
-    }
+    public void SetGoalUnsupported(string message) => Goals.SetUnsupported(message);
 
     public bool HasAttachments => Attachments.Count > 0;
 
@@ -953,188 +576,75 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
 
     public string ModelOverride
     {
-        get => modelOverride;
-        set
-        {
-            if (SetProperty(ref modelOverride, value ?? string.Empty))
-            {
-                OnPropertyChanged(nameof(ModelSelectionSummary));
-            }
-        }
+        get => Options.ModelOverride;
+        set => Options.ModelOverride = value;
     }
 
     public string ReasoningEffortOverride
     {
-        get => reasoningEffortOverride;
-        set
-        {
-            if (SetProperty(ref reasoningEffortOverride, value ?? string.Empty))
-            {
-                OnPropertyChanged(nameof(ModelSelectionSummary));
-            }
-        }
+        get => Options.ReasoningEffortOverride;
+        set => Options.ReasoningEffortOverride = value;
     }
 
     public CodexModelOption? SelectedModel
     {
-        get => selectedModel;
-        set
-        {
-            if (!SetProperty(ref selectedModel, value))
-            {
-                return;
-            }
-
-            if (value is not null)
-            {
-                ModelOverride = value.Model;
-            }
-            RebuildReasoningOptions();
-            ReconcileFastAvailability();
-            OnPropertyChanged(nameof(ModelSelectionSummary));
-            OnPropertyChanged(nameof(FastModeDescription));
-            OnPropertyChanged(nameof(CanSubmitAttachments));
-            OnPropertyChanged(nameof(AttachmentValidationMessage));
-            RaiseCommandStates();
-        }
+        get => Options.SelectedModel;
+        set => Options.SelectedModel = value;
     }
 
     public CodexReasoningOption? SelectedReasoning
     {
-        get => selectedReasoning;
-        set
-        {
-            if (SetProperty(ref selectedReasoning, value))
-            {
-                ReasoningEffortOverride = value?.ProtocolValue ?? string.Empty;
-                OnPropertyChanged(nameof(ModelSelectionSummary));
-            }
-        }
+        get => Options.SelectedReasoning;
+        set => Options.SelectedReasoning = value;
     }
 
     public CodexServiceTierSelection ServiceTierSelection
     {
-        get => serviceTierSelection;
-        set
-        {
-            if (SetProperty(ref serviceTierSelection, value))
-            {
-                OnPropertyChanged(nameof(IsFastModeEnabled));
-                OnPropertyChanged(nameof(ModelSelectionSummary));
-            }
-        }
+        get => Options.ServiceTierSelection;
+        set => Options.ServiceTierSelection = value;
     }
 
     public bool IsFastModeEnabled
     {
-        get => ServiceTierSelection == CodexServiceTierSelection.Fast;
-        set
-        {
-            if (value && !IsFastModeAvailable)
-            {
-                return;
-            }
-            ServiceTierSelection = value
-                ? CodexServiceTierSelection.Fast
-                : CodexServiceTierSelection.Standard;
-        }
+        get => Options.IsFastModeEnabled;
+        set => Options.IsFastModeEnabled = value;
     }
 
-    public bool IsFastModeAvailable => SelectedModel?.SupportsFastMode == true;
+    public bool IsFastModeAvailable => Options.IsFastModeAvailable;
 
-    public string FastModeDescription => SelectedModel?.FastServiceTier?.Description
-        ?? (SelectedModel is null
-            ? "Load models to check Fast availability."
-            : IsFastModeAvailable
-                ? "Faster responses at higher credit use."
-                : $"Fast is not available for {SelectedModel.DisplayName} on this account.");
+    public string FastModeDescription => Options.FastModeDescription;
 
-    public string ModelSelectionSummary
-    {
-        get
-        {
-            var model = SelectedModel?.DisplayName
-                ?? (string.IsNullOrWhiteSpace(ModelOverride) ? "Default model" : ModelOverride);
-            var reasoning = SelectedReasoning?.DisplayName
-                ?? ParseReasoningEffort(ReasoningEffortOverride)?.ToDisplayName();
-            var values = new List<string> { model };
-            if (!string.IsNullOrWhiteSpace(reasoning))
-            {
-                values.Add(reasoning);
-            }
-            if (IsFastModeEnabled)
-            {
-                values.Add("Fast");
-            }
-            return string.Join(" · ", values);
-        }
-    }
+    public string ModelSelectionSummary => Options.ModelSelectionSummary;
 
-    public string AccountPlanLabel
-    {
-        get => accountPlanLabel;
-        private set
-        {
-            if (SetProperty(ref accountPlanLabel, value))
-            {
-                OnPropertyChanged(nameof(HasAccountPlanLabel));
-            }
-        }
-    }
+    public string AccountPlanLabel => Options.AccountPlanLabel;
 
-    public bool HasAccountPlanLabel => !string.IsNullOrWhiteSpace(AccountPlanLabel);
+    public bool HasAccountPlanLabel => Options.HasAccountPlanLabel;
 
-    public bool IsModelCatalogLoading
-    {
-        get => isModelCatalogLoading;
-        private set => SetProperty(ref isModelCatalogLoading, value);
-    }
+    public bool IsModelCatalogLoading => Options.IsModelCatalogLoading;
 
-    public bool IsModelCatalogStale
-    {
-        get => isModelCatalogStale;
-        private set => SetProperty(ref isModelCatalogStale, value);
-    }
+    public bool IsModelCatalogStale => Options.IsModelCatalogStale;
 
-    public string ModelCatalogError
-    {
-        get => modelCatalogError;
-        private set
-        {
-            if (SetProperty(ref modelCatalogError, value))
-            {
-                OnPropertyChanged(nameof(HasModelCatalogError));
-            }
-        }
-    }
+    public string ModelCatalogError => Options.ModelCatalogError;
 
-    public bool HasModelCatalogError => !string.IsNullOrWhiteSpace(ModelCatalogError);
+    public bool HasModelCatalogError => Options.HasModelCatalogError;
 
     public bool IsOptionsFlyoutOpen
     {
-        get => isOptionsFlyoutOpen;
-        set => SetProperty(ref isOptionsFlyoutOpen, value);
+        get => Options.IsOptionsFlyoutOpen;
+        set => Options.IsOptionsFlyoutOpen = value;
     }
 
     public ComposerOptionsPage OptionsPage
     {
-        get => optionsPage;
-        set
-        {
-            if (SetProperty(ref optionsPage, value))
-            {
-                OnPropertyChanged(nameof(IsOptionsMainPage));
-                OnPropertyChanged(nameof(IsOptionsModelPage));
-                OnPropertyChanged(nameof(IsOptionsReasoningPage));
-            }
-        }
+        get => Options.OptionsPage;
+        set => Options.OptionsPage = value;
     }
 
-    public bool IsOptionsMainPage => OptionsPage == ComposerOptionsPage.Main;
+    public bool IsOptionsMainPage => Options.IsOptionsMainPage;
 
-    public bool IsOptionsModelPage => OptionsPage == ComposerOptionsPage.Models;
+    public bool IsOptionsModelPage => Options.IsOptionsModelPage;
 
-    public bool IsOptionsReasoningPage => OptionsPage == ComposerOptionsPage.Reasoning;
+    public bool IsOptionsReasoningPage => Options.IsOptionsReasoningPage;
 
     public string SteeringText
     {
@@ -1251,7 +761,7 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
                 }
                 else
                 {
-                    IsOptionsFlyoutOpen = false;
+                    Options.CloseForRunningTurn();
                 }
 
                 RaiseCommandStates();
@@ -1299,223 +809,8 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(ContextWindowToolTip));
         OnPropertyChanged(nameof(QueuedFollowUps));
         OnPropertyChanged(nameof(HasQueuedFollowUps));
-        RefreshAgents(snapshot, conversationChanged);
+        Agents.ApplySnapshot(snapshot);
         RefreshFindInChatMatches();
-    }
-
-    private void RefreshAgents(ConversationWorkspaceSnapshot snapshot, bool conversationChanged)
-    {
-        isRefreshingAgents = true;
-        try
-        {
-            if (conversationChanged)
-            {
-                agentsByThread.Clear();
-                CloseAgentTranscript();
-            }
-
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var activity in snapshot.ConversationTurns
-                         .SelectMany(turn => turn.Activity)
-                         .Where(item => item.Kind == CodexTimelineItemKind.Collaboration))
-            {
-                foreach (var threadId in activity.CollaborationReceiverThreadIds)
-                {
-                    var agent = GetOrCreateAgent(threadId);
-                    seen.Add(threadId);
-                    if (string.Equals(activity.CollaborationTool, "spawnAgent", StringComparison.Ordinal))
-                    {
-                        if (!string.IsNullOrWhiteSpace(activity.CollaborationPrompt))
-                        {
-                            agent.Prompt = activity.CollaborationPrompt;
-                        }
-
-                        if (!string.IsNullOrWhiteSpace(activity.CollaborationModel))
-                        {
-                            agent.Model = activity.CollaborationModel;
-                        }
-                    }
-                }
-
-                foreach (var state in activity.CollaborationAgentStates)
-                {
-                    var agent = GetOrCreateAgent(state.ThreadId);
-                    seen.Add(state.ThreadId);
-                    agent.SetStatus(state.Status, state.Message);
-                }
-            }
-
-            foreach (var threadId in agentsByThread.Keys.Where(threadId => !seen.Contains(threadId)).ToArray())
-            {
-                if (ReferenceEquals(SelectedAgent, agentsByThread[threadId]))
-                {
-                    CloseAgentTranscript();
-                }
-
-                agentsByThread.Remove(threadId);
-            }
-        }
-        finally
-        {
-            isRefreshingAgents = false;
-        }
-
-        RefreshAgentGroups();
-    }
-
-    private AgentThreadViewModel GetOrCreateAgent(string threadId)
-    {
-        if (agentsByThread.TryGetValue(threadId, out var existing))
-        {
-            return existing;
-        }
-
-        var created = new AgentThreadViewModel(threadId);
-        created.PropertyChanged += (_, args) =>
-        {
-            if (args.PropertyName == nameof(AgentThreadViewModel.IsActive) && !isRefreshingAgents)
-            {
-                RefreshAgentGroups();
-            }
-
-            RaiseAgentCommandStates();
-        };
-        agentsByThread.Add(threadId, created);
-        return created;
-    }
-
-    private void RefreshAgentGroups()
-    {
-        ActiveAgents.Clear();
-        DoneAgents.Clear();
-        foreach (var agent in agentsByThread.Values)
-        {
-            (agent.IsActive ? ActiveAgents : DoneAgents).Add(agent);
-        }
-
-        OnPropertyChanged(nameof(ActiveAgents));
-        OnPropertyChanged(nameof(DoneAgents));
-        OnPropertyChanged(nameof(HasAgents));
-        OnPropertyChanged(nameof(HasActiveAgents));
-        OnPropertyChanged(nameof(HasDoneAgents));
-        RaiseAgentCommandStates();
-    }
-
-    private bool CanOpenAgent(object? parameter) =>
-        parameter is AgentThreadViewModel agent && agent.CanOpen;
-
-    private async Task OpenAgentAsync(object? parameter)
-    {
-        if (parameter is not AgentThreadViewModel agent)
-        {
-            return;
-        }
-
-        SelectedAgent = agent;
-        IsAgentTranscriptOpen = true;
-        await LoadAgentTranscriptAsync(agent).ConfigureAwait(true);
-    }
-
-    private bool CanSteerAgent(object? parameter) =>
-        parameter is AgentThreadViewModel agent && agent.CanSteer;
-
-    private async Task SteerAgentAsync(object? parameter)
-    {
-        if (parameter is not AgentThreadViewModel agent)
-        {
-            return;
-        }
-
-        var message = agent.SteeringText.Trim();
-        if (string.IsNullOrWhiteSpace(agent.ActiveTurnId))
-        {
-            await LoadAgentTranscriptAsync(agent).ConfigureAwait(true);
-        }
-
-        if (string.IsNullOrWhiteSpace(agent.ActiveTurnId))
-        {
-            agent.ErrorMessage = "The agent no longer has a running turn to steer.";
-            return;
-        }
-
-        agent.IsBusy = true;
-        agent.ErrorMessage = string.Empty;
-        try
-        {
-            await agentActions.SteerAgentAsync(agent.ThreadId, agent.ActiveTurnId, message).ConfigureAwait(true);
-            agent.SteeringText = string.Empty;
-        }
-        catch (Exception exception)
-        {
-            agent.ErrorMessage = $"Could not steer agent: {exception.Message}";
-        }
-        finally
-        {
-            agent.IsBusy = false;
-        }
-    }
-
-    private bool CanStopAgent(object? parameter) =>
-        parameter is AgentThreadViewModel agent && agent.CanStop;
-
-    private async Task StopAgentAsync(object? parameter)
-    {
-        if (parameter is not AgentThreadViewModel agent)
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(agent.ActiveTurnId))
-        {
-            await LoadAgentTranscriptAsync(agent).ConfigureAwait(true);
-        }
-
-        if (string.IsNullOrWhiteSpace(agent.ActiveTurnId))
-        {
-            agent.ErrorMessage = "The agent no longer has a running turn to stop.";
-            return;
-        }
-
-        agent.IsBusy = true;
-        agent.ErrorMessage = string.Empty;
-        try
-        {
-            await agentActions.StopAgentAsync(agent.ThreadId, agent.ActiveTurnId).ConfigureAwait(true);
-            agent.SetStatus("interrupted", "Stopped by user.");
-        }
-        catch (Exception exception)
-        {
-            agent.ErrorMessage = $"Could not stop agent: {exception.Message}";
-        }
-        finally
-        {
-            agent.IsBusy = false;
-        }
-    }
-
-    private async Task LoadAgentTranscriptAsync(AgentThreadViewModel agent)
-    {
-        agent.IsBusy = true;
-        agent.ErrorMessage = string.Empty;
-        try
-        {
-            var result = await agentActions.ReadAgentThreadAsync(agent.ThreadId).ConfigureAwait(true);
-            agent.ReplaceTranscript(result.Turns);
-        }
-        catch (Exception exception)
-        {
-            agent.ErrorMessage = $"Could not open agent transcript: {exception.Message}";
-        }
-        finally
-        {
-            agent.IsBusy = false;
-        }
-    }
-
-    private void CloseAgentTranscript()
-    {
-        IsAgentTranscriptOpen = false;
-        SelectedAgent = null;
     }
 
     public bool HasQueuedFollowUps => QueuedFollowUps.Count > 0;
@@ -1794,74 +1089,19 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
 
     public void ApplyModelCatalog(
         IEnumerable<CodexModelOption> models,
-        CodexAccountInfo? account)
-    {
-        ArgumentNullException.ThrowIfNull(models);
-        var requestedModel = ModelOverride;
-        var requestedReasoning = ReasoningEffortOverride;
-        var visibleModels = models
-            .Where(model => !model.Hidden)
-            .DistinctBy(model => model.Model, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        CodexAccountInfo? account) => Options.ApplyModelCatalog(models, account);
 
-        ModelCatalog.Clear();
-        ModelOptions.Clear();
-        foreach (var model in visibleModels)
-        {
-            ModelCatalog.Add(model);
-            ModelOptions.Add(model.Model);
-        }
+    public void SetModelCatalogLoading() => Options.SetModelCatalogLoading();
 
-        AccountPlanLabel = FormatAccountPlan(account);
-        ModelCatalogError = string.Empty;
-        IsModelCatalogLoading = false;
-        IsModelCatalogStale = false;
+    public void SetModelCatalogError(string message) => Options.SetModelCatalogError(message);
 
-        reasoningEffortOverride = requestedReasoning;
-        var match = visibleModels.FirstOrDefault(model =>
-                string.Equals(model.Model, requestedModel, StringComparison.OrdinalIgnoreCase))
-            ?? visibleModels.FirstOrDefault(model => model.IsDefault)
-            ?? visibleModels.FirstOrDefault();
-        if (ReferenceEquals(SelectedModel, match))
-        {
-            RebuildReasoningOptions();
-            ReconcileFastAvailability();
-            OnPropertyChanged(nameof(FastModeDescription));
-        }
-        else
-        {
-            SelectedModel = match;
-        }
-        showModelsCommand.RaiseCanExecuteChanged();
-        showReasoningCommand.RaiseCanExecuteChanged();
-        OnPropertyChanged(nameof(ModelSelectionSummary));
-    }
-
-    public void SetModelCatalogLoading()
-    {
-        IsModelCatalogLoading = true;
-        ModelCatalogError = string.Empty;
-    }
-
-    public void SetModelCatalogError(string message)
-    {
-        IsModelCatalogLoading = false;
-        IsModelCatalogStale = true;
-        ModelCatalogError = message;
-    }
-
-    public void InvalidateModelCatalog()
-    {
-        IsModelCatalogStale = true;
-        AccountPlanLabel = string.Empty;
-    }
+    public void InvalidateModelCatalog() => Options.InvalidateModelCatalog();
 
     public void RaiseCommandStates()
     {
         submitCommand.RaiseCanExecuteChanged();
         composerSendCommand.RaiseCanExecuteChanged();
         cancelCommand.RaiseCanExecuteChanged();
-        loadModelsCommand.RaiseCanExecuteChanged();
         steerCommand.RaiseCanExecuteChanged();
         alternateFollowUpCommand.RaiseCanExecuteChanged();
         forkConversationCommand.RaiseCanExecuteChanged();
@@ -1872,12 +1112,9 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
         RaiseQueuedFollowUpCommandStates();
         openExternalUriCommand.RaiseCanExecuteChanged();
         editGeneratedImageCommand.RaiseCanExecuteChanged();
-        openOptionsCommand.RaiseCanExecuteChanged();
-        showOptionsMainCommand.RaiseCanExecuteChanged();
-        showModelsCommand.RaiseCanExecuteChanged();
-        showReasoningCommand.RaiseCanExecuteChanged();
+        Options.RaiseCommandStates();
         RaiseAgentCommandStates();
-        RaiseGoalCommandStates();
+        Goals.RaiseCommandStates();
     }
 
     private bool RoutesToCodeReview =>
@@ -1885,69 +1122,7 @@ public sealed class TaskViewModel : ObservableObject, IAsyncDisposable
         string.Equals(Prompt.Trim(), "/review", StringComparison.OrdinalIgnoreCase);
 
     private void RaiseAgentCommandStates()
-    {
-        openAgentCommand.RaiseCanExecuteChanged();
-        steerAgentCommand.RaiseCanExecuteChanged();
-        stopAgentCommand.RaiseCanExecuteChanged();
-        closeAgentTranscriptCommand.RaiseCanExecuteChanged();
-    }
-
-    private void RebuildReasoningOptions()
-    {
-        var requested = ParseReasoningEffort(ReasoningEffortOverride);
-        ReasoningOptions.Clear();
-        ReasoningEffortOptions.Clear();
-        foreach (var option in SelectedModel?.SupportedReasoningEfforts ?? [])
-        {
-            ReasoningOptions.Add(option);
-            ReasoningEffortOptions.Add(option.ProtocolValue);
-        }
-
-        SelectedReasoning = ReasoningOptions.FirstOrDefault(option => option.Effort == requested)
-            ?? ReasoningOptions.FirstOrDefault(option => option.Effort == SelectedModel?.DefaultReasoningEffort)
-            ?? ReasoningOptions.FirstOrDefault();
-        showReasoningCommand.RaiseCanExecuteChanged();
-    }
-
-    private void ReconcileFastAvailability()
-    {
-        OnPropertyChanged(nameof(IsFastModeAvailable));
-        if (!IsFastModeAvailable && ServiceTierSelection == CodexServiceTierSelection.Fast)
-        {
-            ServiceTierSelection = CodexServiceTierSelection.Standard;
-        }
-        OnPropertyChanged(nameof(IsFastModeEnabled));
-    }
-
-    private static CodexReasoningEffort? ParseReasoningEffort(string? value) => value?.Trim().ToLowerInvariant() switch
-    {
-        "none" => CodexReasoningEffort.None,
-        "minimal" => CodexReasoningEffort.Minimal,
-        "low" => CodexReasoningEffort.Low,
-        "medium" => CodexReasoningEffort.Medium,
-        "high" => CodexReasoningEffort.High,
-        "xhigh" => CodexReasoningEffort.XHigh,
-        _ => null
-    };
-
-    private static string FormatAccountPlan(CodexAccountInfo? account)
-    {
-        if (account is null ||
-            !string.Equals(account.Type, "chatgpt", StringComparison.OrdinalIgnoreCase) ||
-            string.IsNullOrWhiteSpace(account.PlanType))
-        {
-            return string.Empty;
-        }
-
-        var plan = account.PlanType.ToLowerInvariant() switch
-        {
-            "self_serve_business_usage_based" or "business" => "Business",
-            "enterprise_cbp_usage_based" or "enterprise" => "Enterprise",
-            "prolite" => "Pro Lite",
-            _ => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(account.PlanType.Replace('_', ' '))
-        };
-        return $"ChatGPT {plan}";
-    }
+        => Agents.RaiseCommandStates();
 
     public async ValueTask DisposeAsync()
     {

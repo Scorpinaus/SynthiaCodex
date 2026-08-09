@@ -195,7 +195,7 @@ internal static class ContextWindowIndicatorTests
         view.Arrange(new Rect(0, 0, 900, 700));
         view.UpdateLayout();
 
-        var indicator = view.FindName("ContextWindowIndicator") as Border
+        var indicator = WpfTestHost.FindNamedDescendant<Border>(view, "ContextWindowIndicator")
             ?? throw new InvalidOperationException("context window indicator was not found");
         var label = indicator.Child as TextBlock
             ?? throw new InvalidOperationException("context window indicator label was not found");

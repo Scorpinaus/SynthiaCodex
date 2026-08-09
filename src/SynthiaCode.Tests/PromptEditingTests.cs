@@ -253,7 +253,7 @@ internal static class PromptEditingTests
     private static Task TaskTranscriptExposesPromptEditControlsAsync()
     {
         var root = FindRepositoryRoot();
-        var xaml = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "TaskView.xaml"));
+        var xaml = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "TaskConversationView.xaml"));
         Assert(xaml.Contains("BeginPromptEditCommand", StringComparison.Ordinal), "transcript has an edit action");
         Assert(xaml.Contains("EditedPrompt", StringComparison.Ordinal), "transcript binds an inline prompt editor");
         Assert(xaml.Contains("SubmitPromptEditCommand", StringComparison.Ordinal), "transcript has an edited prompt submit action");

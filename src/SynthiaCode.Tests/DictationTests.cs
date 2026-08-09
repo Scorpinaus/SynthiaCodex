@@ -98,7 +98,7 @@ internal static class DictationTests
     private static Task ComposerRendersMicrophoneControlAsync()
     {
         var root = FindRepositoryRoot();
-        var taskView = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "TaskView.xaml"));
+        var taskView = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "TaskComposerView.xaml"));
         var icons = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Themes", "Icons.xaml"));
         var document = XDocument.Parse(taskView);
         XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";

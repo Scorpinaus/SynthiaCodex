@@ -12,6 +12,31 @@ internal static class WpfTestHost
         await dispatcher.InvokeAsync(action, DispatcherPriority.Normal).Task.ConfigureAwait(false);
     }
 
+    public static T? FindNamedDescendant<T>(DependencyObject root, string name)
+        where T : FrameworkElement
+    {
+        if (root is FrameworkElement scope && scope.FindName(name) is T named)
+        {
+            return named;
+        }
+
+        if (root is T { Name: var candidateName } match &&
+            string.Equals(candidateName, name, StringComparison.Ordinal))
+        {
+            return match;
+        }
+
+        foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
+        {
+            if (FindNamedDescendant<T>(child, name) is { } descendant)
+            {
+                return descendant;
+            }
+        }
+
+        return null;
+    }
+
     private static Task<Dispatcher> StartDispatcherAsync()
     {
         var completion = new TaskCompletionSource<Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);

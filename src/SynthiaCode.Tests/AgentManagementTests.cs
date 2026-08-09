@@ -117,13 +117,13 @@ internal static class AgentManagementTests
         view.Arrange(new Rect(0, 0, 980, 760));
         view.UpdateLayout();
 
-        var panel = view.FindName("AgentPanel") as FrameworkElement
+        var panel = WpfTestHost.FindNamedDescendant<FrameworkElement>(view, "AgentPanel")
             ?? throw new InvalidOperationException("agent panel was not found");
-        var active = view.FindName("ActiveAgentsList") as ItemsControl
+        var active = WpfTestHost.FindNamedDescendant<ItemsControl>(view, "ActiveAgentsList")
             ?? throw new InvalidOperationException("active agent list was not found");
-        var done = view.FindName("DoneAgentsList") as ItemsControl
+        var done = WpfTestHost.FindNamedDescendant<ItemsControl>(view, "DoneAgentsList")
             ?? throw new InvalidOperationException("done agent list was not found");
-        var transcript = view.FindName("AgentTranscriptPanel") as FrameworkElement
+        var transcript = WpfTestHost.FindNamedDescendant<FrameworkElement>(view, "AgentTranscriptPanel")
             ?? throw new InvalidOperationException("agent transcript panel was not found");
 
         Assert(panel.Visibility == Visibility.Visible, "agent panel is visible for delegated work");

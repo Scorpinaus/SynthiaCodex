@@ -113,11 +113,11 @@ internal static class NativeSkillInvocationTests
         view.Arrange(new Rect(available));
         view.UpdateLayout();
 
-        var button = view.FindName("SkillsButton") as Button;
-        var popup = view.FindName("SkillsPopup") as Popup;
-        var search = view.FindName("SkillsSearchBox") as TextBox;
-        var list = view.FindName("ComposerSkillsList") as ListBox;
-        var selected = view.FindName("SelectedSkillsList") as ItemsControl;
+        var button = WpfTestHost.FindNamedDescendant<Button>(view, "SkillsButton");
+        var popup = WpfTestHost.FindNamedDescendant<Popup>(view, "SkillsPopup");
+        var search = WpfTestHost.FindNamedDescendant<TextBox>(view, "SkillsSearchBox");
+        var list = WpfTestHost.FindNamedDescendant<ListBox>(view, "ComposerSkillsList");
+        var selected = WpfTestHost.FindNamedDescendant<ItemsControl>(view, "SelectedSkillsList");
 
         Assert(button is not null, "skills button exists");
         AssertEqual("Select skills", AutomationProperties.GetName(button), "skills button accessible name");

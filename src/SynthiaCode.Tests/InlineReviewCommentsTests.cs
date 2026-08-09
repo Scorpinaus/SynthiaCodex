@@ -256,12 +256,12 @@ internal static class InlineReviewCommentsTests
     {
         var root = FindRepositoryRoot();
         var gitXaml = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "GitView.xaml"));
-        var taskXaml = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "TaskView.xaml"));
+        var taskXaml = File.ReadAllText(Path.Combine(root, "src", "SynthiaCode.App", "Views", "TaskComposerView.xaml"));
 
-        Assert(gitXaml.Contains("Git.BeginAddCommentCommand", StringComparison.Ordinal), "diff rows expose Add comment command");
-        Assert(gitXaml.Contains("Git.SaveCommentCommand", StringComparison.Ordinal), "row editor exposes Save comment command");
-        Assert(gitXaml.Contains("Git.CancelAddCommentCommand", StringComparison.Ordinal), "row editor exposes Cancel command");
-        Assert(gitXaml.Contains("Git.ReviewComments", StringComparison.Ordinal), "pending comment summary is rendered");
+        Assert(gitXaml.Contains("Git.Actions.BeginAddCommentCommand", StringComparison.Ordinal), "diff rows expose Add comment command");
+        Assert(gitXaml.Contains("Git.Actions.SaveCommentCommand", StringComparison.Ordinal), "row editor exposes Save comment command");
+        Assert(gitXaml.Contains("Git.Actions.CancelAddCommentCommand", StringComparison.Ordinal), "row editor exposes Cancel command");
+        Assert(gitXaml.Contains("Git.Changes.ReviewComments", StringComparison.Ordinal), "pending comment summary is rendered");
         Assert(gitXaml.Contains("AutomationProperties.Name=\"Add inline review comment\"", StringComparison.Ordinal), "add action has an accessible name");
         Assert(gitXaml.Contains("SideLabel", StringComparison.Ordinal) && gitXaml.Contains("DisplayLocation", StringComparison.Ordinal), "side and location are non-color labels");
         Assert(taskXaml.Contains("ReviewCommentSummary", StringComparison.Ordinal), "queued cards disclose captured comments");

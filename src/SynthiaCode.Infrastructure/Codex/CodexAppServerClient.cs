@@ -2,28 +2,33 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using SynthiaCode.Core.Codex.AppServer;
 using SynthiaCode.Core.Codex.Configuration;
+using SynthiaCode.Infrastructure.Codex.Codecs;
 
 namespace SynthiaCode.Infrastructure.Codex;
 
-public sealed class CodexAppServerClient : IAsyncDisposable
+/// <summary>
+/// Provides typed Codex app-server operations over one JSON-RPC connection.
+/// </summary>
+public class CodexClient : IAsyncDisposable
 {
-    private readonly IAppServerTransport transport;
-    private readonly CodexAppServerClientMetadata metadata;
-    private readonly CancellationTokenSource readLoopCancellation = new();
-    private readonly SemaphoreSlim writeGate = new(1, 1);
-    private readonly Dictionary<int, TaskCompletionSource<JsonNode?>> pendingRequests = [];
+    private readonly JsonRpcConnection connection;
+    private readonly SessionCodexCodec sessionCodec;
+    private readonly ThreadCodexCodec threadCodec = new();
+    private readonly AccountCodexCodec accountCodec = new();
+    private readonly SkillsCodexCodec skillsCodec = new();
+    private readonly TurnCodexCodec turnCodec = new();
+    private readonly CodexServerRequestParser serverRequestParser = new();
+    private readonly CodexNotificationParser notificationParser;
     private readonly HashSet<CodexRequestId> pendingIncomingRequests = [];
     private readonly HashSet<CodexRequestId> respondingIncomingRequests = [];
     private readonly object gate = new();
-    private Task? readLoop;
-    private bool started;
-    private int connectionFailureReported;
-    private int nextRequestId;
 
-    public CodexAppServerClient(IAppServerTransport transport, CodexAppServerClientMetadata metadata)
+    public CodexClient(IAppServerTransport transport, CodexAppServerClientMetadata metadata)
     {
-        this.transport = transport;
-        this.metadata = metadata;
+        sessionCodec = new SessionCodexCodec(metadata);
+        notificationParser = new CodexNotificationParser(serverRequestParser);
+        connection = new JsonRpcConnection(transport, ProcessMessageAsync);
+        connection.ConnectionFailed += OnConnectionFailed;
     }
 
     public event EventHandler<AppServerNotification>? NotificationReceived;
@@ -44,33 +49,14 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
 
-        var parameters = new JsonObject
-        {
-            ["clientInfo"] = new JsonObject
-            {
-                ["name"] = metadata.Name,
-                ["title"] = metadata.Title,
-                ["version"] = metadata.Version
-            },
-            ["capabilities"] = new JsonObject
-            {
-                ["experimentalApi"] = options.ExperimentalApi,
-                ["optOutNotificationMethods"] = options.OptOutNotificationMethods is null
-                    ? null
-                    : new JsonArray(options.OptOutNotificationMethods.Select(method => JsonValue.Create(method)).ToArray())
-            }
-        };
-
-        var response = await SendRequestForResponseAsync("initialize", parameters, cancellationToken).ConfigureAwait(false);
+        var call = sessionCodec.EncodeInitialize(options);
+        var response = await SendRequestForResponseAsync(call.Method, call.Parameters, cancellationToken).ConfigureAwait(false);
         await SendNotificationAsync("initialized", new JsonObject(), cancellationToken).ConfigureAwait(false);
 
-        await using var registration = cancellationToken.Register(() => CancelPendingResponse(response, cancellationToken));
-        var result = await response.Task.WaitAsync(cancellationToken).ConfigureAwait(false) as JsonObject;
+        await using var registration = cancellationToken.Register(() => connection.CancelPendingResponse(response, cancellationToken));
+        var result = await response.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         IsHealthy = true;
-        return new CodexAppServerSession(
-            ReadString(result, "userAgent"),
-            ReadString(result, "platformFamily"),
-            ReadString(result, "platformOs"));
+        return sessionCodec.DecodeInitialize(result);
     }
 
     public async Task<CodexThreadStartResult> StartThreadAsync(
@@ -78,38 +64,14 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
-        ValidatePermissionBoundary(options.Sandbox, options.PermissionProfileId);
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
 
-        var parameters = new JsonObject();
-        if (!string.IsNullOrWhiteSpace(options.Model))
-        {
-            parameters["model"] = options.Model;
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.Cwd))
-        {
-            parameters["cwd"] = options.Cwd;
-        }
-
-        if (options.Sandbox is not null)
-        {
-            parameters["sandbox"] = options.Sandbox.Value.ToProtocolValue();
-        }
-
-        AddPermissionProfile(parameters, options.PermissionProfileId);
-
-        AddApprovalPolicyOverrides(parameters, options.ApprovalPolicy, options.ApprovalsReviewer);
-        AddInstructionOverrides(parameters, options.DeveloperInstructions, options.BaseInstructions);
-
-        var result = await SendThreadLifecycleRequestAsync("thread/start", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
-        var threadId = ReadString(result, "thread.id");
-        if (string.IsNullOrWhiteSpace(threadId))
-        {
-            throw new CodexAppServerProtocolException("thread/start response did not include result.thread.id.");
-        }
-
-        return new CodexThreadStartResult(threadId, ParseActivePermissionProfile(result));
+        var call = threadCodec.EncodeStart(options);
+        var result = await SendThreadLifecycleRequestAsync(
+            call.Method,
+            call.Parameters!,
+            cancellationToken).ConfigureAwait(false);
+        return threadCodec.DecodeStart(result);
     }
 
     public async Task<CodexThreadResumeResult> ResumeThreadAsync(
@@ -346,74 +308,17 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (request.Cwds.Count == 0)
-        {
-            throw new ArgumentException("At least one working directory is required.", nameof(request));
-        }
-
-        var cwds = request.Cwds
-            .Select(path =>
-            {
-                if (string.IsNullOrWhiteSpace(path))
-                {
-                    throw new ArgumentException("Skill working directories cannot be empty.", nameof(request));
-                }
-
-                return Path.GetFullPath(path);
-            })
-            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
-            .ToList();
-
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
-        JsonObject? result;
+        var call = skillsCodec.EncodeList(request);
         try
         {
-            result = await SendRequestAsync(
-                "skills/list",
-                new JsonObject
-                {
-                    ["cwds"] = new JsonArray(cwds.Select(path => JsonValue.Create(path)).ToArray()),
-                    ["forceReload"] = request.ForceReload
-                },
-                cancellationToken).ConfigureAwait(false) as JsonObject;
+            var result = await SendRequestAsync(call.Method, call.Parameters, cancellationToken).ConfigureAwait(false);
+            return skillsCodec.DecodeList(result);
         }
         catch (CodexAppServerProtocolException ex) when (ex.Code == -32601)
         {
             return new CodexSkillListResult([], IsSupported: false);
         }
-
-        var contexts = new List<CodexSkillContextResult>();
-        if (result?["data"] is not JsonArray data)
-        {
-            return new CodexSkillListResult(contexts);
-        }
-
-        foreach (var entry in data.OfType<JsonObject>())
-        {
-            var cwd = ReadString(entry, "cwd") ?? string.Empty;
-            var errors = ParseSkillErrors(entry["errors"] as JsonArray);
-            var skills = new List<CodexSkillMetadata>();
-            if (entry["skills"] is JsonArray skillValues)
-            {
-                foreach (var skillValue in skillValues.OfType<JsonObject>())
-                {
-                    var parsed = ParseSkill(skillValue);
-                    if (parsed is not null)
-                    {
-                        skills.Add(parsed);
-                        continue;
-                    }
-
-                    errors.Add(new CodexSkillLoadError(
-                        ReadString(skillValue, "path") ?? cwd,
-                        "Codex returned incomplete skill metadata."));
-                }
-            }
-
-            contexts.Add(new CodexSkillContextResult(cwd, skills, errors));
-        }
-
-        return new CodexSkillListResult(contexts);
     }
 
     public async Task<CodexSkillConfigWriteResult> WriteSkillConfigAsync(
@@ -421,27 +326,12 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (string.IsNullOrWhiteSpace(request.Path) || !Path.IsPathRooted(request.Path))
-        {
-            throw new ArgumentException("An absolute SKILL.md path is required.", nameof(request));
-        }
-
-        var path = Path.GetFullPath(request.Path);
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        var call = skillsCodec.EncodeConfigWrite(request);
         try
         {
-            var result = await SendRequestAsync(
-                "skills/config/write",
-                new JsonObject
-                {
-                    ["path"] = path,
-                    ["enabled"] = request.Enabled
-                },
-                cancellationToken).ConfigureAwait(false) as JsonObject;
-            var effectiveEnabled = ReadBool(result, "effectiveEnabled")
-                ?? throw new CodexAppServerProtocolException(
-                    "skills/config/write response did not include result.effectiveEnabled.");
-            return new CodexSkillConfigWriteResult(effectiveEnabled);
+            var result = await SendRequestAsync(call.Method, call.Parameters, cancellationToken).ConfigureAwait(false);
+            return skillsCodec.DecodeConfigWrite(result);
         }
         catch (CodexAppServerProtocolException ex) when (ex.Code == -32601)
         {
@@ -454,25 +344,18 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
-        var result = await SendRequestAsync(
-            "account/read",
-            new JsonObject
-            {
-                ["refreshToken"] = refreshToken
-            },
-            cancellationToken).ConfigureAwait(false) as JsonObject;
-        return CodexAccountProtocolParser.ParseAccount(result);
+        var call = accountCodec.EncodeRead(refreshToken);
+        var result = await SendRequestAsync(call.Method, call.Parameters, cancellationToken).ConfigureAwait(false);
+        return accountCodec.DecodeRead(result);
     }
 
     public async Task<CodexAccountRateLimitsResult> ReadAccountRateLimitsAsync(
         CancellationToken cancellationToken = default)
     {
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
-        var result = await SendRequestAsync(
-            "account/rateLimits/read",
-            parameters: null,
-            cancellationToken).ConfigureAwait(false) as JsonObject;
-        return CodexAccountProtocolParser.ParseRateLimits(result);
+        var call = accountCodec.EncodeReadRateLimits();
+        var result = await SendRequestAsync(call.Method, call.Parameters, cancellationToken).ConfigureAwait(false);
+        return accountCodec.DecodeReadRateLimits(result);
     }
 
     public async Task<CodexExecutionPolicyConfig> ReadExecutionPolicyConfigAsync(
@@ -911,24 +794,9 @@ public sealed class CodexAppServerClient : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
-        ValidateUserInputs(request.Inputs, nameof(request));
-
-        var result = await SendRequestAsync(
-            "turn/steer",
-            new JsonObject
-            {
-                ["threadId"] = request.ThreadId,
-                ["expectedTurnId"] = request.ExpectedTurnId,
-                ["input"] = WriteUserInputs(request.Inputs)
-            },
-            cancellationToken).ConfigureAwait(false) as JsonObject;
-        var turnId = ReadString(result, "turnId");
-        if (string.IsNullOrWhiteSpace(turnId))
-        {
-            throw new CodexAppServerProtocolException("turn/steer response did not include result.turnId.");
-        }
-
-        return new CodexTurnSteerResult(turnId);
+        var call = turnCodec.EncodeSteer(request);
+        var result = await SendRequestAsync(call.Method, call.Parameters, cancellationToken).ConfigureAwait(false);
+        return turnCodec.DecodeSteer(result);
     }
 
     public async Task<CodexTurnStartResult> StartTurnAsync(
@@ -936,64 +804,10 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (string.IsNullOrWhiteSpace(request.ThreadId))
-        {
-            throw new ArgumentException("Thread ID is required.", nameof(request));
-        }
-
-        ValidateUserInputs(request.Inputs, nameof(request));
-
-        ValidatePermissionBoundary(request.Sandbox, request.PermissionProfileId);
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
-
-        var parameters = new JsonObject
-        {
-            ["threadId"] = request.ThreadId,
-            ["input"] = WriteUserInputs(request.Inputs),
-            ["cwd"] = request.Cwd
-        };
-
-        if (request.Sandbox is not null)
-        {
-            parameters["sandboxPolicy"] = request.Sandbox.Value.ToTurnSandboxPolicy(request.WorkspaceRoots);
-        }
-
-        AddPermissionProfile(parameters, request.PermissionProfileId);
-
-        if (!string.IsNullOrWhiteSpace(request.Model))
-        {
-            parameters["model"] = request.Model;
-        }
-
-        if (request.ReasoningEffort is not null)
-        {
-            parameters["effort"] = request.ReasoningEffort.Value.ToProtocolValue();
-        }
-
-        AddApprovalPolicyOverrides(parameters, request.ApprovalPolicy, request.ApprovalsReviewer);
-
-        switch (request.ServiceTier)
-        {
-            case CodexServiceTierSelection.Inherit:
-                break;
-            case CodexServiceTierSelection.Standard:
-                parameters["serviceTier"] = null;
-                break;
-            case CodexServiceTierSelection.Fast:
-                parameters["serviceTier"] = "fast";
-                break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(request), request.ServiceTier, "Unknown service tier selection.");
-        }
-
-        var result = await SendRequestAsync("turn/start", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
-        var turnId = ReadString(result, "turn.id");
-        if (string.IsNullOrWhiteSpace(turnId))
-        {
-            throw new CodexAppServerProtocolException("turn/start response did not include result.turn.id.");
-        }
-
-        return new CodexTurnStartResult(turnId);
+        var call = turnCodec.EncodeStart(request);
+        var result = await SendRequestAsync(call.Method, call.Parameters, cancellationToken).ConfigureAwait(false);
+        return turnCodec.DecodeStart(result);
     }
 
     public async Task<CodexReviewStartResult> StartReviewAsync(
@@ -1001,86 +815,18 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (string.IsNullOrWhiteSpace(request.ThreadId))
-        {
-            throw new ArgumentException("Thread ID is required.", nameof(request));
-        }
-        ArgumentNullException.ThrowIfNull(request.Target);
-
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
-        var parameters = new JsonObject
-        {
-            ["threadId"] = request.ThreadId,
-            ["delivery"] = request.Delivery switch
-            {
-                CodexReviewDelivery.Inline => "inline",
-                CodexReviewDelivery.Detached => "detached",
-                _ => throw new ArgumentOutOfRangeException(nameof(request), request.Delivery, "Unknown review delivery.")
-            },
-            ["target"] = WriteReviewTarget(request.Target)
-        };
-        var result = await SendRequestAsync("review/start", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
-        var turnId = ReadString(result, "turn.id");
-        var reviewThreadId = ReadString(result, "reviewThreadId");
-        if (string.IsNullOrWhiteSpace(turnId))
-        {
-            throw new CodexAppServerProtocolException("review/start response did not include result.turn.id.");
-        }
-        if (string.IsNullOrWhiteSpace(reviewThreadId))
-        {
-            throw new CodexAppServerProtocolException("review/start response did not include result.reviewThreadId.");
-        }
-
-        return new CodexReviewStartResult(turnId, reviewThreadId);
+        var call = turnCodec.EncodeReviewStart(request);
+        var result = await SendRequestAsync(call.Method, call.Parameters, cancellationToken).ConfigureAwait(false);
+        return turnCodec.DecodeReviewStart(result);
     }
 
     public async Task CancelTurnAsync(string threadId, string turnId, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(threadId))
-        {
-            throw new ArgumentException("Thread ID is required.", nameof(threadId));
-        }
-
-        if (string.IsNullOrWhiteSpace(turnId))
-        {
-            throw new ArgumentException("Turn ID is required.", nameof(turnId));
-        }
-
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
-        await SendRequestAsync(
-            "turn/interrupt",
-            new JsonObject
-            {
-                ["threadId"] = threadId,
-                ["turnId"] = turnId
-            },
-            cancellationToken).ConfigureAwait(false);
+        var call = turnCodec.EncodeInterrupt(threadId, turnId);
+        await SendRequestAsync(call.Method, call.Parameters, cancellationToken).ConfigureAwait(false);
     }
-
-    private static JsonObject WriteReviewTarget(CodexReviewTarget target) => target.Kind switch
-    {
-        CodexReviewTargetKind.UncommittedChanges => new JsonObject
-        {
-            ["type"] = "uncommittedChanges"
-        },
-        CodexReviewTargetKind.BaseBranch => new JsonObject
-        {
-            ["type"] = "baseBranch",
-            ["branch"] = target.Branch
-        },
-        CodexReviewTargetKind.Commit => new JsonObject
-        {
-            ["type"] = "commit",
-            ["sha"] = target.Sha,
-            ["title"] = target.Title
-        },
-        CodexReviewTargetKind.Custom => new JsonObject
-        {
-            ["type"] = "custom",
-            ["instructions"] = target.Instructions
-        },
-        _ => throw new ArgumentOutOfRangeException(nameof(target), target.Kind, "Unknown review target.")
-    };
 
     public Task RespondToServerRequestAsync(
         CodexServerRequest request,
@@ -1116,26 +862,15 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task EnsureStartedAsync(CancellationToken cancellationToken)
-    {
-        if (started)
-        {
-            return;
-        }
-
-        await transport.StartAsync(cancellationToken).ConfigureAwait(false);
-        readLoop = Task.Run(() => ReadLoopAsync(readLoopCancellation.Token), CancellationToken.None);
-        started = true;
-    }
+    private Task EnsureStartedAsync(CancellationToken cancellationToken) =>
+        connection.EnsureStartedAsync(cancellationToken);
 
     private async Task<JsonNode?> SendRequestAsync(
         string method,
         JsonObject? parameters,
         CancellationToken cancellationToken)
     {
-        var response = await SendRequestForResponseAsync(method, parameters, cancellationToken).ConfigureAwait(false);
-        await using var registration = cancellationToken.Register(() => CancelPendingResponse(response, cancellationToken));
-        return await response.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        return await connection.SendRequestAsync(method, parameters, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<JsonNode?> SendThreadLifecycleRequestAsync(
@@ -1163,122 +898,39 @@ public sealed class CodexAppServerClient : IAsyncDisposable
         }
     }
 
-    private async Task<PendingResponse> SendRequestForResponseAsync(
+    private Task<JsonRpcPendingResponse> SendRequestForResponseAsync(
         string method,
         JsonObject? parameters,
-        CancellationToken cancellationToken)
-    {
-        var id = AllocateRequestId();
-        var completion = new TaskCompletionSource<JsonNode?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        lock (gate)
-        {
-            pendingRequests[id] = completion;
-        }
-
-        var message = new JsonObject
-        {
-            ["method"] = method,
-            ["id"] = id
-        };
-        if (parameters is not null)
-        {
-            message["params"] = parameters;
-        }
-
-        try
-        {
-            await WriteMessageAsync(message, cancellationToken).ConfigureAwait(false);
-            return new PendingResponse(id, completion.Task, completion);
-        }
-        catch
-        {
-            lock (gate)
-            {
-                pendingRequests.Remove(id);
-            }
-
-            throw;
-        }
-    }
+        CancellationToken cancellationToken) =>
+        connection.BeginRequestAsync(method, parameters, cancellationToken);
 
     private Task SendNotificationAsync(
         string method,
         JsonObject parameters,
-        CancellationToken cancellationToken)
-    {
-        var message = new JsonObject
-        {
-            ["method"] = method,
-            ["params"] = parameters
-        };
+        CancellationToken cancellationToken) =>
+        connection.SendNotificationAsync(method, parameters, cancellationToken);
 
-        return WriteMessageAsync(message, cancellationToken);
-    }
+    private Task WriteMessageAsync(JsonObject message, CancellationToken cancellationToken) =>
+        connection.SendMessageAsync(message, cancellationToken);
 
-    private async Task WriteMessageAsync(JsonObject message, CancellationToken cancellationToken)
-    {
-        await writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await transport.WriteLineAsync(message.ToJsonString(), cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            writeGate.Release();
-        }
-    }
-
-    private async Task ReadLoopAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await foreach (var line in transport.ReadLinesAsync(cancellationToken).ConfigureAwait(false))
-            {
-                await ProcessLineAsync(line, cancellationToken).ConfigureAwait(false);
-            }
-
-            if (!cancellationToken.IsCancellationRequested)
-            {
-                ReportConnectionFailure(new EndOfStreamException("Codex app-server closed its output stream."));
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            ReportConnectionFailure(ex);
-        }
-    }
-
-    private void ReportConnectionFailure(Exception exception)
+    private void OnConnectionFailed(object? sender, AppServerConnectionFailedEventArgs args)
     {
         IsHealthy = false;
-        CompleteAllPending(exception);
-        if (Interlocked.Exchange(ref connectionFailureReported, 1) == 0)
+        lock (gate)
         {
-            ConnectionFailed?.Invoke(this, new AppServerConnectionFailedEventArgs(exception));
+            pendingIncomingRequests.Clear();
+            respondingIncomingRequests.Clear();
         }
+
+        ConnectionFailed?.Invoke(this, args);
     }
 
-    private async Task ProcessLineAsync(string line, CancellationToken cancellationToken)
+    private async Task ProcessMessageAsync(JsonObject message, CancellationToken cancellationToken)
     {
-        JsonObject message;
-        try
-        {
-            message = JsonNode.Parse(line) as JsonObject ??
-                throw new CodexAppServerProtocolException("App-server message was not a JSON object.");
-        }
-        catch (JsonException ex)
-        {
-            ReportConnectionFailure(new CodexAppServerProtocolException("App-server emitted invalid JSON.", ex));
-            return;
-        }
-
         var method = ReadString(message, "method");
         if (message["id"] is not null && !string.IsNullOrWhiteSpace(method))
         {
-            if (!TryReadRequestId(message["id"], out var requestId))
+            if (!serverRequestParser.TryReadRequestId(message["id"], out var requestId))
             {
                 return;
             }
@@ -1286,7 +938,7 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             var serverParams = message["params"] as JsonObject;
             RegisterIncomingRequest(requestId);
             string? parseError = null;
-            if (serverParams is null || !TryParseServerRequest(method, serverParams, requestId, out var request, out parseError))
+            if (serverParams is null || !serverRequestParser.TryParse(method, serverParams, requestId, out var request, out parseError))
             {
                 await RespondToServerRequestErrorAsync(
                     requestId,
@@ -1310,50 +962,19 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             return;
         }
 
-        if (message["id"] is not null)
-        {
-            CompletePendingRequest(message);
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(method))
+        if (!notificationParser.TryParse(message, out var parsedNotification))
         {
             return;
         }
 
-        var parameters = message["params"] as JsonObject ?? new JsonObject();
-        if (method == CodexAppServerNotificationMethods.ServerRequestResolved &&
-            TryReadRequestId(parameters["requestId"] ?? parameters["id"], out var resolvedRequestId))
+        if (parsedNotification.ResolvedRequestId is { } resolvedRequestId)
         {
             lock (gate)
             {
                 pendingIncomingRequests.Remove(resolvedRequestId);
             }
         }
-        NotificationReceived?.Invoke(this, new AppServerNotification(method, parameters));
-    }
-
-    private void CompletePendingRequest(JsonObject message)
-    {
-        var id = message["id"]!.GetValue<int>();
-        TaskCompletionSource<JsonNode?>? completion;
-        lock (gate)
-        {
-            if (!pendingRequests.Remove(id, out completion))
-            {
-                return;
-            }
-        }
-
-        if (message["error"] is JsonObject error)
-        {
-            var code = error["code"]?.GetValue<int?>() ?? 0;
-            var errorMessage = error["message"]?.GetValue<string>() ?? "App-server request failed.";
-            completion.TrySetException(new CodexAppServerProtocolException($"App-server error {code}: {errorMessage}", code));
-            return;
-        }
-
-        completion.TrySetResult(message["result"]?.DeepClone());
+        NotificationReceived?.Invoke(this, parsedNotification.Notification);
     }
 
     private void RegisterIncomingRequest(CodexRequestId requestId)
@@ -1419,182 +1040,6 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
             throw;
         }
-    }
-
-    private static bool TryParseServerRequest(
-        string method,
-        JsonObject parameters,
-        CodexRequestId requestId,
-        out CodexServerRequest request,
-        out string? error)
-    {
-        error = null;
-        CodexServerRequestPayload payload;
-        switch (method)
-        {
-            case "item/commandExecution/requestApproval":
-                if (!TryReadApprovalCorrelation(parameters, out var commandThreadId, out var commandTurnId, out var commandItemId, out var commandStartedAt, out error))
-                {
-                    request = null!;
-                    return false;
-                }
-
-                CodexNetworkApprovalContext? networkContext = null;
-                if (parameters["networkApprovalContext"] is JsonObject network)
-                {
-                    var host = ReadString(network, "host");
-                    var protocol = ReadString(network, "protocol");
-                    if (!string.IsNullOrWhiteSpace(host) && !string.IsNullOrWhiteSpace(protocol))
-                    {
-                        networkContext = new CodexNetworkApprovalContext(host, protocol, ReadInt(network, "port"));
-                    }
-                }
-
-                payload = new CodexCommandApprovalRequest(
-                    commandThreadId,
-                    commandTurnId,
-                    commandItemId,
-                    commandStartedAt,
-                    ReadString(parameters, "command"),
-                    ReadString(parameters, "cwd"),
-                    ReadString(parameters, "reason"),
-                    networkContext,
-                    ReadStringArray(parameters, "proposedExecpolicyAmendment"),
-                    ReadStringArray(parameters, "availableDecisions"),
-                    ReadString(parameters, "approvalId"));
-                break;
-
-            case "item/fileChange/requestApproval":
-                if (!TryReadApprovalCorrelation(parameters, out var fileThreadId, out var fileTurnId, out var fileItemId, out var fileStartedAt, out error))
-                {
-                    request = null!;
-                    return false;
-                }
-
-                payload = new CodexFileChangeApprovalRequest(
-                    fileThreadId,
-                    fileTurnId,
-                    fileItemId,
-                    fileStartedAt,
-                    ReadString(parameters, "reason"),
-                    ReadString(parameters, "grantRoot"));
-                break;
-
-            case "item/permissions/requestApproval":
-                if (!TryReadApprovalCorrelation(parameters, out var permissionThreadId, out var permissionTurnId, out var permissionItemId, out var permissionStartedAt, out error))
-                {
-                    request = null!;
-                    return false;
-                }
-
-                var cwd = ReadString(parameters, "cwd");
-                var permissions = parameters["permissions"] as JsonObject;
-                if (string.IsNullOrWhiteSpace(cwd) || permissions is null)
-                {
-                    request = null!;
-                    error = "Permission approval requires cwd and permissions.";
-                    return false;
-                }
-
-                payload = new CodexPermissionApprovalRequest(
-                    permissionThreadId,
-                    permissionTurnId,
-                    permissionItemId,
-                    permissionStartedAt,
-                    cwd,
-                    ReadString(parameters, "reason"),
-                    (JsonObject)permissions.DeepClone());
-                break;
-
-            default:
-                payload = new CodexUnsupportedServerRequest(method);
-                break;
-        }
-
-        request = new CodexServerRequest(
-            requestId,
-            method,
-            (JsonObject)parameters.DeepClone(),
-            payload);
-        return true;
-    }
-
-    private static bool TryReadApprovalCorrelation(
-        JsonObject parameters,
-        out string threadId,
-        out string turnId,
-        out string itemId,
-        out long startedAtMs,
-        out string? error)
-    {
-        threadId = ReadString(parameters, "threadId") ?? string.Empty;
-        turnId = ReadString(parameters, "turnId") ?? string.Empty;
-        itemId = ReadString(parameters, "itemId") ?? string.Empty;
-        startedAtMs = ReadLong(parameters, "startedAtMs") ?? 0;
-        if (string.IsNullOrWhiteSpace(threadId) ||
-            string.IsNullOrWhiteSpace(turnId) ||
-            string.IsNullOrWhiteSpace(itemId) ||
-            ReadLong(parameters, "startedAtMs") is null)
-        {
-            error = "Approval request is missing threadId, turnId, itemId, or startedAtMs.";
-            return false;
-        }
-
-        error = null;
-        return true;
-    }
-
-    private static bool TryReadRequestId(JsonNode? value, out CodexRequestId requestId)
-    {
-        if (value is JsonValue jsonValue && jsonValue.TryGetValue<long>(out var integer))
-        {
-            requestId = CodexRequestId.FromInteger(integer);
-            return true;
-        }
-
-        if (value is JsonValue stringValue && stringValue.TryGetValue<string>(out var text) && !string.IsNullOrEmpty(text))
-        {
-            requestId = CodexRequestId.FromString(text);
-            return true;
-        }
-
-        requestId = default;
-        return false;
-    }
-
-    private void CompleteAllPending(Exception exception)
-    {
-        List<TaskCompletionSource<JsonNode?>> completions;
-        lock (gate)
-        {
-            completions = [.. pendingRequests.Values];
-            pendingRequests.Clear();
-            pendingIncomingRequests.Clear();
-            respondingIncomingRequests.Clear();
-        }
-
-        foreach (var completion in completions)
-        {
-            completion.TrySetException(exception);
-        }
-    }
-
-    private int AllocateRequestId()
-    {
-        lock (gate)
-        {
-            return nextRequestId++;
-        }
-    }
-
-    private void CancelPendingResponse(PendingResponse response, CancellationToken cancellationToken)
-    {
-        lock (gate)
-        {
-            pendingRequests.Remove(response.Id);
-        }
-
-        response.Completion.TrySetCanceled(cancellationToken);
     }
 
     private static void AddApprovalPolicyOverrides(
@@ -1731,96 +1176,6 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             ? boolValue
             : null;
     }
-
-    private static List<CodexSkillLoadError> ParseSkillErrors(JsonArray? values)
-    {
-        var errors = new List<CodexSkillLoadError>();
-        if (values is null)
-        {
-            return errors;
-        }
-
-        foreach (var value in values.OfType<JsonObject>())
-        {
-            var message = ReadString(value, "message");
-            if (!string.IsNullOrWhiteSpace(message))
-            {
-                errors.Add(new CodexSkillLoadError(
-                    ReadString(value, "path") ?? string.Empty,
-                    message));
-            }
-        }
-
-        return errors;
-    }
-
-    private static CodexSkillMetadata? ParseSkill(JsonObject value)
-    {
-        var name = ReadString(value, "name");
-        var description = ReadString(value, "description");
-        var path = ReadString(value, "path");
-        if (string.IsNullOrWhiteSpace(name) ||
-            string.IsNullOrWhiteSpace(description) ||
-            string.IsNullOrWhiteSpace(path))
-        {
-            return null;
-        }
-
-        CodexSkillInterface? skillInterface = null;
-        if (value["interface"] is JsonObject interfaceValue)
-        {
-            skillInterface = new CodexSkillInterface(
-                ReadString(interfaceValue, "displayName"),
-                ReadString(interfaceValue, "shortDescription"),
-                ReadString(interfaceValue, "brandColor"),
-                ReadString(interfaceValue, "defaultPrompt"),
-                ReadString(interfaceValue, "iconSmall"),
-                ReadString(interfaceValue, "iconLarge"));
-        }
-
-        CodexSkillDependencies? dependencies = null;
-        if (value["dependencies"] is JsonObject dependencyValue &&
-            dependencyValue["tools"] is JsonArray toolValues)
-        {
-            var tools = new List<CodexSkillToolDependency>();
-            foreach (var toolValue in toolValues.OfType<JsonObject>())
-            {
-                var type = ReadString(toolValue, "type");
-                var dependencyValueText = ReadString(toolValue, "value");
-                if (!string.IsNullOrWhiteSpace(type) && !string.IsNullOrWhiteSpace(dependencyValueText))
-                {
-                    tools.Add(new CodexSkillToolDependency(
-                        type,
-                        dependencyValueText,
-                        ReadString(toolValue, "description"),
-                        ReadString(toolValue, "command"),
-                        ReadString(toolValue, "transport"),
-                        ReadString(toolValue, "url")));
-                }
-            }
-
-            dependencies = new CodexSkillDependencies(tools);
-        }
-
-        return new CodexSkillMetadata(
-            name,
-            description,
-            Path.GetFullPath(path),
-            ParseSkillScope(ReadString(value, "scope")),
-            ReadBool(value, "enabled") ?? true,
-            ReadString(value, "shortDescription"),
-            skillInterface,
-            dependencies);
-    }
-
-    private static CodexSkillScope ParseSkillScope(string? value) => value?.ToLowerInvariant() switch
-    {
-        "user" => CodexSkillScope.User,
-        "repo" => CodexSkillScope.Repository,
-        "system" => CodexSkillScope.System,
-        "admin" => CodexSkillScope.Admin,
-        _ => CodexSkillScope.Unknown
-    };
 
     private static string? FormatConfigOrigin(JsonObject? origin)
     {
@@ -1963,106 +1318,6 @@ public sealed class CodexAppServerClient : IAsyncDisposable
             }
         }
         return values;
-    }
-
-    private static void ValidateUserInputs(IReadOnlyList<CodexUserInput>? inputs, string parameterName)
-    {
-        if (inputs is null || inputs.Count == 0)
-        {
-            throw new ArgumentException("At least one prompt input is required.", parameterName);
-        }
-        var hasContent = false;
-        foreach (var input in inputs)
-        {
-            switch (input)
-            {
-                case CodexTextInput text when !string.IsNullOrWhiteSpace(text.Text):
-                    hasContent = true;
-                    break;
-                case CodexLocalImageInput image when !string.IsNullOrWhiteSpace(image.Path):
-                    hasContent = true;
-                    break;
-                case CodexImageInput image when image.DataUrl.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase):
-                    hasContent = true;
-                    break;
-                case CodexMentionInput mention when
-                    !string.IsNullOrWhiteSpace(mention.Name) &&
-                    !string.IsNullOrWhiteSpace(mention.Path) &&
-                    Path.IsPathRooted(mention.Path):
-                    hasContent = true;
-                    break;
-                case CodexSkillInput skill when
-                    !string.IsNullOrWhiteSpace(skill.Name) &&
-                    !string.IsNullOrWhiteSpace(skill.Path) &&
-                    Path.IsPathRooted(skill.Path) &&
-                    Path.GetFileName(skill.Path).Equals("SKILL.md", StringComparison.OrdinalIgnoreCase):
-                    hasContent = true;
-                    break;
-                case CodexSkillInput:
-                    throw new ArgumentException(
-                        "Skill inputs require a name and an absolute SKILL.md path.",
-                        parameterName);
-                case CodexTextInput or CodexLocalImageInput or CodexImageInput or CodexMentionInput:
-                    break;
-                default:
-                    throw new ArgumentException("The prompt contains an unsupported input part.", parameterName);
-            }
-        }
-        if (!hasContent)
-        {
-            throw new ArgumentException("At least one non-empty text or attachment input is required.", parameterName);
-        }
-    }
-
-    private static JsonArray WriteUserInputs(IReadOnlyList<CodexUserInput> inputs)
-    {
-        var result = new JsonArray();
-        foreach (var input in inputs)
-        {
-            JsonObject? item = input switch
-            {
-                CodexTextInput text when !string.IsNullOrWhiteSpace(text.Text) => new JsonObject
-                {
-                    ["type"] = "text",
-                    ["text"] = text.Text
-                },
-                CodexLocalImageInput image when !string.IsNullOrWhiteSpace(image.Path) => new JsonObject
-                {
-                    ["type"] = "localImage",
-                    ["path"] = image.Path
-                },
-                CodexImageInput image when image.DataUrl.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase) => new JsonObject
-                {
-                    ["type"] = "image",
-                    ["url"] = image.DataUrl
-                },
-                CodexMentionInput mention when
-                    !string.IsNullOrWhiteSpace(mention.Name) &&
-                    !string.IsNullOrWhiteSpace(mention.Path) &&
-                    Path.IsPathRooted(mention.Path) => new JsonObject
-                {
-                    ["type"] = "mention",
-                    ["name"] = mention.Name,
-                    ["path"] = mention.Path
-                },
-                CodexSkillInput skill when
-                    !string.IsNullOrWhiteSpace(skill.Name) &&
-                    !string.IsNullOrWhiteSpace(skill.Path) &&
-                    Path.IsPathRooted(skill.Path) &&
-                    Path.GetFileName(skill.Path).Equals("SKILL.md", StringComparison.OrdinalIgnoreCase) => new JsonObject
-                {
-                    ["type"] = "skill",
-                    ["name"] = skill.Name,
-                    ["path"] = skill.Path
-                },
-                _ => null
-            };
-            if (item is not null)
-            {
-                result.Add(item);
-            }
-        }
-        return result;
     }
 
     private static CodexSandbox? ParseSandbox(string? value) => value?.ToLowerInvariant() switch
@@ -2358,29 +1613,16 @@ public sealed class CodexAppServerClient : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        readLoopCancellation.Cancel();
-        await transport.StopAsync().ConfigureAwait(false);
-        if (readLoop is not null)
+        connection.ConnectionFailed -= OnConnectionFailed;
+        lock (gate)
         {
-            try
-            {
-                await readLoop.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
+            pendingIncomingRequests.Clear();
+            respondingIncomingRequests.Clear();
         }
 
-        readLoopCancellation.Dispose();
-        writeGate.Dispose();
-        await transport.DisposeAsync().ConfigureAwait(false);
+        await connection.DisposeAsync().ConfigureAwait(false);
     }
 }
-
-internal sealed record PendingResponse(
-    int Id,
-    Task<JsonNode?> Task,
-    TaskCompletionSource<JsonNode?> Completion);
 
 public sealed class CodexAppServerProtocolException : Exception
 {

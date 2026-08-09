@@ -1,3 +1,9 @@
+---
+type: change-stage
+stage: 02_plan
+status: approved
+---
+
 # Harness-Agnostic Runtime Migration
 
 ## 1. Task Summary
@@ -199,17 +205,12 @@ Each persisted conversation has a SynthiaCode-owned local ID, a `HarnessId`, and
 | 2026-08-04 | Keep Codex extensions as optional features | Preserves product richness | Base UI depends only on capability-neutral contracts |
 | 2026-08-04 | Use a strangler migration | Maintains a green, testable Codex path | Existing protocol classes remain temporarily inside the adapter |
 
-## 10. Progress Log
+## 10. Progress and completion records
 
-| Date | Status | Notes |
-| --- | --- | --- |
-| 2026-08-04 | In progress | Goal created; safe-edit workflow loaded; dirty worktree recorded; baseline suite passed 272 tests. |
+This file is the approved plan. It is not the live status source.
 
-## 11. Completion Report
+- Current implementation state: `03_progress.md`
+- Verification evidence: `04_verification.md` when verification starts
+- Final result and remaining risks: `05_handoff.md` when the change is complete
 
-- **Outcome:** In progress.
-- **Files/components changed:** This task plan only so far.
-- **Validation completed:** Baseline `dotnet test SynthiaCode.sln` passed 272 tests.
-- **Acceptance criteria:** Pending implementation.
-- **Known limitations:** The current code remains Codex-shaped until the planned vertical slices land.
-- **Follow-up work:** Will be updated when implementation completes.
+The task boxes above preserve the approved sequence. Use the numbered record files to determine current state.

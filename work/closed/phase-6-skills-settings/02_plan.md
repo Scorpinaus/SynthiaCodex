@@ -377,7 +377,7 @@ Update after implementation:
 - `README.md`;
 - `docs/current-architecture.md`;
 - `feature_parity.md`;
-- the Phase 6 status in `implementation_plan.md`;
+- the Phase 6 status in `../../../_archive/legacy-roadmap/implementation_plan.md`;
 - the test-count references that are intended to remain current.
 
 ## 8. Implementation Slices

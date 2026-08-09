@@ -1,9 +1,9 @@
 # SynthiaCode: Current Architecture
 
-**Recorded:** 8 August 2026
-**Last code-verified:** 8 August 2026
+**Recorded:** 9 August 2026
+**Last code-verified:** 9 August 2026
 **Release:** 0.1.0
-**Phase:** Architecture migration Phase 2, with durable state separated behind repository contracts
+**Phase:** Architecture migration Phase 3, with a hardened Codex protocol boundary
 **Purpose:** Describe the current architecture, presentation shell, runtime and persistence boundaries, implemented desktop workflows, and release verification baseline.
 
 ## System shape
@@ -14,7 +14,7 @@ The solution is a Windows-only WPF desktop application with seven projects:
 | --- | --- | --- |
 | `SynthiaCode.Core` | Provider-neutral harness models and events; settings, thread, attachment, Git, worktree, terminal, auth, logging, and Codex protocol-domain contracts; conversation reduction | None |
 | `SynthiaCode.Application` | Harness registry and runtime; the conversation feature facade; workspace state ownership; thread lifecycle, turn execution, persistence, and queued-dispatch orchestration | Core |
-| `SynthiaCode.Infrastructure` | Codex CLI/app-server transport, split JSON durable-state repositories and legacy import, Git, worktrees, ConPTY terminal, auth, logging | Core |
+| `SynthiaCode.Infrastructure` | Codex CLI/app-server transport, JSON-RPC connection, typed protocol facade and feature codecs, split JSON durable-state repositories and legacy import, Git, worktrees, ConPTY terminal, auth, logging | Core |
 | `SynthiaCode.Harnesses.Codex` | Adapter from neutral harness commands/events to Codex app-server types, operations, and notifications | Application and Core |
 | `SynthiaCode.Harnesses.InMemory` | Deterministic, process-free harness implementation used to prove and test the provider boundary | Application and Core |
 | `SynthiaCode.App` | WPF composition root, windows, theme resources, feature view models, UI services, and Codex-specific side features such as review, goals, and skills | Application, Core, Codex harness, and Infrastructure |
@@ -55,8 +55,10 @@ flowchart TB
     HarnessOps --> Runtime["HarnessRuntimeCoordinator"]
     Runtime --> CodexAdapter["CodexHarnessSession"]
     CodexAdapter --> Session["AppServerSessionCoordinator"]
-    Session --> Client["CodexAppServerClient"]
-    Client --> Transport["UTF-8 stdio transport"]
+    Session --> Client["CodexClient facade"]
+    Client --> Codecs["Feature codecs and message parsers"]
+    Client --> Rpc["JsonRpcConnection"]
+    Rpc --> Transport["UTF-8 stdio transport"]
     Transport --> Codex["codex app-server child process"]
     Workspace --> State["ThreadStore / conversation and queue workspaces"]
     Shell --> SideFeatures["Codex review, goals, skills"]
@@ -81,7 +83,7 @@ This ordering deliberately keeps shell visibility independent of Codex app-serve
 
 `MainViewModel` is the shell coordinator. `ProjectThreadViewModel`, `TaskViewModel`, `TerminalViewModel`, `DiagnosticsViewModel`, `AccountViewModel`, `GitViewModel`, `SkillsViewModel`, and `EffectiveCodexSettingsViewModel` own feature presentation state and commands. The shell supplies explicit operation delegates or immutable-on-read context callbacks and receives status/selection callbacks; feature view models do not reference or control one another.
 
-App-server lifecycle is exposed to presentation through `IAppServerSessionCoordinator`. Its implementation owns `CodexAppServerClient`, process transport startup, reconnect serialization, batched notifications, typed app-server operations, health transitions, and disposal. It also implements the narrow Codex backend consumed by `CodexHarnessSession` and separate Codex-only feature interfaces for account, execution policy, skills, configuration, goals, reviews, and approvals. Protocol request/response JSON and delta-payload batching remain in the Codex Core/Infrastructure boundary rather than WPF presentation.
+App-server lifecycle is exposed to presentation through `IAppServerSessionCoordinator`. Its implementation owns the public `CodexClient` facade, process transport startup, reconnect serialization, batched notifications, typed app-server operations, health transitions, and disposal. `JsonRpcConnection` owns line transport, request IDs, response correlation, serialized writes, connection failure, and transport disposal. Feature codecs own request and response JSON for session setup, thread start, turns and reviews, skills, and account data. Dedicated notification and server-request parsers classify incoming messages. The coordinator also implements the narrow Codex backend consumed by `CodexHarnessSession` and separate Codex-only feature interfaces for account, execution policy, skills, configuration, goals, reviews, and approvals. Protocol JSON and delta-payload batching remain in the Codex Core/Infrastructure boundary rather than WPF presentation.
 
 `App.xaml` is now a resource-composition root. Theme colors live in matching light, graphite-dark, and system-color high-contrast dictionaries; foundations, typography, vector icons, buttons, inputs, navigation, and transient controls are split by concern. Feature views consume semantic dynamic resources, so changing theme dictionaries does not recreate the window or any feature view model.
 
@@ -161,7 +163,7 @@ sequenceDiagram
     F->>PS: persist detached workspace state
 ```
 
-Protocol request construction, response correlation, parsing, and transport failure handling remain inside Infrastructure. Core owns app-server request/result records and notification-derived thread state.
+Protocol request construction, response correlation, parsing, and transport failure handling remain inside Infrastructure. `CodexClient` is the public typed facade. Its connection, codecs, and parsers are internal parts. Core owns app-server request/result records and notification-derived thread state.
 
 The presentation layer subscribes to both event levels for different reasons. General thread/turn text, activity, context, diff, and completion updates travel through `CodexHarnessEventTranslator` and `HarnessRuntimeCoordinator` to `MainViewModel`. Raw Codex notifications are consumed directly only by provider-specific account, goal, approval-resolution, skills-invalidation, and review-lifecycle surfaces. This split prevents protocol types from leaking into portable conversation operations while preserving Codex features that have no neutral contract.
 
@@ -236,7 +238,7 @@ Pull-request creation/status, remote selection and management, fetch, and pull r
 
 ### Server-request approvals and permission modes
 
-`CodexAppServerClient` classifies app-server messages as outgoing responses, notifications, or incoming server requests. Incoming request IDs retain their integer or string representation. Command-execution, file-change, and permission requests are parsed to typed Core models; malformed and unsupported requests receive deterministic JSON-RPC errors so the server is never left waiting. The client maintains separate outgoing and incoming registries and permits exactly one successful response for each incoming request.
+`JsonRpcConnection` classifies response envelopes and correlates them with outgoing requests. `CodexNotificationParser` and `CodexServerRequestParser` classify the remaining messages. Incoming request IDs retain their integer or string representation. Command-execution, file-change, and permission requests are parsed to typed Core models. Malformed and unsupported requests receive deterministic JSON-RPC errors so the server is never left waiting. `CodexClient` keeps incoming-request state separate from the connection's outgoing-request state and permits exactly one successful response for each incoming request. `CodexAppServerClient` is a small source-compatibility type that derives from the facade; production composition uses `CodexClient`.
 
 `AppServerSessionCoordinator` attaches request handlers to the active client generation and rejects responses from a replaced connection. `MainViewModel` marshals requests to the captured UI context and owns `ApprovalQueueViewModel`, which serializes prompts globally. `serverRequest/resolved`, reconnect, and shutdown events invalidate stale prompts. Permission responses are constructed by intersecting the selected top-level permission groups with the immutable original request.
 
@@ -262,7 +264,7 @@ Phase 6A reuses the initialized `AppServerSessionCoordinator`; it does not creat
 
 ```text
 app-server request (method + id)
-  -> CodexAppServerClient typed parser and incoming registry
+  -> CodexServerRequestParser and CodexClient incoming registry
   -> AppServerSessionCoordinator active-generation check
   -> MainViewModel UI-context dispatch
   -> ApprovalQueueViewModel / ApprovalPromptView
@@ -372,7 +374,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 ## Concurrency and failure model
 
 - WPF state changes are marshaled to the `SynchronizationContext` captured by `MainViewModel`; feature view models do not update observable UI state from transport threads.
-- `CodexAppServerClient` serializes writes, correlates outgoing responses, separately tracks incoming server requests, and fails pending work when the read loop or process connection fails.
+- `JsonRpcConnection` serializes writes, correlates outgoing responses, and fails pending work when the read loop or process connection fails. `CodexClient` separately tracks incoming server requests.
 - `AppServerSessionCoordinator` serializes connection replacement and associates approval requests with one client generation. Responses from a stale connection are rejected.
 - Agent-message deltas are coalesced for 50 ms by thread, turn, and item. A non-delta notification flushes pending text first, preserving protocol order.
 - Harness connection creation is serialized and cached per provider. `IConversationWorkspace` serializes turn reduction and detached snapshot creation; a recorded completion cannot be reopened by a delayed start continuation, and notification-before-response ordering binds the same pending turn.
@@ -395,7 +397,7 @@ Thread snapshots persist the latest 100 timeline items, 100 raw events, and 100 
 
 `dotnet test SynthiaCode.sln` is the authoritative local gate on Windows with the .NET 10 SDK selected by `global.json`. The test project references every production layer plus the in-memory harness. Coverage combines pure contract/reducer/use-case tests, fake app-server transports, deterministic harness parity tests, temporary-repository Git/worktree tests, local bare-repository push integration tests, and WPF presentation tests hosted on a dedicated STA dispatcher. Test collections and process-level test parallelism are disabled because WPF application state, native terminal resources, and shared process fixtures require deterministic ownership.
 
-Repository-wide build policy lives in `.editorconfig`, `Directory.Build.props`, and `Directory.Packages.props`. Builds are deterministic, CI treats warnings as errors, and external package versions are centrally owned. `ArchitectureBoundaryTests` locks the production project graph, namespace ownership and forbidden upward imports, and confines WPF/Windows targeting to the App project. Phase 0 golden characterization tests preserve conversation reduction, queued dispatch, reconnect, and persistence-migration behavior. Phase 1 architecture tests pin Application ownership, the single facade constructor boundary, callback-free requests, detached workspace events, and terminal turn ordering. Phase 2 tests pin repository ownership, the unchanged in-memory settings shape, split-file contents, one-time release import, strictly sequential migrations, and generation recovery.
+Repository-wide build policy lives in `.editorconfig`, `Directory.Build.props`, and `Directory.Packages.props`. Builds are deterministic, CI treats warnings as errors, and external package versions are centrally owned. `ArchitectureBoundaryTests` locks the production project graph, namespace ownership and forbidden upward imports, and confines WPF/Windows targeting to the App project. Phase 0 golden characterization tests preserve conversation reduction, queued dispatch, reconnect, and persistence-migration behavior. Phase 1 architecture tests pin Application ownership, the single facade constructor boundary, callback-free requests, detached workspace events, and terminal turn ordering. Phase 2 tests pin repository ownership, the unchanged in-memory settings shape, split-file contents, one-time release import, strictly sequential migrations, and generation recovery. Phase 3 tests pin the public protocol facade, internal connection and parser parts, feature codec groups, out-of-order response matching, incoming-message routing, and invalid JSON failure.
 
 GitHub Actions restores and runs the Release test suite on `windows-latest`. Main-branch, tag, and manual workflows publish a self-contained `win-x64` portable folder; a tag matching the app project's semantic version also produces a ZIP and SHA-256 checksum GitHub release. The app project is `net10.0-windows`/WPF; the non-WPF Core, Application, harness, and Infrastructure libraries target `net10.0`.
 
@@ -444,7 +446,7 @@ The next two tables are retained as the dated Phase 5B and release 0.1.0 optimiz
 | --- | --- | --- |
 | `MainViewModel.cs` | 3,502 physical lines | Thread lifecycle, turn execution, queue dispatch, and thread-state persistence execute behind explicit application use-case services; the remaining size is shell/UI projection and cross-feature coordination. |
 | `MainWindow.xaml` | 444 physical lines | Custom chrome, adaptive three-zone shell, compact drawers, lower terminal dock, inspector, status, and approval hosting. |
-| xUnit suite | 381 passing tests | Includes the 307-case legacy behavioral matrix plus focused architecture, migration, integration, and presentation tests discovered individually by xUnit. |
+| xUnit suite | 385 passing tests | Includes the 307-case legacy behavioral matrix plus focused architecture, migration, protocol, integration, and presentation tests discovered individually by xUnit. |
 | Startup shell/readiness | 541 ms / 759 ms | unchanged |
 | Codex long stream | 25,001 notifications, 2 UI batches, 20.71 MiB, 40.25 ms | same batching/allocation bound; synthetic CPU time varies locally |
 | Terminal storage/presentation | 39.06 MiB in 2.24 ms; 250,000 retained; 100 chunks to 1 UI update | faster storage run; same presentation bound |

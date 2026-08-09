@@ -15,8 +15,8 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
     private readonly AppServerNotificationBatcher notificationBatcher;
     private readonly SemaphoreSlim lifecycleGate = new(1, 1);
     private readonly object requestGate = new();
-    private readonly Dictionary<CodexRequestId, CodexAppServerClient> requestClients = [];
-    private CodexAppServerClient? client;
+    private readonly Dictionary<CodexRequestId, CodexClient> requestClients = [];
+    private CodexClient? client;
     private AppServerSessionState state;
     private long recoveryStartedTimestamp;
     private bool disposed;
@@ -70,13 +70,13 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
             await DisposeClientAsync().ConfigureAwait(false);
             SetState(isRecovery ? AppServerSessionState.Reconnecting : AppServerSessionState.Connecting);
 
-            CodexAppServerClient? candidate = null;
+            CodexClient? candidate = null;
             try
             {
                 var transport = await processService
                     .StartAppServerTransportAsync(installation, cancellationToken)
                     .ConfigureAwait(false);
-                candidate = new CodexAppServerClient(transport, metadata);
+                candidate = new CodexClient(transport, metadata);
                 candidate.NotificationReceived += OnNotificationReceived;
                 candidate.ServerRequestReceived += OnServerRequestReceived;
                 candidate.ConnectionFailed += OnConnectionFailed;
@@ -268,7 +268,7 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
         CodexServerRequestResponse response,
         CancellationToken cancellationToken = default)
     {
-        CodexAppServerClient requestClient;
+        CodexClient requestClient;
         lock (requestGate)
         {
             if (!requestClients.TryGetValue(request.RequestId, out requestClient!) ||
@@ -310,12 +310,12 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
         }
     }
 
-    private CodexAppServerClient GetConnectedClient() =>
+    private CodexClient GetConnectedClient() =>
         client?.IsHealthy == true
             ? client
             : throw new InvalidOperationException("The Codex app-server session is not connected.");
 
-    private void EnsureCurrentClient(CodexAppServerClient requestClient, string message)
+    private void EnsureCurrentClient(CodexClient requestClient, string message)
     {
         if (!ReferenceEquals(requestClient, client))
         {
@@ -328,7 +328,7 @@ public sealed class AppServerSessionCoordinator : IAppServerSessionCoordinator
 
     private void OnServerRequestReceived(object? sender, CodexServerRequest request)
     {
-        if (sender is not CodexAppServerClient requestClient)
+        if (sender is not CodexClient requestClient)
         {
             return;
         }

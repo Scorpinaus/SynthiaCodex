@@ -2,7 +2,7 @@
 
 - **Prepared:** 19 July 2026
 - **Repository baseline inspected:** `fcc935e`
-- **Extends:** `attachments_image_input_implementation_plan.md`
+- **Extends:** `../attachments-image-input/02_plan.md`
 - **Scope:** Workspace file and folder references, safe acquisition, typed prompt parts, queue/turn persistence, transcript presentation, and permission-aware external-file staging
 - **Status:** Workspace file/folder core implemented and verified; deferred hardening is recorded below
 

@@ -5,7 +5,7 @@
 - **Target:** SynthiaCode / SynthiaCode
 - **Scope:** Bidirectional app-server request handling, interactive approvals, and configurable sandbox/approval policies
 
-The later ChatGPT-style permission-mode refinement is documented and implemented through `permission_modes_implementation_plan.md`; this record remains the transport and approval-queue history.
+The later ChatGPT-style permission-mode refinement is documented and implemented through `../permission-modes/02_plan.md`; this record remains the transport and approval-queue history.
 
 ## 1. Recommendation
 
@@ -581,7 +581,7 @@ Do not send policy changes through `turn/steer`; policy selection is disabled wh
 ### Documentation after implementation
 
 - Update `docs/current-architecture.md` with bidirectional request flow and approval ownership.
-- Update `implementation_plan.md` to mark the approval/policy slice delivered without marking unrelated Phase 6 work complete.
+- Update `../../../_archive/legacy-roadmap/implementation_plan.md` to mark the approval/policy slice delivered without marking unrelated Phase 6 work complete.
 - Add a short user-facing section to `README.md` describing sandbox/approval choices.
 
 ## 11. Implementation sequence

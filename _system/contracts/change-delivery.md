@@ -1,6 +1,6 @@
 # Project Operating Parameters
 
-This file defines how implementation tasks should be carried out in the SynthiaCode repository. A task-specific plan belongs in `outline.md`; this file supplies the standing rules used while executing that plan.
+This file defines how implementation tasks must be carried out in the SynthiaCode repository. A task-specific plan belongs in `work/active/<change-slug>/02_plan.md`; this file supplies the standing rules used while executing that plan.
 
 ## Project Context
 
@@ -25,7 +25,7 @@ This file defines how implementation tasks should be carried out in the SynthiaC
 
 - The active task and its acceptance criteria define the allowed scope.
 - `README.md`, repository documentation, source code, tests, and schemas are evidence for current behavior.
-- Record assumptions in `outline.md` when requirements are incomplete but a low-risk default permits progress.
+- Record assumptions in the selected record's `01_intake.md` or `02_plan.md` when requirements are incomplete but a low-risk default permits progress.
 - Stop and request direction when a missing decision would materially change product behavior, architecture, security, data handling, or user-visible semantics.
 - Do not modify unrelated worktree changes, generated output, or portable artifacts unless the task explicitly requires it.
 
@@ -33,7 +33,7 @@ This file defines how implementation tasks should be carried out in the SynthiaC
 
 1. **Orient**: identify the affected user flow, project layers, tests, and documentation.
 2. **Baseline**: confirm current behavior and note relevant existing failures before editing.
-3. **Plan**: complete the task-specific sections of `outline.md`, including acceptance criteria and validation.
+3. **Plan**: complete the selected record's `02_plan.md`, including acceptance criteria and validation.
 4. **Implement**: make small, reviewable changes that follow existing naming and architectural conventions.
 5. **Validate incrementally**: run the narrowest relevant tests after each logical unit.
 6. **Validate comprehensively**: run `dotnet test SynthiaCode.sln` when practical before completion.
@@ -80,7 +80,7 @@ A task is complete only when:
 - the final diff contains no unintended changes;
 - documentation is current for affected behavior;
 - known limitations, risks, and deferred work are recorded; and
-- `outline.md` reflects the final implementation and validation status.
+- the selected record's numbered files show the final implementation and validation status.
 
 ## Precedence
 
@@ -88,6 +88,6 @@ If instructions conflict, follow them in this order:
 
 1. explicit user or task requirements;
 2. repository-level agent or policy instructions;
-3. the active task's approved `outline.md`;
+3. the active change record's approved `02_plan.md`;
 4. this file;
 5. existing conventions inferred from nearby code.

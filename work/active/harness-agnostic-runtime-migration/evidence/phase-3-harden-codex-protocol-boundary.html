@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Phase 3: Harden the Codex Protocol Boundary</title>
+  <style>
+    :root {
+      --page: #f3f6fb;
+      --surface: #ffffff;
+      --strong: #eaf0f8;
+      --ink: #172033;
+      --muted: #59657a;
+      --line: #ccd6e5;
+      --accent: #4758c9;
+      --accent-soft: #e8eafe;
+      --success: #14794b;
+      --success-soft: #e4f5ec;
+      --warning: #9a5b00;
+      --warning-soft: #fff1d6;
+      --danger: #a33a42;
+      --shadow: 0 18px 45px rgba(28, 42, 73, .09);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111521;
+        --surface: #191f2d;
+        --strong: #222b3d;
+        --ink: #eef2fa;
+        --muted: #aeb8ca;
+        --line: #35415a;
+        --accent: #aab4ff;
+        --accent-soft: #2c3158;
+        --success: #72d4a5;
+        --success-soft: #173d30;
+        --warning: #f2bd69;
+        --warning-soft: #493719;
+        --danger: #ff9da5;
+        --shadow: none;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font: 16px/1.58 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    a { color: var(--accent); }
+    code, pre { font-family: "Cascadia Code", Consolas, monospace; }
+    code { padding: .08rem .3rem; border-radius: .3rem; background: var(--strong); }
+    pre { overflow-x: auto; padding: 1rem; border: 1px solid var(--line); border-radius: .8rem; background: var(--strong); }
+    h1, h2, h3 { margin-top: 0; line-height: 1.16; }
+    h1 { max-width: 900px; margin-bottom: 1rem; font-size: clamp(2.25rem, 6vw, 4.8rem); letter-spacing: -.055em; }
+    h2 { margin-bottom: .7rem; font-size: clamp(1.7rem, 3.5vw, 2.65rem); letter-spacing: -.035em; }
+    h3 { margin-bottom: .25rem; font-size: 1.02rem; }
+    .shell { width: min(1180px, calc(100% - 2rem)); margin-inline: auto; }
+    .hero { padding: 4.8rem 0 2.7rem; }
+    .eyebrow { margin: 0 0 .8rem; color: var(--accent); font-size: .76rem; font-weight: 850; letter-spacing: .11em; text-transform: uppercase; }
+    .lede { max-width: 820px; color: var(--muted); font-size: 1.12rem; }
+    .meta, .phase-links { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: 1.2rem; }
+    .pill { display: inline-flex; align-items: center; padding: .38rem .7rem; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: .82rem; text-decoration: none; }
+    .pill.success { border-color: color-mix(in srgb, var(--success) 45%, var(--line)); background: var(--success-soft); color: var(--success); font-weight: 800; }
+    .scoreboard { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .85rem; margin-bottom: 3.8rem; }
+    .score, .card, .check, .node { border: 1px solid var(--line); border-radius: .95rem; background: var(--surface); box-shadow: var(--shadow); }
+    .score { padding: 1.15rem; }
+    .score strong { display: block; font-size: clamp(1.45rem, 3.5vw, 2.3rem); line-height: 1; letter-spacing: -.04em; }
+    .score span { display: block; margin-top: .55rem; color: var(--muted); font-size: .86rem; }
+    .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: clamp(2rem, 6vw, 5rem); }
+    nav { position: sticky; top: 1rem; align-self: start; padding: 1rem; border-left: 2px solid var(--line); }
+    nav strong { display: block; margin-bottom: .55rem; font-size: .75rem; letter-spacing: .09em; text-transform: uppercase; }
+    nav a { display: block; padding: .28rem 0; color: var(--muted); text-decoration: none; }
+    nav a:hover, nav a:focus-visible { color: var(--accent); }
+    main section { margin-bottom: 4.5rem; scroll-margin-top: 1rem; }
+    .intro { max-width: 800px; color: var(--muted); }
+    .checklist, .cards, .timeline { display: grid; gap: .85rem; margin-top: 1.2rem; }
+    .check { display: grid; grid-template-columns: 1.5rem 1fr; gap: .8rem; padding: 1rem 1.1rem; box-shadow: none; }
+    .check-mark { color: var(--success); font-weight: 900; }
+    .check p, .card p, .timeline p, .node p { margin: .25rem 0 0; color: var(--muted); }
+    .flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1.6rem; margin-top: 1.3rem; }
+    .node { position: relative; min-height: 9.5rem; padding: 1rem; box-shadow: none; }
+    .node:not(:last-child)::after { content: "\2192"; position: absolute; top: 50%; right: -1.28rem; color: var(--accent); font-size: 1.35rem; font-weight: 900; transform: translateY(-50%); }
+    .node small, .tag { display: block; margin-bottom: .45rem; color: var(--accent); font-size: .71rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+    .card { padding: 1.15rem; box-shadow: none; }
+    .card.change { border-left: 4px solid var(--accent); }
+    .card.guard { border-left: 4px solid var(--success); }
+    .card.lesson { border-left: 4px solid var(--warning); }
+    .table-wrap { margin-top: 1.1rem; overflow-x: auto; border: 1px solid var(--line); border-radius: .9rem; }
+    table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: .91rem; }
+    th, td { padding: .85rem .95rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--strong); color: var(--muted); font-size: .72rem; letter-spacing: .07em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .timeline { counter-reset: item; }
+    .timeline article { position: relative; padding: 0 0 1.3rem 2.6rem; border-left: 2px solid var(--line); }
+    .timeline article::before { counter-increment: item; content: counter(item); position: absolute; top: 0; left: -.95rem; display: grid; width: 1.8rem; height: 1.8rem; place-items: center; border-radius: 50%; background: var(--warning-soft); color: var(--warning); font-weight: 900; }
+    .correction { padding: .65rem .8rem; border-radius: .6rem; background: var(--warning-soft); color: var(--ink) !important; }
+    details { margin-top: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--surface); }
+    summary { cursor: pointer; font-weight: 800; }
+    footer { margin-top: 3rem; padding: 2rem 0 3rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .86rem; }
+    @media (max-width: 980px) { .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } .node::after { display: none; } }
+    @media (max-width: 760px) { .scoreboard, .layout, .flow { grid-template-columns: 1fr; } nav { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-left: 0; border-top: 2px solid var(--line); } nav strong { grid-column: 1 / -1; } }
+    @media print { body { background: #fff; color: #000; } nav { display: none; } .layout { display: block; } .score, .card, .check, .node, table, details { box-shadow: none; break-inside: avoid; } }
+  </style>
+</head>
+<body>
+  <header class="hero shell">
+    <p class="eyebrow">SynthiaCode architecture migration</p>
+    <h1>Phase 3: Harden the Codex Protocol Boundary</h1>
+    <p class="lede">The public client now presents typed Codex operations. Internal parts own JSON-RPC transport, message parsing, and feature JSON. The application coordinator no longer creates the former client type.</p>
+    <div class="meta">
+      <span class="pill success">&#10003; Complete</span>
+      <span class="pill"><time datetime="2026-08-09">9 August 2026</time></span>
+      <span class="pill">Release baseline 0.1.0</span>
+      <span class="pill">Protocol behavior preserved</span>
+    </div>
+    <div class="phase-links" aria-label="Migration phases">
+      <a class="pill" href="phase-2-separate-durable-state.html">&#8592; Phase 2 durable state</a>
+      <a class="pill" href="../../../../docs/current-architecture.md">Current architecture</a>
+    </div>
+  </header>
+
+  <div class="shell scoreboard" aria-label="Phase 3 results">
+    <div class="score"><strong>1</strong><span>Public <code>CodexClient</code> facade</span></div>
+    <div class="score"><strong>3</strong><span>Dedicated connection and parser parts</span></div>
+    <div class="score"><strong>5</strong><span>Feature codec groups</span></div>
+    <div class="score"><strong>385/385</strong><span>Release tests passed</span></div>
+  </div>
+
+  <div class="shell layout">
+    <nav aria-label="On this page">
+      <strong>Phase 3 record</strong>
+      <a href="#objectives">Objectives</a>
+      <a href="#boundary">Boundary</a>
+      <a href="#changes">Changes</a>
+      <a href="#mistakes">Mistakes</a>
+      <a href="#lessons">Lessons</a>
+      <a href="#verification">Verification</a>
+      <a href="#files">Files</a>
+      <a href="#handoff">Handoff</a>
+    </nav>
+
+    <main>
+      <section id="objectives">
+        <p class="eyebrow">Approved scope</p>
+        <h2>Objectives completed</h2>
+        <div class="checklist">
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Separate JSON-RPC transport</h3><p><code>JsonRpcConnection</code> owns transport startup, the read loop, serialized writes, request IDs, cancellation, response matching, failure fan-out, and transport disposal.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Group feature codecs</h3><p>Session, thread, turn and review, skills, and account request/response JSON now live under the <code>Codex.Codecs</code> namespace.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Separate incoming parsers</h3><p><code>CodexNotificationParser</code> and <code>CodexServerRequestParser</code> classify notifications, resolved approvals, request IDs, and typed approval payloads.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Publish one facade</h3><p><code>CodexClient</code> is the public typed boundary. <code>AppServerSessionCoordinator</code> creates and stores this type.</p></div></div>
+          <div class="check"><span class="check-mark">&#10003;</span><div><h3>Keep source compatibility</h3><p>A small <code>CodexAppServerClient</code> subtype keeps existing callers and tests valid while production code uses the new name.</p></div></div>
+        </div>
+      </section>
+
+      <section id="boundary">
+        <p class="eyebrow">Runtime design</p>
+        <h2>One public entry point, focused internal parts</h2>
+        <p class="intro">The facade controls operation order and Codex error policy. It does not own the transport loop. Codecs do not start processes or change connection state. Parsers do not update WPF state.</p>
+        <div class="flow" role="img" aria-label="The application coordinator calls CodexClient. The client uses feature codecs and message parsers. JsonRpcConnection uses the process transport.">
+          <div class="node"><small>Application</small><strong>AppServerSessionCoordinator</strong><p>Reconnects and rejects stale approval responses.</p></div>
+          <div class="node"><small>Public facade</small><strong>CodexClient</strong><p>Exposes typed Codex operations and events.</p></div>
+          <div class="node"><small>Protocol shape</small><strong>Codecs and parsers</strong><p>Own feature JSON and incoming message meaning.</p></div>
+          <div class="node"><small>JSON-RPC</small><strong>JsonRpcConnection</strong><p>Owns IDs, pending calls, writes, reads, and failures.</p></div>
+          <div class="node"><small>Process I/O</small><strong>IAppServerTransport</strong><p>Moves UTF-8 JSON lines to and from Codex.</p></div>
+        </div>
+      </section>
+
+      <section id="changes">
+        <p class="eyebrow">Implementation record</p>
+        <h2>What changed</h2>
+        <div class="cards">
+          <article class="card change"><span class="tag">Connection</span><h3>Outgoing state moved out</h3><p>The request dictionary, numeric ID allocation, response completion, cancellation registration, read loop, write gate, failure-once guard, and owned transport moved to <code>JsonRpcConnection</code>.</p></article>
+          <article class="card change"><span class="tag">Incoming state</span><h3>Approval state stayed with the facade</h3><p>Incoming request and responding-request sets remain separate from outgoing requests. This preserves exact-once approval responses and resolved-request invalidation.</p></article>
+          <article class="card change"><span class="tag">Feature JSON</span><h3>High-change request shapes moved to codecs</h3><p>Initialization, thread start, turn start and steer, review start, turn interrupt, skill list/write, and account reads use grouped encode/decode classes.</p></article>
+          <article class="card change"><span class="tag">Composition</span><h3>Production uses the facade</h3><p>The session coordinator stores <code>CodexClient</code> instances, associates approval IDs with the correct client generation, and disposes the facade during replacement.</p></article>
+          <article class="card guard"><span class="tag">Compatibility</span><h3>Existing features remain stable</h3><p>The old public name derives from <code>CodexClient</code>. No Core request model, app-server method name, reconnect rule, notification batching rule, or Codex-only side feature changed.</p></article>
+        </div>
+      </section>
+
+      <section id="mistakes">
+        <p class="eyebrow">Honest migration log</p>
+        <h2>Mistakes and corrections</h2>
+        <div class="timeline">
+          <article><h3>The first facade patch missed an expression-body token</h3><p>The notification helper lost its <code>=&gt;</code>. The first Infrastructure build failed with three syntax errors.</p><p class="correction"><strong>Correction:</strong> restored the token, inspected the changed block, and rebuilt with zero warnings and zero errors.</p></article>
+          <article><h3>The first thread codec copied the wrong active-profile shape</h3><p>The draft decoder used a three-value constructor that does not exist and looked at the wrong JSON property.</p><p class="correction"><strong>Correction:</strong> copied the established <code>activePermissionProfile</code> behavior exactly, including string and object forms.</p></article>
+          <article><h3>A compact switch reused one pattern variable name</h3><p>The first turn-input validator used <code>image</code> for two adjacent patterns. The compiler rejected the shared scope.</p><p class="correction"><strong>Correction:</strong> used distinct <code>localImage</code> and <code>dataImage</code> names, then rebuilt the codec.</p></article>
+          <article><h3>The first protocol test used fragile raw-string braces</h3><p>Interpolated JSON test strings did not have enough delimiter markers for nested closing braces.</p><p class="correction"><strong>Correction:</strong> constructed response fixtures with <code>JsonObject</code>. This also made request IDs explicit.</p></article>
+          <article><h3>A source-file move left two copies</h3><p>The guarded patch created the destination but could not remove the tracked source. That briefly produced two <code>CodexClient</code> declarations.</p><p class="correction"><strong>Correction:</strong> removed the incomplete destination, kept the verified source path, and confirmed that only one facade type remained.</p></article>
+          <article><h3>An obsolete marker made the clean suite noisy</h3><p>The first compatibility type produced warnings in the existing characterization tests.</p><p class="correction"><strong>Correction:</strong> kept the compatibility type without the marker. Production use is still enforced by the new coordinator dependency and the Phase 3 structure test.</p></article>
+        </div>
+      </section>
+
+      <section id="lessons">
+        <p class="eyebrow">What carries forward</p>
+        <h2>Lessons for later phases</h2>
+        <div class="cards">
+          <article class="card lesson"><h3>Transport state and domain state are different</h3><p>Outgoing request correlation belongs to JSON-RPC. Incoming approval lifetime belongs to the typed Codex facade.</p></article>
+          <article class="card lesson"><h3>Compile after each extraction</h3><p>Small builds found syntax, constructor, and pattern-scope errors before they could mix with behavior failures.</p></article>
+          <article class="card lesson"><h3>Use builders for JSON test fixtures</h3><p>Structured fixtures make nested objects and dynamic IDs clear. They also remove raw-string delimiter mistakes.</p></article>
+          <article class="card lesson"><h3>Compatibility can be quiet and explicit</h3><p>A small derived type keeps source compatibility. The production composition root and structure tests still identify the supported facade.</p></article>
+          <article class="card lesson"><h3>Do not combine protocol and product changes</h3><p>This phase changed ownership and names. It did not change method semantics, Core models, reconnect policy, or Codex-only goals, reviews, and skills behavior.</p></article>
+        </div>
+      </section>
+
+      <section id="verification">
+        <p class="eyebrow">Evidence</p>
+        <h2>Verification gate</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Gate</th><th>Result</th></tr></thead>
+            <tbody>
+              <tr><td>Phase 3 Release baseline</td><td>381 / 381 passed before edits</td></tr>
+              <tr><td>Infrastructure builds during extraction</td><td>Zero warnings and zero errors after each correction</td></tr>
+              <tr><td>Phase 3 protocol tests</td><td>4 / 4 passed</td></tr>
+              <tr><td>Structure test</td><td>Public facade, internal connection and parsers, five codec groups, and compatibility inheritance verified</td></tr>
+              <tr><td>Response correlation</td><td>Account and rate-limit replies arrived out of order and completed the correct calls</td></tr>
+              <tr><td>Incoming routing</td><td>Notification and typed file-change approval paths verified</td></tr>
+              <tr><td>Invalid JSON</td><td>Connection failed once and the pending initialize request failed</td></tr>
+              <tr><td>Authoritative full Release gate</td><td>385 / 385 passed</td></tr>
+              <tr><td>Diff whitespace check</td><td><code>git diff --check</code> passed</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <details>
+          <summary>Authoritative command</summary>
+          <pre><code>dotnet test SynthiaCode.sln -c Release --no-restore
+
+Passed: 385  Failed: 0  Skipped: 0  Total: 385</code></pre>
+        </details>
+      </section>
+
+      <section id="files">
+        <p class="eyebrow">Change inventory</p>
+        <h2>Primary files</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Area</th><th>Files</th></tr></thead>
+            <tbody>
+              <tr><td>Public facade</td><td><a href="../../../../src/SynthiaCode.Infrastructure/Codex/CodexAppServerClient.cs"><code>CodexClient</code> implementation</a>, <a href="../../../../src/SynthiaCode.Infrastructure/Codex/CodexAppServerClient.Compatibility.cs">compatibility type</a></td></tr>
+              <tr><td>JSON-RPC connection</td><td><a href="../../../../src/SynthiaCode.Infrastructure/Codex/JsonRpcConnection.cs"><code>JsonRpcConnection.cs</code></a></td></tr>
+              <tr><td>Incoming parsers</td><td><a href="../../../../src/SynthiaCode.Infrastructure/Codex/CodexNotificationParser.cs"><code>CodexNotificationParser.cs</code></a>, <a href="../../../../src/SynthiaCode.Infrastructure/Codex/CodexServerRequestParser.cs"><code>CodexServerRequestParser.cs</code></a></td></tr>
+              <tr><td>Feature codecs</td><td><a href="../../../../src/SynthiaCode.Infrastructure/Codex/Codecs/"><code>Codex/Codecs/</code></a></td></tr>
+              <tr><td>Application composition</td><td><a href="../../../../src/SynthiaCode.App/Services/AppServerSessionCoordinator.cs"><code>AppServerSessionCoordinator.cs</code></a></td></tr>
+              <tr><td>Characterization</td><td><a href="../../../../src/SynthiaCode.Tests/Phase3ProtocolBoundaryTests.cs"><code>Phase3ProtocolBoundaryTests.cs</code></a></td></tr>
+              <tr><td>Architecture record</td><td><a href="../../../../docs/current-architecture.md"><code>current-architecture.md</code></a>, this changelog</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="handoff">
+        <p class="eyebrow">Phase boundary</p>
+        <h2>What Phase 3 leaves stable</h2>
+        <p class="intro">Core protocol records, the app-server coordinator interfaces, reconnect behavior, approval decisions, notification batching, and the Phase 2 durable format did not change. Goals, reviews, and skills remain Codex-specific side features. Review and skill JSON moved behind feature codecs, but their product behavior did not move to the portable conversation facade.</p>
+        <div class="card guard"><h3>Stable handoff</h3><p>New protocol work can start in one feature codec or one parser. Connection changes can be tested without changing typed Codex behavior. Application code has one supported client name.</p></div>
+      </section>
+    </main>
+  </div>
+
+  <footer><div class="shell">SynthiaCode migration record &middot; Phase 3 &middot; Generated from verified repository state on <time datetime="2026-08-09">9 August 2026</time>.</div></footer>
+</body>
+</html>

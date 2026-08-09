@@ -2,7 +2,7 @@
 
 - **Prepared:** 19 July 2026
 - **Repository baseline:** commit `319b67d` (`Add file folder attachments`)
-- **Extends:** `file_folder_attachments_implementation_plan.md`
+- **Extends:** `../file-folder-attachments/02_plan.md`
 - **Scope:** Images, regular files, directories, and mixed attachment batches selected outside the active project/worktree
 - **Status:** Core managed-snapshot implementation complete; advanced live roots and review/permission hardening remain deferred
 

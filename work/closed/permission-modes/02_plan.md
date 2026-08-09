@@ -477,9 +477,9 @@ Disable changing permission mode while the selected turn is active. A changed mo
   - Explain the three modes and Custom/config ownership.
 - `docs/current-architecture.md`
   - Document permission-profile discovery and the single resolver.
-- `implementation_plan.md`
+- `../../../_archive/legacy-roadmap/implementation_plan.md`
   - Mark the permission-mode refinement delivered only after all gates pass.
-- `server_request_approvals_implementation_plan.md`
+- `../server-request-approvals/02_plan.md`
   - Add a cross-reference rather than rewriting the completed approval transport history.
 
 ## 11. TDD implementation sequence
